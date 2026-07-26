@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned toolchain per spec C.2.3 (rust-toolchain.toml: 1.83.0)
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.83.0 --component clippy rustfmt --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo +1.83.0 fmt --all -- --check
+
+      - name: Clippy
+        run: cargo +1.83.0 clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo +1.83.0 test --workspace
