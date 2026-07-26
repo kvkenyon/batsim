@@ -1,0 +1,63 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "enphase.iq_battery_10c",
+  "vendor": "Enphase",
+  "display_name": "Enphase IQ Battery 10C",
+  "chemistry": "LFP",
+  "coupling": "MicroinverterBased",
+  "nameplate_energy_kwh": { "value": 10.0, "provenance": "spec", "unit": "kWh" },
+  "usable_energy_kwh": { "value": 10.0, "provenance": "estimated", "unit": "kWh", "note": "usable ≈ nameplate; LFP full window" },
+  "continuous_discharge_power_kw": { "value": 7.08, "provenance": "spec", "unit": "kW", "note": "unit AC limit; below the 12 × IQ8D hardware ceiling of 7.68 kW" },
+  "peak_discharge_power_kw": { "value": 14.16, "provenance": "estimated", "unit": "kW" },
+  "peak_duration_s": { "value": 3, "provenance": "estimated", "unit": "s" },
+  "continuous_charge_power_kw": { "value": 7.08, "provenance": "spec", "unit": "kW" },
+  "soc_window": { "min_soc_frac": 0.0, "max_soc_frac": 1.0, "reserve_floor_frac": 0.1, "provenance": "estimated" },
+  "charge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.3, "efficiency": 0.88 },
+      { "x_kw": 1.0, "efficiency": 0.928 },
+      { "x_kw": 2.5, "efficiency": 0.952 },
+      { "x_kw": 5.0, "efficiency": 0.9482 },
+      { "x_kw": 7.08, "efficiency": 0.94 }
+    ],
+    "provenance": "estimated"
+  },
+  "discharge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.3, "efficiency": 0.88 },
+      { "x_kw": 1.0, "efficiency": 0.928 },
+      { "x_kw": 2.5, "efficiency": 0.952 },
+      { "x_kw": 5.0, "efficiency": 0.9482 },
+      { "x_kw": 7.08, "efficiency": 0.94 }
+    ],
+    "provenance": "estimated"
+  },
+  "rte_pv_coupled": { "value": 0.89, "provenance": "estimated", "unit": "frac", "note": "AC-coupled; PV-to-grid storage path identical to grid path" },
+  "rte_ac_coupled": { "value": 0.89, "provenance": "estimated", "unit": "frac" },
+  "grid_forming_in_backup": true,
+  "requires_controller_id": "enphase.iq_system_controller_2",
+  "integrated_inverter": true,
+  "microinverter_count": 12,
+  "power_per_microinverter_kw": { "value": 0.64, "provenance": "spec", "unit": "kW", "note": "per-IQ8D continuous rating (spec-derived: 3.84/6 on 5P); unit AC limit below aggregate" },
+  "expansion": { "packs_add_power": true },
+  "warranty": {
+    "years": { "value": 15, "provenance": "estimated", "unit": "yr" }
+  },
+  "operating_temperature": { "min_c": -20, "max_c": 50, "derating_note": "power derating above ~45 C", "provenance": "estimated" },
+  "cooling": "passive",
+  "ramp_rate": { "max_kw_per_s": 7.08, "provenance": "estimated", "note": "sub-second full-swing assumed; not published" },
+  "self_discharge_frac_per_day": { "value": 0.002, "provenance": "estimated", "unit": "frac/day" },
+  "vendor_api": {
+    "family": "enphase_envoy_local",
+    "auth_style": "jwt_via_cloud",
+    "base_path_hint": "/",
+    "endpoints": [
+      { "path": "/ivp/ensemble/inventory", "purpose": "inventory" },
+      { "path": "/ivp/ensemble/soc", "purpose": "soc" },
+      { "path": "/api/v1/production", "purpose": "telemetry" },
+      { "path": "/ivp/livedata/status", "purpose": "telemetry" }
+    ],
+    "provenance": "spec"
+  }
+}

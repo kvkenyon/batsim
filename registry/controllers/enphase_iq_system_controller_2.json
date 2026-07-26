@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "enphase.iq_system_controller_2",
+  "vendor": "Enphase",
+  "display_name": "Enphase IQ System Controller 2",
+  "provides_grid_forming": true,
+  "transfer_time_s": { "value": 1.0, "provenance": "estimated", "unit": "s", "note": "Part A §5 default" },
+  "reconnect_s": { "value": 300, "provenance": "estimated", "unit": "s", "note": "Part A §5 default reconnect delay after stable grid returns" },
+  "supports_generator_input": true,
+  "frequency_shift_curtailment": { "start_hz": 60.2, "full_curtail_hz": 62.0, "provenance": "estimated" },
+  "pv_blackstart": true,
+  "standby_power_w": { "value": 20, "provenance": "estimated", "unit": "W", "note": "IQ System Controller vampire load, B.3.2" },
+  "vendor_api": {
+    "family": "enphase_envoy_local",
+    "auth_style": "jwt_via_cloud",
+    "base_path_hint": "/",
+    "endpoints": [
+      { "path": "/ivp/ensemble/inventory", "purpose": "inventory" },
+      { "path": "/ivp/ensemble/soc", "purpose": "soc" },
+      { "path": "/api/v1/production", "purpose": "telemetry" },
+      { "path": "/ivp/livedata/status", "purpose": "telemetry" }
+    ],
+    "provenance": "spec"
+  }
+}

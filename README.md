@@ -10,7 +10,10 @@ real hardware.
 
 ## Status
 
-**Specification approved; implementation not started.**
+**Milestone M1 (spec section 0.2) complete**: the `batsim-core`
+simulation engine and `batsim-registry` device registry crates. Later
+milestones (HTTP API server, ERCOT market integration, outages, thermal,
+degradation, vendor API mimicry) are not yet implemented.
 
 ## Specification
 

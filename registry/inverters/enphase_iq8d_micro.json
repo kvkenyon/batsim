@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "enphase.iq8d_micro",
+  "vendor": "Enphase",
+  "display_name": "Enphase IQ8D battery microinverter",
+  "topology": "BatteryIntegrated",
+  "rated_ac_output_kw": { "value": 0.64, "provenance": "spec", "unit": "kW", "note": "per-microinverter continuous rating (spec-derived: 3.84 kW / 6 on IQ Battery 5P)" },
+  "efficiency_curve": {
+    "points": [
+      { "x_kw": 0.03, "efficiency": 0.85 },
+      { "x_kw": 0.1, "efficiency": 0.92 },
+      { "x_kw": 0.32, "efficiency": 0.965 },
+      { "x_kw": 0.48, "efficiency": 0.962 },
+      { "x_kw": 0.64, "efficiency": 0.95 }
+    ],
+    "provenance": "estimated"
+  },
+  "grid_following_on_grid": true,
+  "grid_forming_in_backup": true,
+  "compatible_battery_ids": ["enphase.iq_battery_5p", "enphase.iq_battery_10", "enphase.iq_battery_10c"]
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "generic.string_pv_8kw",
+  "vendor": "Generic",
+  "display_name": "Generic 8 kW residential string PV inverter",
+  "topology": "StringPVOnly",
+  "rated_ac_output_kw": { "value": 8.0, "provenance": "estimated", "unit": "kW" },
+  "max_pv_dc_input_kw": { "value": 9.6, "provenance": "estimated", "unit": "kW", "note": "1.2 DC/AC design ratio" },
+  "efficiency_curve": {
+    "points": [
+      { "x_kw": 0.4, "efficiency": 0.90 },
+      { "x_kw": 1.6, "efficiency": 0.95 },
+      { "x_kw": 4.0, "efficiency": 0.97 },
+      { "x_kw": 6.0, "efficiency": 0.968 },
+      { "x_kw": 8.0, "efficiency": 0.956 }
+    ],
+    "provenance": "estimated"
+  },
+  "grid_following_on_grid": true,
+  "grid_forming_in_backup": false,
+  "compatible_battery_ids": []
+}

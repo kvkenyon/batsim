@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "solaredge.home_hub_hd_wave",
+  "vendor": "SolarEdge",
+  "display_name": "SolarEdge Home Hub HD-Wave single-phase inverter",
+  "topology": "HybridDCCoupled",
+  "rated_ac_output_kw": { "value": 7.6, "provenance": "estimated", "unit": "kW" },
+  "efficiency_curve": {
+    "points": [
+      { "x_kw": 0.4, "efficiency": 0.90 },
+      { "x_kw": 1.5, "efficiency": 0.955 },
+      { "x_kw": 3.8, "efficiency": 0.97 },
+      { "x_kw": 5.7, "efficiency": 0.968 },
+      { "x_kw": 7.6, "efficiency": 0.955 }
+    ],
+    "provenance": "estimated"
+  },
+  "grid_following_on_grid": true,
+  "grid_forming_in_backup": true,
+  "compatible_battery_ids": ["solaredge.home_battery_400v"],
+  "max_batteries": 3,
+  "vendor_api": {
+    "family": "solaredge_monitoring_cloud",
+    "auth_style": "api_key",
+    "endpoints": [
+      { "path": "/site/{id}/power", "purpose": "telemetry" },
+      { "path": "/site/{id}/storageData", "purpose": "soc" },
+      { "path": "/site/{id}/energy", "purpose": "telemetry" }
+    ],
+    "provenance": "spec"
+  }
+}

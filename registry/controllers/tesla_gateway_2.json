@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "tesla.gateway_2",
+  "vendor": "Tesla",
+  "display_name": "Tesla Gateway 2",
+  "provides_grid_forming": true,
+  "transfer_time_s": { "value": 0.1, "provenance": "estimated", "unit": "s", "note": "Part A §5 default; Tesla Gateway observed ~0.1–1 s" },
+  "reconnect_s": { "value": 300, "provenance": "estimated", "unit": "s", "note": "Part A §5 default reconnect delay after stable grid returns" },
+  "supports_generator_input": false,
+  "vendor_api": {
+    "family": "tesla_local_gateway",
+    "auth_style": "bearer_local_login",
+    "base_path_hint": "/api",
+    "endpoints": [
+      { "path": "/api/login/Basic", "purpose": "auth" },
+      { "path": "/api/system_status/soe", "purpose": "soc" },
+      { "path": "/api/meters/aggregates", "purpose": "telemetry" },
+      { "path": "/api/operation", "purpose": "mode_config" }
+    ],
+    "provenance": "spec"
+  }
+}

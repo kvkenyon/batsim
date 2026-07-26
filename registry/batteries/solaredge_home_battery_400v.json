@@ -1,0 +1,60 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.1.0",
+  "model_id": "solaredge.home_battery_400v",
+  "vendor": "SolarEdge",
+  "display_name": "SolarEdge Home Battery 400V",
+  "chemistry": "LFP",
+  "coupling": "DCCoupledHybrid",
+  "nameplate_energy_kwh": { "value": 10.3, "provenance": "estimated", "unit": "kWh", "note": "9.7 kWh usable published; nameplate inferred" },
+  "usable_energy_kwh": { "value": 9.7, "provenance": "spec", "unit": "kWh" },
+  "continuous_discharge_power_kw": { "value": 5.0, "provenance": "spec", "unit": "kW", "note": "DC-coupled path" },
+  "peak_discharge_power_kw": { "value": 7.5, "provenance": "spec", "unit": "kW" },
+  "peak_duration_s": { "value": 10, "provenance": "spec", "unit": "s" },
+  "continuous_charge_power_kw": { "value": 5.0, "provenance": "spec", "unit": "kW", "note": "DC-coupled path" },
+  "soc_window": { "min_soc_frac": 0.0, "max_soc_frac": 1.0, "reserve_floor_frac": 0.2, "provenance": "estimated" },
+  "charge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.25, "efficiency": 0.90 },
+      { "x_kw": 1.0, "efficiency": 0.958 },
+      { "x_kw": 2.5, "efficiency": 0.986 },
+      { "x_kw": 4.85, "efficiency": 0.9841 },
+      { "x_kw": 5.0, "efficiency": 0.9835 }
+    ],
+    "provenance": "estimated"
+  },
+  "discharge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.25, "efficiency": 0.90 },
+      { "x_kw": 1.0, "efficiency": 0.958 },
+      { "x_kw": 2.5, "efficiency": 0.986 },
+      { "x_kw": 4.85, "efficiency": 0.9841 },
+      { "x_kw": 5.0, "efficiency": 0.9835 }
+    ],
+    "provenance": "estimated"
+  },
+  "rte_pv_coupled": { "value": 0.945, "provenance": "spec", "unit": "frac", "note": "manufacturer claim for PV→battery→AC path; exceeds what the battery + Home Hub component curves reproduce — kept as published claim" },
+  "rte_ac_coupled": { "value": 0.90, "provenance": "estimated", "unit": "frac", "note": "double-conversion grid-charge round trip; not published; curves renormalized per Part A §5 so eta_chg x eta_coul x eta_dis x eta_hyb^2 lands here at 0.5C (§3.3)" },
+  "grid_forming_in_backup": true,
+  "requires_controller_id": "solaredge.backup_interface",
+  "integrated_inverter": false,
+  "warranty": {
+    "years": { "value": 10, "provenance": "spec", "unit": "yr" },
+    "cycles": { "value": 999999, "provenance": "estimated", "unit": "cycles", "note": "published as cycles-unlimited variant; sentinel value" },
+    "capacity_retention_pct": { "value": 70, "provenance": "spec", "unit": "pct" }
+  },
+  "operating_temperature": { "min_c": -10, "max_c": 50, "provenance": "estimated" },
+  "cooling": "passive",
+  "ramp_rate": { "max_kw_per_s": 5.0, "provenance": "estimated", "note": "full-swing in ~1 s assumed; not published" },
+  "self_discharge_frac_per_day": { "value": 0.002, "provenance": "estimated", "unit": "frac/day", "note": "includes idle/standby draw; not published" },
+  "vendor_api": {
+    "family": "solaredge_monitoring_cloud",
+    "auth_style": "api_key",
+    "endpoints": [
+      { "path": "/site/{id}/power", "purpose": "telemetry" },
+      { "path": "/site/{id}/storageData", "purpose": "soc" },
+      { "path": "/site/{id}/energy", "purpose": "telemetry" }
+    ],
+    "provenance": "spec"
+  }
+}

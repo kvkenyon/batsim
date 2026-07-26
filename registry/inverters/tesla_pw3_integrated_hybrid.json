@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "tesla.pw3_integrated_hybrid",
+  "vendor": "Tesla",
+  "display_name": "Tesla Powerwall 3 integrated hybrid inverter",
+  "topology": "HybridDCCoupled",
+  "rated_ac_output_kw": { "value": 11.5, "provenance": "spec", "unit": "kW" },
+  "max_ac_output_kw_backup": { "value": 11.5, "provenance": "estimated", "unit": "kW", "note": "backup ratings config-dependent; on-grid figure used" },
+  "max_pv_dc_input_kw": { "value": 20.0, "provenance": "spec", "unit": "kW" },
+  "mppt_count": { "value": 6, "provenance": "spec", "unit": "count" },
+  "efficiency_curve": {
+    "points": [
+      { "x_kw": 0.5, "efficiency": 0.90 },
+      { "x_kw": 2.0, "efficiency": 0.955 },
+      { "x_kw": 5.75, "efficiency": 0.975 },
+      { "x_kw": 8.0, "efficiency": 0.972 },
+      { "x_kw": 11.5, "efficiency": 0.961 }
+    ],
+    "provenance": "estimated"
+  },
+  "grid_following_on_grid": true,
+  "grid_forming_in_backup": true,
+  "compatible_battery_ids": ["tesla.powerwall_3", "tesla.pw3_expansion_pack"],
+  "max_batteries": 4,
+  "vendor_api": {
+    "family": "tesla_local_gateway",
+    "auth_style": "bearer_local_login",
+    "base_path_hint": "/api",
+    "endpoints": [
+      { "path": "/api/login/Basic", "purpose": "auth" },
+      { "path": "/api/system_status/soe", "purpose": "soc" },
+      { "path": "/api/meters/aggregates", "purpose": "telemetry" },
+      { "path": "/api/operation", "purpose": "mode_config" }
+    ],
+    "provenance": "spec"
+  }
+}
