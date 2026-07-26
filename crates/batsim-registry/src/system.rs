@@ -311,9 +311,12 @@ impl HomeSystem {
     ///   matching kind (batteries, inverters, controllers, PV inverter).
     /// - Quantities are >= 1; SOC/reserve fractions lie in `[0, 1]`;
     ///   each battery's initial SOC lies inside its model's SOC window.
-    /// - `backup_capable` requires exactly one present controller entry
-    ///   with `provides_grid_forming`, and every battery's
-    ///   `requires_controller_id` (when declared) present in `controllers[]`.
+    /// - `backup_capable` requires either exactly one present controller
+    ///   entry with `provides_grid_forming`, or, with no such controller,
+    ///   a self-forming fleet: at least one present battery, every one
+    ///   grid-forming in backup with an integrated inverter. Every
+    ///   battery's `requires_controller_id` (when declared) must be
+    ///   present in `controllers[]`.
     /// - DC-coupled hybrid batteries without an integrated inverter
     ///   intersect some present inverter's `compatible_battery_ids`.
     /// - Per battery model, unit count <= Σ `max_batteries × quantity`
@@ -504,8 +507,17 @@ impl HomeSystem {
             .collect()
     }
 
-    /// Backup composition (spec §3.1 rule 1, §4.6): exactly one grid-forming
-    /// controller, and every battery's required controller present.
+    /// Backup composition: a backup-capable
+    /// system forms its island in one of two ways - either exactly one
+    /// present controller entry with `provides_grid_forming = true`, or,
+    /// when no such controller is present, a battery fleet that forms the
+    /// grid itself: at least one present battery, and every present battery
+    /// model declaring both `grid_forming_in_backup` and an integrated
+    /// inverter / transfer path (e.g. ecoLinx). A mixed fleet does not
+    /// qualify: the every-battery condition fails as soon as one battery
+    /// cannot help form the island, which is the intended reading.
+    /// Independently, every battery's declared `requires_controller_id`
+    /// must be present in controllers[].
     fn check_backup(
         &self,
         battery_models: &[Option<&BatteryModel>],
@@ -520,13 +532,28 @@ impl HomeSystem {
             .filter(|(c, _)| c.provides_grid_forming)
             .count();
         if grid_forming != 1 {
-            violations.push(violation(
-                "controllers",
-                format!(
-                    "backup_capable requires exactly one present controller entry with \
-                     provides_grid_forming = true; found {grid_forming}"
-                ),
-            ));
+            let present_batteries: Vec<&BatteryModel> = self
+                .batteries
+                .iter()
+                .zip(battery_models)
+                .filter(|(r, _)| r.quantity > 0)
+                .filter_map(|(_, m)| *m)
+                .collect();
+            let self_forming_fleet = !present_batteries.is_empty()
+                && present_batteries
+                    .iter()
+                    .all(|m| m.grid_forming_in_backup && m.integrated_inverter == Some(true));
+            if grid_forming > 1 || !self_forming_fleet {
+                violations.push(violation(
+                    "controllers",
+                    format!(
+                        "backup_capable requires either exactly one present controller entry \
+                         with provides_grid_forming = true (found {grid_forming}), or, with no \
+                         such controller, at least one present battery where every present \
+                         battery model is grid-forming in backup and has an integrated inverter"
+                    ),
+                ));
+            }
         }
         for (i, _) in self.batteries.iter().enumerate() {
             if let Some(m) = battery_models[i] {
@@ -1038,6 +1065,7 @@ mod tests {
     const SE_BACKUP_IFACE: &str = "solaredge.backup_interface";
     const ENP_5P: &str = "enphase.iq_battery_5p";
     const ENP_CTRL: &str = "enphase.iq_system_controller_3";
+    const ECOLINX: &str = "sonnen.ecolinx";
 
     fn curve() -> EfficiencyCurve {
         EfficiencyCurve {
@@ -1141,6 +1169,15 @@ mod tests {
 
     fn se_battery() -> BatteryModel {
         battery(SE_BATTERY, Coupling::DCCoupledHybrid, 9.7, 5.0, 5.0)
+    }
+
+    /// ecoLinx-style AC-coupled battery: forms the island itself through an
+    /// integrated inverter and transfer path, so backup needs no separate
+    /// controller.
+    fn ecolinx() -> BatteryModel {
+        let mut m = battery(ECOLINX, Coupling::ACCoupled, 20.0, 8.0, 8.0);
+        m.integrated_inverter = Some(true);
+        m
     }
 
     /// Enphase IQ Battery 5P: 6 x 0.64 kW IQ8D microinverters = 3.84 kW.
@@ -1348,12 +1385,14 @@ mod tests {
     fn backup_capable_requires_one_grid_forming_controller() {
         let registry = Registry::from_parts(vec![pw3()], vec![], vec![gateway()]);
 
-        // No controller at all: missing grid-former AND missing required controller.
+        // No controller at all: PW3 can form the grid itself, so the fleet
+        // rule is satisfied - but PW3 declares a required controller, and
+        // that check still rejects the system on the battery line item.
         let mut sys = base_system();
         sys.batteries = vec![battery_ref(PW3, 1)];
         sys.backup_capable = true;
         let v = violations_of(sys.validate(&registry));
-        assert_field(&v, "controllers");
+        assert!(v.iter().all(|x| x.field != "controllers"), "{v:?}");
         assert_field(&v, "batteries[0].model_id");
 
         // Two grid-forming controller entries: still a violation.
@@ -1363,9 +1402,15 @@ mod tests {
         assert_field(&v, "controllers");
         assert!(v[0].message.contains('2'));
 
-        // A non-grid-forming controller does not count.
-        let registry =
-            Registry::from_parts(vec![pw3()], vec![], vec![controller(GATEWAY, false, false)]);
+        // A non-grid-forming controller does not count, and a battery that
+        // cannot form the grid itself leaves the system without an island
+        // source.
+        let registry = Registry::from_parts(
+            vec![se_battery()],
+            vec![],
+            vec![controller(GATEWAY, false, false)],
+        );
+        sys.batteries = vec![battery_ref(SE_BATTERY, 1)];
         sys.controllers = vec![controller_ref(GATEWAY, 1)];
         let v = violations_of(sys.validate(&registry));
         assert_field(&v, "controllers");
@@ -1633,5 +1678,61 @@ mod tests {
         let spec = sys.validate(&registry).expect("non-backup system");
         assert!(spec.backup_path_power_kw.is_none());
         assert!(spec.resolved_controller_model_id.is_none());
+    }
+
+    #[test]
+    fn backup_with_integrated_grid_forming_battery_needs_no_controller() {
+        let registry = Registry::from_parts(vec![ecolinx()], vec![], vec![]);
+        let mut sys = base_system();
+        sys.batteries = vec![battery_ref(ECOLINX, 2)];
+        sys.backup_capable = true;
+
+        let spec = sys
+            .validate(&registry)
+            .expect("self-forming battery fleet must pass");
+        assert!(spec.resolved_controller_model_id.is_none());
+        // No controller and no explicit inverter: the battery continuous sum rules.
+        assert_close(spec.backup_path_power_kw.expect("backup-capable"), 16.0);
+    }
+
+    #[test]
+    fn backup_without_controller_rejects_non_integrated_battery() {
+        let registry = Registry::from_parts(vec![se_battery()], vec![se_hub()], vec![]);
+        let mut sys = base_system();
+        sys.batteries = vec![battery_ref(SE_BATTERY, 1)];
+        sys.inverters = vec![inverter_ref(SE_HUB, 1)];
+        sys.backup_capable = true;
+
+        let violations = violations_of(sys.validate(&registry));
+        assert_field(&violations, "controllers");
+    }
+
+    #[test]
+    fn backup_without_controller_rejects_mixed_battery_fleet() {
+        let registry = Registry::from_parts(vec![ecolinx(), se_battery()], vec![se_hub()], vec![]);
+        let mut sys = base_system();
+        sys.batteries = vec![battery_ref(ECOLINX, 1), battery_ref(SE_BATTERY, 1)];
+        sys.inverters = vec![inverter_ref(SE_HUB, 1)];
+        sys.backup_capable = true;
+
+        let violations = violations_of(sys.validate(&registry));
+        assert_field(&violations, "controllers");
+    }
+
+    #[test]
+    fn embedded_ecolinx_backup_system_validates_without_controller() {
+        // The reported composition, against the shipped catalog: a
+        // backup-capable ecoLinx fleet forms its own island through its
+        // integrated inverter, so it must validate with no controller.
+        let registry = Registry::embedded().expect("embedded registry");
+        let mut sys = base_system();
+        sys.batteries = vec![battery_ref(ECOLINX, 2)];
+        sys.backup_capable = true;
+
+        let spec = sys
+            .validate(&registry)
+            .expect("embedded ecoLinx backup system must pass");
+        assert!(spec.resolved_controller_model_id.is_none());
+        assert_close(spec.backup_path_power_kw.expect("backup-capable"), 16.0);
     }
 }

@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::dispatch::ScheduledDispatch;
 use crate::error::CoreError;
 use crate::home::Home;
+use crate::math;
 use crate::time::SimClock;
 
 /// Ambient temperature feed (M1). The Texas TMY/NSRDB hourly feed with
@@ -50,7 +51,7 @@ impl AmbientFeed {
                 // UTC-6 fixed offset (Texas; DST ignored, documented).
                 let hour = (unix_time_s as f64 / 3600.0 - 6.0).rem_euclid(24.0);
                 let phase = std::f64::consts::TAU * (hour - 15.0) / 24.0;
-                mean_c + amplitude_c * phase.sin()
+                mean_c + amplitude_c * math::sin(phase)
             }
         }
     }

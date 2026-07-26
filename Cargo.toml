@@ -21,6 +21,7 @@ rand_chacha = "0.3"
 rayon = "1"
 sha2 = "0.10"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+libm = "0.2"
 include_dir = "0.7"
 
 proptest = "1"

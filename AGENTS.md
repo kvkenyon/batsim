@@ -20,6 +20,7 @@ M1 (core engine + registry, spec 0.2) is complete on branch `fm/batsim-m1`: crat
 - D4: a `DCCoupledHybrid` battery with `integrated_inverter == true` and no declared hybrid gets its `InverterUnit` synthesized from the compatible catalog entry (the PW3 *is* its own hybrid); an explicitly declared hybrid must carry `quantity >= ` the integrated head-unit count or composition errors.
 - D5: inverter `quantity` aggregates by scaling both the AC rating and the efficiency-curve x-axis by N, i.e. N units share the flow equally. Per-module PV units (microinverter / battery-integrated ratings) scale to the array DC nameplate instead of capping it at one unit.
 - D6: B.3.3 PV priority is enforced in stage 5 by curtailing the hybrid *discharge command* to the AC headroom PV leaves (`batt_clipped`); stage 6 then treats realized pack DC as non-negotiable and curtails only PV, which is losslessly curtailable at the MPPT. Clip counters are attributed by actual bus share, never by the config flag.
+- D7: every transcendental on a simulation path goes through `batsim-core/src/math.rs` (the `libm` crate), never the `f64` intrinsic methods: platform libms differ by an ulp and the golden traces hash every tick. Correctly rounded ops (`sqrt`, `ceil`, `floor`, `round`, `abs`) stay intrinsic. Golden snapshots are therefore bit-exact across macOS/Linux; regressions here fail CI on the other platform.
 
 ## Maintaining this file
 

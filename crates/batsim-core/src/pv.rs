@@ -22,9 +22,10 @@
 //!   longitude/anomaly, equation of center, apparent longitude, obliquity
 //!   correction, equation of time) — PSA/NOAA-class, accuracy <= 0.05 deg
 //!   for 1950-2050 (B.7.2). Extraterrestrial irradiance `G_sc = 1367 W/m^2`
-//!   with the Spencer/Iqbal eccentricity-correction day-angle series. Only
-//!   `std` `f64` transcendentals (B.10.1: no fast-math flags anywhere in
-//!   the workspace profile).
+//!   with the Spencer/Iqbal eccentricity-correction day-angle series. All
+//!   transcendentals route through the libm-backed [`crate::math`] module
+//!   for cross-platform bit-exactness (no fast-math flags
+//!   anywhere in the workspace profile).
 //! - **Clear sky**: Hottel (1976) beam transmittance model A (23 km
 //!   visibility standard atmosphere) at fixed 0.2 km site altitude, with
 //!   the Liu & Jordan (1960) diffuse transmittance relation and the
@@ -53,16 +54,18 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+use crate::math;
 use crate::rng::{self, RngPurpose};
 
 /// Standard-normal variate from two uniform (0, 1) draws via Box-Muller.
-/// Deterministic, `std`-only transcendentals (B.10.1); the workspace has
-/// no `rand_distr` dependency and none may be added, so Gaussian draws
-/// for the AR(1) layers are transformed in-module.
+/// Deterministic; transcendentals route through the libm-backed
+/// [`crate::math`] module. The workspace has no `rand_distr` dependency
+/// and none may be added, so Gaussian draws for the AR(1) layers are
+/// transformed in-module.
 pub(crate) fn normal_from_uniforms(u1: f64, u2: f64) -> f64 {
     // Map u1 into (0, 1] so the log never sees 0.
-    let r = (-2.0 * (1.0 - u1).ln()).sqrt();
-    r * (2.0 * std::f64::consts::PI * u2).cos()
+    let r = (-2.0 * math::ln(1.0 - u1)).sqrt();
+    r * math::cos(2.0 * std::f64::consts::PI * u2)
 }
 
 /// One roof sub-array (B.7.3: multiple sub-arrays per home MUST be
@@ -190,8 +193,8 @@ const G_SC: f64 = 1367.0;
 const DEG: f64 = std::f64::consts::PI / 180.0;
 
 /// Pure-function solar position (NOAA/PSA-lite; spec B.7.2, accuracy
-/// <= 0.05 deg for 1950-2050). Deterministic: only `std` `f64`
-/// transcendentals, no iteration (B.10.1).
+/// <= 0.05 deg for 1950-2050). Deterministic, no iteration;
+/// transcendentals route through the libm-backed [`crate::math`] module.
 #[must_use]
 pub fn solar_position(unix_time_s: u64, latitude_deg: f64, longitude_deg: f64) -> SolarPosition {
     let julian_day = unix_time_s as f64 / 86_400.0 + 2_440_587.5;
@@ -201,46 +204,48 @@ pub fn solar_position(unix_time_s: u64, latitude_deg: f64, longitude_deg: f64) -
     let geom_mean_anom = 357.529_11 + jc * (35_999.050_29 - 0.000_153_7 * jc);
     let ecc = 0.016_708_634 - jc * (0.000_042_037 + 0.000_000_126_7 * jc);
     let gma_rad = geom_mean_anom * DEG;
-    let eq_center = gma_rad.sin() * (1.914_602 - jc * (0.004_817 + 0.000_014 * jc))
-        + (2.0 * gma_rad).sin() * (0.019_993 - 0.000_101 * jc)
-        + (3.0 * gma_rad).sin() * 0.000_289;
+    let eq_center = math::sin(gma_rad) * (1.914_602 - jc * (0.004_817 + 0.000_014 * jc))
+        + math::sin(2.0 * gma_rad) * (0.019_993 - 0.000_101 * jc)
+        + math::sin(3.0 * gma_rad) * 0.000_289;
     let sun_true_long = geom_mean_long + eq_center;
     let omega_rad = (125.04 - 1934.136 * jc) * DEG;
-    let sun_app_long = sun_true_long - 0.005_69 - 0.004_78 * omega_rad.sin();
+    let sun_app_long = sun_true_long - 0.005_69 - 0.004_78 * math::sin(omega_rad);
     let mean_obliq =
         23.0 + (26.0 + (21.448 - jc * (46.815 + jc * (0.000_59 - jc * 0.001_813))) / 60.0) / 60.0;
-    let obliq_rad = (mean_obliq + 0.002_56 * omega_rad.cos()) * DEG;
-    let decl_rad = (obliq_rad.sin() * (sun_app_long * DEG).sin()).asin();
-    let var_y = (obliq_rad / 2.0).tan().powi(2);
+    let obliq_rad = (mean_obliq + 0.002_56 * math::cos(omega_rad)) * DEG;
+    let decl_rad = math::asin(math::sin(obliq_rad) * math::sin(sun_app_long * DEG));
+    let tan_half_obliq = math::tan(obliq_rad / 2.0);
+    let var_y = tan_half_obliq * tan_half_obliq;
     let sun_long_rad = geom_mean_long * DEG;
     let eq_time_min = 4.0
-        * (var_y * (2.0 * sun_long_rad).sin() - 2.0 * ecc * gma_rad.sin()
-            + 4.0 * ecc * var_y * gma_rad.sin() * (2.0 * sun_long_rad).cos()
-            - 0.5 * var_y * var_y * (4.0 * sun_long_rad).sin()
-            - 1.25 * ecc * ecc * (2.0 * gma_rad).sin())
+        * (var_y * math::sin(2.0 * sun_long_rad) - 2.0 * ecc * math::sin(gma_rad)
+            + 4.0 * ecc * var_y * math::sin(gma_rad) * math::cos(2.0 * sun_long_rad)
+            - 0.5 * var_y * var_y * math::sin(4.0 * sun_long_rad)
+            - 1.25 * ecc * ecc * math::sin(2.0 * gma_rad))
         / DEG;
     // True solar time (minutes) -> hour angle.
     let utc_min = (unix_time_s % 86_400) as f64 / 60.0;
     let tst_min = (utc_min + eq_time_min + 4.0 * longitude_deg).rem_euclid(1440.0);
     let ha_rad = (tst_min / 4.0 - 180.0) * DEG;
     let lat_rad = latitude_deg * DEG;
-    let cos_zen = (lat_rad.sin() * decl_rad.sin() + lat_rad.cos() * decl_rad.cos() * ha_rad.cos())
-        .clamp(-1.0, 1.0);
-    let elevation_deg = 90.0 - cos_zen.acos() / DEG;
-    let az_deg = ((ha_rad
-        .sin()
-        .atan2(ha_rad.cos() * lat_rad.sin() - decl_rad.tan() * lat_rad.cos()))
-        / DEG
+    let cos_zen = (math::sin(lat_rad) * math::sin(decl_rad)
+        + math::cos(lat_rad) * math::cos(decl_rad) * math::cos(ha_rad))
+    .clamp(-1.0, 1.0);
+    let elevation_deg = 90.0 - math::acos(cos_zen) / DEG;
+    let az_deg = (math::atan2(
+        math::sin(ha_rad),
+        math::cos(ha_rad) * math::sin(lat_rad) - math::tan(decl_rad) * math::cos(lat_rad),
+    ) / DEG
         + 180.0)
         .rem_euclid(360.0);
     // Eccentricity correction (Spencer 1971 / Iqbal 1983 day-angle series).
     let day_angle =
         2.0 * std::f64::consts::PI * (civil_local(unix_time_s).day_of_year - 1) as f64 / 365.0;
     let e0 = 1.000_11
-        + 0.034_221 * day_angle.cos()
-        + 0.001_28 * day_angle.sin()
-        + 0.000_719 * (2.0 * day_angle).cos()
-        + 0.000_077 * (2.0 * day_angle).sin();
+        + 0.034_221 * math::cos(day_angle)
+        + 0.001_28 * math::sin(day_angle)
+        + 0.000_719 * math::cos(2.0 * day_angle)
+        + 0.000_077 * math::sin(2.0 * day_angle);
     SolarPosition {
         elevation_deg,
         azimuth_deg: az_deg,
@@ -266,11 +271,12 @@ pub fn clear_sky(position: &SolarPosition) -> Irradiance {
         return Irradiance::default();
     }
     let el_rad = position.elevation_deg * DEG;
-    let sin_el = el_rad.sin();
+    let sin_el = math::sin(el_rad);
     // Kasten & Young (1989) relative optical airmass.
-    let airmass = 1.0 / (sin_el + 0.505_72 * (position.elevation_deg + 6.079_95).powf(-1.636_4));
+    let airmass =
+        1.0 / (sin_el + 0.505_72 * math::powf(position.elevation_deg + 6.079_95, -1.636_4));
     // Hottel (1976) beam transmittance; Liu & Jordan (1960) diffuse.
-    let tau_b = HOTTEL_A0 + HOTTEL_A1 * (-HOTTEL_K * airmass).exp();
+    let tau_b = HOTTEL_A0 + HOTTEL_A1 * math::exp(-HOTTEL_K * airmass);
     let beam_w = position.extra_terrestrial_w_m2 * tau_b;
     let tau_d = (0.271 - 0.294 * tau_b).max(0.0);
     let diffuse_w = position.extra_terrestrial_w_m2 * tau_d * sin_el;
@@ -295,11 +301,13 @@ pub fn poa_irradiance(
         return 0.0;
     }
     let el_rad = position.elevation_deg * DEG;
-    let sin_el = el_rad.sin();
+    let sin_el = math::sin(el_rad);
     let tilt_rad = tilt_deg * DEG;
     // Angle of incidence on the tilted plane.
-    let cos_aoi = (sin_el * tilt_rad.cos()
-        + el_rad.cos() * tilt_rad.sin() * ((position.azimuth_deg - azimuth_deg) * DEG).cos())
+    let cos_aoi = (sin_el * math::cos(tilt_rad)
+        + math::cos(el_rad)
+            * math::sin(tilt_rad)
+            * math::cos((position.azimuth_deg - azimuth_deg) * DEG))
     .clamp(-1.0, 1.0);
     let beam = irr.dni_w_m2 * cos_aoi.max(0.0);
     // Hay-Davies anisotropy index and tilt factor (Rb clamped >= 0 so a
@@ -310,8 +318,8 @@ pub fn poa_irradiance(
         0.0
     };
     let rb = (cos_aoi / sin_el).max(0.0);
-    let diffuse = irr.dhi_w_m2 * ((1.0 - aniso) * 0.5 * (1.0 + tilt_rad.cos()) + aniso * rb);
-    let ground = 0.2 * irr.ghi_w_m2 * 0.5 * (1.0 - tilt_rad.cos());
+    let diffuse = irr.dhi_w_m2 * ((1.0 - aniso) * 0.5 * (1.0 + math::cos(tilt_rad)) + aniso * rb);
+    let ground = 0.2 * irr.ghi_w_m2 * 0.5 * (1.0 - math::cos(tilt_rad));
     (beam + diffuse + ground).max(0.0)
 }
 
@@ -797,7 +805,7 @@ impl PvArray {
             };
         }
         // Within-state AR(1) flicker, sigma as fraction of clear sky.
-        let phi = (-dt_s / FLICKER_TAU_S).exp();
+        let phi = math::exp(-dt_s / FLICKER_TAU_S);
         let sigma = self.sky.sigma();
         self.flicker = phi * self.flicker + sigma * (1.0 - phi * phi).sqrt() * eps;
     }

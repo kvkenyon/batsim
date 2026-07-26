@@ -14,6 +14,7 @@ version = "0.1.0"
 dependencies = [
  "batsim-registry",
  "insta",
+ "libm",
  "proptest",
  "rand",
  "rand_chacha",
