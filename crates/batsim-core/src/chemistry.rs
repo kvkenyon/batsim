@@ -402,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn r_int_modifiers_match_b_2_4() {
+    fn r_int_modifiers() {
         let r = base_internal_resistance(11_500.0);
         // Unity at soc 0.5, 25 degC, no growth.
         approx(r_int(r, 0.5, 0.0, 25.0), r, 1e-12);
@@ -421,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn thevenin_sag_anchor_b11() {
+    fn thevenin_sag_anchor() {
         // PW3-shaped LFP unit: 11.5 kW continuous, 5 % SOC, -5 degC must
         // deliver 40-60 % of nameplate continuous (the Thevenin-sag
         // conformance anchor).
@@ -463,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn lfp_cold_charge_block_and_nmc_derate_b11() {
+    fn lfp_cold_charge_block_and_nmc_derate() {
         // LFP: charge power = 0 below 0 degC (the LFP cold-charge-block
         // anchor).
         assert_eq!(cold_charge_factor(Chemistry::LFP, -5.0), 0.0);
@@ -485,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn thermal_derate_matches_b_4_4_piecewise() {
+    fn thermal_derate_piecewise() {
         assert_eq!(thermal_derate(-21.0), 0.0);
         assert_eq!(thermal_derate(-20.0), 0.5);
         approx(thermal_derate(-10.0), 0.75, 1e-12);

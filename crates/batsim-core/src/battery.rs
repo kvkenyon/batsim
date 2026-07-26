@@ -881,7 +881,7 @@ mod tests {
     }
 
     #[test]
-    fn thevenin_sag_anchor_b11_unit_level() {
+    fn thevenin_sag_anchor_unit_level() {
         // Thevenin-sag conformance anchor: PW3-shaped LFP unit at 5 % SOC
         // and -5 degC delivers 40-60 % of nameplate continuous (11.5 kW).
         let model = pw3_like();
@@ -901,7 +901,7 @@ mod tests {
     }
 
     #[test]
-    fn lfp_cold_charge_block_and_nmc_cutoff_b11() {
+    fn lfp_cold_charge_block_and_nmc_cutoff() {
         // The LFP cold-charge-block anchor at the unit level.
         let lfp = pw3_like();
         // Below 0 degC: charge limit is exactly 0.
