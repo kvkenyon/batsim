@@ -1,15 +1,15 @@
-//! Round-trip efficiency conformance (spec B.2.2, B.11 `rte_conformance`).
+//! Round-trip efficiency conformance.
 //!
 //! Standard profile per device: charge at 0.5 C for 2 h, rest 10 min,
 //! discharge at 0.5 C to cutoff. The measured AC-path round-trip
 //! efficiency MUST reproduce the entry's `rte_ac_coupled` within
 //! +/-0.5 percentage points (mandatory conformance).
 //!
-//! Path construction honors coupling (F16): AC-coupled units are measured
-//! at their terminal (= AC); DC-coupled hybrid units are measured through
-//! their compatible hybrid inverter (grid charge is a double conversion,
-//! A.3.3). Standby/tare draw is excluded from the integral — it models
-//! gateway self-consumption (B.3.2), not the conversion path.
+//! Path construction honors coupling-aware routing: AC-coupled units are
+//! measured at their terminal (= AC); DC-coupled hybrid units are measured
+//! through their compatible hybrid inverter (grid charge is a double
+//! conversion). Standby/tare draw is excluded from the integral - it models
+//! gateway self-consumption, not the conversion path.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -24,7 +24,7 @@ fn measure_rte(registry: &Registry, model: &BatteryModel) -> f64 {
     let p_half_c_kw = 0.5 * usable_kwh;
     let p_chg_kw = p_half_c_kw.min(model.continuous_charge_power_kw.value);
     let p_dis_kw = p_half_c_kw.min(model.continuous_discharge_power_kw.value);
-    // The hybrid inverter stage for DC-coupled entries (F16).
+    // The hybrid inverter stage for DC-coupled entries.
     let hybrid = if matches!(model.coupling, Coupling::DCCoupledHybrid) {
         registry
             .inverters()
@@ -45,7 +45,7 @@ fn measure_rte(registry: &Registry, model: &BatteryModel) -> f64 {
         let mut e_dis_ac = 0.0f64;
         let mut drive = |unit: &mut BatteryUnit, p_ac_kw: f64, seconds: u64, charge: bool| {
             // Hybrid-path efficiency at a power level: curve x-axis is AC kW;
-            // one fixed-point step from the DC side is ample (D1 decision).
+            // one fixed-point step from the DC side is ample.
             let hyb_eta = |p_w: f64| -> f64 {
                 hybrid
                     .as_ref()
@@ -112,7 +112,7 @@ fn rte_conformance() {
         }
         let Some(target) = &model.rte_ac_coupled else {
             failures.push(format!(
-                "{}: standalone entry missing rte_ac_coupled (B.11 gate)",
+                "{}: standalone entry missing rte_ac_coupled (conformance gate)",
                 model.model_id
             ));
             continue;
@@ -121,7 +121,7 @@ fn rte_conformance() {
         let err_pp = (measured - target.value).abs() * 100.0;
         if err_pp > 0.5 {
             failures.push(format!(
-                "{}: measured {:.4} vs spec {:.4} ({:.2} pp)",
+                "{}: measured {:.4} vs catalog {:.4} ({:.2} pp)",
                 model.model_id, measured, target.value, err_pp
             ));
         }

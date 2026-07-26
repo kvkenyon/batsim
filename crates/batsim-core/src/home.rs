@@ -1,15 +1,16 @@
-//! One simulated home: the B.1.5 per-tick pipeline over its devices, with
-//! coupling-aware energy paths (spec A.3, B.3.4; F16).
+//! One simulated home: the per-tick pipeline over its devices, with
+//! coupling-aware energy-path routing.
 //!
-//! Stage order per tick is mandatory (B.1.5): load -> pv -> price_signal
-//! (M3) -> dispatch -> battery -> inverter -> metering -> telemetry.
+//! Stage order per tick is mandatory: load -> pv -> price_signal
+//! (planned future work) -> dispatch -> battery -> inverter -> metering
+//! -> telemetry.
 //!
-//! M1 scope: grid is always present (outages F11 are M4); the dispatch
-//! stage reads stages 1-2 of the same tick (allowed by B.1.5); telemetry
-//! is the lossless truth stream only.
+//! Current scope: grid is always present (outage simulation is planned
+//! future work); the dispatch stage reads stages 1-2 of the same tick;
+//! telemetry is the lossless truth stream only.
 //!
-//! Sign conventions (B.0): battery power positive = discharging; grid
-//! power positive = importing (B.1.5 stage 7 formula).
+//! Sign conventions: battery power positive = discharging; grid
+//! power positive = importing (the metering-stage formula).
 
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +34,8 @@ pub struct Home {
 
 /// Stage-5 result: the per-unit realized outputs plus the battery AC
 /// discharge that was curtailed *before* integration because the shared
-/// hybrid inverter had no AC headroom left for it (B.3.3).
+/// hybrid inverter had no AC headroom left for it (the shared-inverter
+/// PV-priority rule).
 #[derive(Debug, Clone, Default)]
 struct BatteryStage {
     units: Vec<BatteryStepOutput>,
@@ -65,10 +67,10 @@ impl Home {
         }
     }
 
-    /// Queue a dispatch action (applied at the top of its tick, B.1.5
-    /// stage 4). Commands may be submitted in any tick order; the queue is
-    /// kept sorted by `execute_at_tick`, and submission order is preserved
-    /// for equal ticks.
+    /// Queue a dispatch action (applied at the top of its tick, in the
+    /// dispatch stage). Commands may be submitted in any tick order; the
+    /// queue is kept sorted by `execute_at_tick`, and submission order is
+    /// preserved for equal ticks.
     pub fn schedule(&mut self, cmd: ScheduledDispatch) {
         let at = self
             .dispatch_queue
@@ -131,7 +133,7 @@ impl Home {
         &self.truth
     }
 
-    /// Execute one tick of the B.1.5 pipeline.
+    /// Execute one tick of the per-tick pipeline.
     pub fn step(&mut self, tick: u64, unix_time_s: u64, dt_s: u32, t_amb_c: f64) {
         self.apply_due_dispatches(tick);
         let exo = self.stages_load_pv(tick, unix_time_s, dt_s, t_amb_c);
@@ -157,7 +159,7 @@ impl Home {
         }
     }
 
-    /// Stages 1-2: load and PV (B.1.5).
+    /// Stages 1-2: load and PV.
     fn stages_load_pv(
         &mut self,
         tick: u64,
@@ -172,9 +174,9 @@ impl Home {
             .pv
             .as_mut()
             .map_or(0.0, |pv| pv.dc_power_w(unix_time_s, tick, dt_s, t_amb_c));
-        // Dedicated string inverter: PV converts here (loss L1, A.3.2) and
-        // never touches the battery path. Hybrid: PV DC lands on the bus
-        // and converts in stage 6.
+        // Dedicated string inverter: PV converts here (the string-
+        // inverter loss point) and never touches the battery path.
+        // Hybrid: PV DC lands on the bus and converts in stage 6.
         let (pv_ac_conv, pv_clipped_conv) = match (&self.devices.pv_inverter, p_pv_dc > 0.0) {
             (Some(inv), true) => {
                 let conv = inv.dc_to_ac_capped(p_pv_dc, self.pv_ac_cap_w());
@@ -233,11 +235,11 @@ impl Home {
     }
 
     /// Stage 5: split the setpoint across ALL units in one AC-boundary
-    /// pro-rata pass (B.3.4) and step each unit. Every unit's weight is
+    /// pro-rata pass and step each unit. Every unit's weight is
     /// its dynamic headroom expressed at the AC boundary, so mixed
     /// couplings never realize more than the setpoint. Hybrid shares are
     /// then translated to DC-bus setpoints: PV-surplus charging routes
-    /// DC->DC (single inversion, A.3.3); AC-side shares translate through
+    /// DC->DC (single inversion); AC-side shares translate through
     /// the hybrid curve (grid charge remains a double conversion).
     fn stage_battery(
         &mut self,
@@ -321,9 +323,9 @@ impl Home {
     }
 
     /// The DC-bus setpoint for the hybrid units, translated from their
-    /// AC-boundary share through the shared inverter (A.3.3). Every
-    /// AC<->DC translation routes through the `inverter` helpers so the D1
-    /// charge-path rule has a single owner.
+    /// AC-boundary share through the shared inverter. Every
+    /// AC<->DC translation routes through the `inverter` helpers so the
+    /// energy-conserving charge-path rule has a single owner.
     ///
     /// Zero when no hybrid inverter exists: `build_devices` guarantees one
     /// for any DC-coupled battery, so this is an unreachable safety floor
@@ -331,7 +333,8 @@ impl Home {
     ///
     /// Returns `(p_dc_setpoint_w, curtailed_ac_w)`. The discharge target is
     /// curtailed here, before the pack integrates it, by the AC headroom PV
-    /// already occupies at the shared inverter (B.3.3 PV priority): a pack
+    /// already occupies at the shared inverter (PV priority at the shared
+    /// inverter): a pack
     /// may never discharge energy the shared inverter cannot pass, so the
     /// curtailment is a command reduction, not a downstream clip.
     fn hybrid_dc_setpoint(&self, p_batt_ac_set: f64, exo: &Exogenous) -> (f64, f64) {
@@ -342,7 +345,7 @@ impl Home {
             && self.devices.pv_inverter.is_none()
         {
             // DC left on the bus after covering the load (single-
-            // inversion PV->battery path, A.3.3).
+            // inversion PV->battery path).
             (exo.pv_dc - inv.dc_required_for_ac(exo.load)).max(0.0)
         } else {
             0.0
@@ -365,7 +368,8 @@ impl Home {
             (inv.dc_required_for_ac(ac_target), p_batt_ac_set - ac_target)
         } else {
             // Charge: DC delivered to the bus from an AC draw
-            // (conservation-true: DC = AC x eta, D1 decision).
+            // (conservation-true: DC delivered equals AC drawn times
+            // efficiency).
             (-inv.ac_to_dc(-p_batt_ac_set).p_out_w, 0.0)
         }
     }
@@ -379,7 +383,7 @@ impl Home {
     }
 
     /// AC output the shared hybrid inverter can still pass to the battery
-    /// once PV has been admitted (B.3.3). With `pv_priority` off the battery
+    /// once PV has been admitted. With `pv_priority` off the battery
     /// is admitted first and owns the whole rating.
     fn hybrid_batt_ac_headroom_w(
         &self,
@@ -393,13 +397,13 @@ impl Home {
         (inv.rated_ac_w() - pv_ac).max(0.0)
     }
 
-    /// AC-side cap on the PV path from the array's DC/AC ratio (B.7.4).
+    /// AC-side cap on the PV path from the array's DC/AC ratio.
     fn pv_ac_cap_w(&self) -> f64 {
         self.devices.pv_ac_cap_w.unwrap_or(f64::INFINITY)
     }
 
     /// Split a setpoint across the given unit indices pro-rata by dynamic
-    /// headroom and step each (B.3.4).
+    /// headroom and step each.
     fn split_and_step(
         batteries: &mut [crate::battery::BatteryUnit],
         indices: &[usize],
@@ -435,8 +439,9 @@ impl Home {
         }
     }
 
-    /// Stage 6: resolve the hybrid inverter's shared AC cap (PV priority,
-    /// B.3.3) and return (pv_ac_w, batt_ac_w) at the panel.
+    /// Stage 6: resolve the hybrid inverter's shared AC cap (PV priority
+    /// at the shared inverter) and return (pv_ac_w, batt_ac_w) at the
+    /// panel.
     fn stage_inverter(&mut self, exo: &Exogenous, batt: &BatteryStage, dt_s: u32) -> (f64, f64) {
         let unit_realized = &batt.units;
         let mut p_batt_ac: f64 = unit_realized
@@ -457,7 +462,8 @@ impl Home {
             .map(|(o, _)| o.p_term_w)
             .sum();
         // The array lands on the hybrid bus ONLY when it is MPPT-landed
-        // (A.4.4: `pv_inverter_model_id == null`). With a dedicated PV
+        // (`pv_inverter_model_id == null` in the device catalog). With a
+        // dedicated PV
         // inverter, stage 2 already converted the array - converting it
         // again here would double-count and double-meter the same DC.
         let pv_bus_dc = if self.devices.pv_inverter.is_some() {
@@ -466,7 +472,8 @@ impl Home {
             exo.pv_dc
         };
         let p_bus = pv_bus_dc + hyb_batt_dc;
-        // Command curtailment from stage 5 (B.3.3), converted to the DC
+        // Command curtailment from stage 5 (the shared-inverter
+        // PV-priority rule), converted to the DC
         // side at the realized bus operating point (the marginal DC the
         // shared inverter would have drawn for the curtailed AC slice),
         // so this counter is homogeneous with the residual clip below and
@@ -487,7 +494,7 @@ impl Home {
             let batt_dc_share = hyb_batt_dc.max(0.0).min(p_bus);
             let pv_dc_share = p_bus - batt_dc_share;
             // The array's DC/AC ratio caps the PV path before the shared
-            // rating does (B.7.4); the overhang is PV curtailment.
+            // rating does; the overhang is PV curtailment.
             let pv_ac_uncapped = pv_dc_share * eta;
             let pv_ac_candidate = pv_ac_uncapped.min(self.pv_ac_cap_w());
             let batt_ac_candidate = batt_dc_share * eta;
@@ -503,7 +510,7 @@ impl Home {
                 .accumulate((batt_ac_candidate - batt_admitted) / eta, dt_s);
         } else if p_bus < 0.0 {
             // Net bus deficit: drawn from AC through the hybrid (grid
-            // charge double conversion, A.3.3). The battery already
+            // charge double conversion). The battery already
             // absorbed its DC, so the AC draw is metered in full.
             p_batt_ac -= inv.ac_required_for_dc(-p_bus);
         }
@@ -511,8 +518,8 @@ impl Home {
     }
 
     /// Stage 7: close the balance at the meter points and integrate energy
-    /// counters (B.1.5: `P_grid = P_load - P_pv_ac - P_inv_ac`, + import;
-    /// standby draw added on the AC side per B.3.2).
+    /// counters (`P_grid = P_load - P_pv_ac - P_inv_ac`, + import;
+    /// standby draw added on the AC side).
     fn stage_metering(&mut self, exo: &Exogenous, p_pv_ac: f64, p_batt_ac: f64, dt_s: u32) {
         let p_standby = self.standby_total_w();
         let p_grid = exo.load - p_pv_ac - p_batt_ac + p_standby;
@@ -524,7 +531,7 @@ impl Home {
         self.meters.standby_loss.accumulate(p_standby, dt_s);
     }
 
-    /// Total standby draw (W): battery units + controllers (B.3.2).
+    /// Total standby draw (W): battery units + controllers.
     fn standby_total_w(&self) -> f64 {
         self.devices
             .batteries
@@ -534,7 +541,7 @@ impl Home {
             + self.devices.controller_standby_w
     }
 
-    /// Stage 8: record the lossless truth record for this tick (B.9.2).
+    /// Stage 8: record the lossless truth record for this tick.
     fn stage_telemetry(
         &mut self,
         tick: u64,

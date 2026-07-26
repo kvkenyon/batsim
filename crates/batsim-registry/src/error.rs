@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 /// One semantic or schema violation found in a catalog entry. Validation
-/// collects all violations across all entries before failing (spec §1.3:
-/// "a diagnostic listing every offending entry and field path").
+/// collects all violations across all entries before failing, producing
+/// a diagnostic listing every offending entry and field path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Violation {
     /// Registry-relative path of the offending file, e.g.
@@ -55,7 +55,7 @@ pub enum RegistryError {
     },
 
     /// `catalog.json` content hashes do not match the entry files
-    /// (tamper detection, spec §4.6).
+    /// (tamper detection via the integrity checks).
     #[error("registry integrity check failed: {0}")]
     Integrity(String),
 

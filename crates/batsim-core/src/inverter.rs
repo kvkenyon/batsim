@@ -1,14 +1,15 @@
-//! Inverter conversion model (spec B.3; F6): load-dependent efficiency,
+//! Inverter conversion model: load-dependent efficiency,
 //! clipping, standby draw, and the AC/DC coupling-path conversion stages.
 //!
-//! The free functions here are the explicit loss points of spec A.3.2/3.3
-//! (F16): every conversion stage in every topology routes through
-//! [`dc_to_ac`] / [`ac_to_dc`] so telemetry can attribute each loss.
+//! The free functions here are the explicit loss points of the
+//! coupling-aware topology routing: every conversion stage in every
+//! topology routes through [`dc_to_ac`] / [`ac_to_dc`] so telemetry can
+//! attribute each loss.
 //!
 //! All powers are magnitudes (W, non-negative); direction is carried by
 //! which function is called. Efficiency curves are evaluated at
 //! `x_kw = power / 1000` against the registry `EfficiencyCurve` semantics
-//! (linear interpolation, endpoint clamping, spec B.3.1).
+//! (linear interpolation, endpoint clamping).
 
 use batsim_registry::{EfficiencyCurve, InverterModel};
 use serde::{Deserialize, Serialize};
@@ -20,15 +21,16 @@ pub struct Conversion {
     pub p_out_w: f64,
     /// Power lost to heat in the stage (W).
     pub loss_w: f64,
-    /// Power clipped at the stage rating (W; counted separately, B.3.3).
+    /// Power clipped at the stage rating (W; counted separately from
+    /// heat loss).
     pub clipped_w: f64,
 }
 
 /// Efficiency floor: at/below this the stage is treated as total loss
-/// (guards the (0, 0) zero anchor of B.3.1 curves from NaN/Inf).
+/// (guards the (0, 0) zero anchor of the efficiency curves from NaN/Inf).
 const ETA_FLOOR: f64 = 1e-6;
 
-/// DC -> AC conversion (discharge path or PV inversion), B.3.1/B.3.3:
+/// DC -> AC conversion (discharge path or PV inversion):
 /// `P_ac = P_dc * eta_inv(|P_dc|/P_rated)` hard-clamped to the AC rating;
 /// the clamp bounds the OUTPUT, so excess DC input is reported as clipped.
 ///
@@ -65,20 +67,20 @@ pub fn dc_to_ac(curve: &EfficiencyCurve, rated_ac_w: f64, p_dc_w: f64) -> Conver
     }
 }
 
-/// AC -> DC conversion (charge path), B.3.1:
+/// AC -> DC conversion (charge path):
 /// `P_dc = |P_ac_req| * eta_inv(|P_ac_req|/P_rated)`. The request is
 /// clamped to the AC rating first (no clipping counter: the limit is a
 /// normal operating bound, not lost energy).
 ///
-/// # Deviation from the B.3.1 formula text
+/// # Why the charge path multiplies by eta
 ///
-/// Spec B.3.1 literally writes `P_dc_draw = |P_ac_req| / eta_inv` for the
-/// charge path. That reading violates energy conservation (the DC side
-/// would receive MORE power than the AC side draws), so this function
-/// implements the conservation-true charge-forward conversion instead:
-/// DC delivered = AC requested x eta. The inverse question "AC draw
-/// required for a DC target" is the caller's job (`p_ac = p_dc / eta`,
-/// one fixed-point step when eta is power-dependent).
+/// The naive charge formula `P_dc_draw = |P_ac_req| / eta_inv` violates
+/// energy conservation (the DC side would receive MORE power than the
+/// AC side draws), so this function implements the conservation-true
+/// charge-forward conversion instead: DC delivered = AC requested x
+/// eta. The inverse question "AC draw required for a DC target" is the
+/// caller's job (`p_ac = p_dc / eta`, one fixed-point step when eta is
+/// power-dependent).
 #[must_use]
 pub fn ac_to_dc(curve: &EfficiencyCurve, rated_ac_w: f64, p_ac_req_w: f64) -> Conversion {
     let p_ac_req_w = p_ac_req_w.max(0.0).min(rated_ac_w);
@@ -105,7 +107,8 @@ pub fn dc_required_for_ac(curve: &EfficiencyCurve, rated_ac_w: f64, p_ac_target_
 /// AC draw required to cover a DC-bus deficit (the inverse of [`ac_to_dc`]
 /// evaluated from the DC side): `P_ac = P_dc / eta(P_dc)`, one fixed-point
 /// step. Unclamped: the DC has already been absorbed downstream, so the
-/// draw must be metered in full (conservation-true, D1 decision).
+/// draw must be metered in full (conservation-true: the charge path is
+/// energy-conserving).
 #[must_use]
 pub fn ac_required_for_dc(curve: &EfficiencyCurve, p_dc_target_w: f64) -> f64 {
     let p_dc = p_dc_target_w.max(0.0);
@@ -114,7 +117,7 @@ pub fn ac_required_for_dc(curve: &EfficiencyCurve, p_dc_target_w: f64) -> f64 {
 }
 
 /// Resolve two candidate AC flows (PV output and battery discharge)
-/// sharing one inverter's AC rating (spec B.3.3): the combined flow is
+/// sharing one inverter's AC rating: the combined flow is
 /// capped at `rated_ac_w`; with `pv_priority` PV is admitted first and
 /// the battery takes the remainder (the default, matching hybrid
 /// firmware); otherwise the battery is admitted first.
@@ -155,13 +158,13 @@ pub struct InverterUnit {
     /// by `quantity`, so evaluating at fleet power yields the per-unit
     /// efficiency at the equally-shared per-unit power.
     curve: EfficiencyCurve,
-    /// Standby draw while energized (W), AC side (B.3.2).
+    /// Standby draw while energized (W), AC side.
     standby_w: f64,
 }
 
 impl InverterUnit {
     /// Build a single-unit instance from its registry model. `standby_w`
-    /// is the measured or estimated AC-side standby draw (B.3.2); it is
+    /// is the measured or estimated AC-side standby draw; it is
     /// carried, never invented from the model.
     #[must_use]
     pub fn new(model: &InverterModel, standby_w: f64) -> Self {
@@ -170,7 +173,7 @@ impl InverterUnit {
 
     /// Build an instance aggregating `quantity` identical units of the
     /// model: the AC rating and the efficiency-curve x-axis both scale
-    /// linearly, so N units share the flow equally (spec A.4.4).
+    /// linearly, so N units share the flow equally.
     ///
     /// `quantity` is treated as at least 1.
     #[must_use]
@@ -202,7 +205,7 @@ impl InverterUnit {
         self.quantity
     }
 
-    /// Standby draw while energized (W), AC side (B.3.2).
+    /// Standby draw while energized (W), AC side.
     #[must_use]
     pub fn standby_w(&self) -> f64 {
         self.standby_w
@@ -222,7 +225,7 @@ impl InverterUnit {
     }
 
     /// DC -> AC through this inverter against a tighter AC cap than the
-    /// nameplate rating (e.g. the array's declared DC/AC ratio, B.7.4).
+    /// nameplate rating (e.g. the array's declared DC/AC ratio).
     #[must_use]
     pub fn dc_to_ac_capped(&self, p_dc_w: f64, cap_ac_w: f64) -> Conversion {
         dc_to_ac(&self.curve, self.rated_ac_w.min(cap_ac_w.max(0.0)), p_dc_w)
@@ -259,7 +262,7 @@ mod tests {
     use super::*;
     use batsim_registry::{EfficiencyPoint, Provenance};
 
-    /// B.3.1-conforming curve: (0, 0) anchor, poor 5 % load efficiency,
+    /// CEC-style curve: (0, 0) anchor, poor 5 % load efficiency,
     /// 0.97 peak in the 0.2-0.5 band, slight rolloff at full load.
     fn cec_curve(rated_kw: f64) -> EfficiencyCurve {
         EfficiencyCurve {
@@ -310,7 +313,7 @@ mod tests {
     #[test]
     fn dc_to_ac_low_power_efficiency_is_poor() {
         let curve = cec_curve(10.0);
-        // 5 % load: eta 0.90 (B.3.1 MUST-show poor low-load efficiency).
+        // 5 % load: eta 0.90 (deliberately poor low-load efficiency).
         let c = dc_to_ac(&curve, 10_000.0, 500.0);
         assert!((c.p_out_w - 450.0).abs() < 1e-9);
         // Below 5 % the linear-from-zero anchor drops eta proportionally:

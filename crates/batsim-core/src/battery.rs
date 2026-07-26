@@ -1,35 +1,36 @@
-//! Battery unit physics (spec B.2; F3 split-efficiency SOC model, F4
-//! Thevenin sag, F5 chemistry modules).
+//! Battery unit physics: the split-efficiency SOC model, Thevenin
+//! voltage sag, and the per-chemistry modules.
 //!
 //! # Model boundary conventions
 //!
-//! A [`BatteryUnit`] is ONE physical battery unit (spec B.2.1). A home with
+//! A [`BatteryUnit`] is ONE physical battery unit. A home with
 //! N units holds N instances; setpoint splitting across units is the home
-//! controller's job (spec B.3.4: pro-rata by remaining headroom).
+//! controller's job (pro-rata by remaining headroom).
 //!
 //! **Terminal power convention** (`p_term_*`): positive = discharging out of
 //! the device boundary (toward home/grid); negative = charging. The boundary
-//! depends on coupling (spec A.1.4, A.3):
+//! depends on coupling (the device catalog's coupling declaration):
 //! - `ACCoupled` / `MicroinverterBased`: boundary is the unit's AC meter
 //!   point; the registry efficiency curves cover AC<->pack conversion.
 //! - `DCCoupledHybrid`: boundary is the hybrid inverter's DC bus; the
 //!   registry battery curves are the bidirectional DC-DC converter
 //!   (`eta_dcdc`); the separate `InverterModel` owns DC->AC inversion.
 //!
-//! # Energy path (spec B.2.2)
+//! # Energy path
 //!
 //! Charge: `P_pack = |P_term| * eta_chg(|P_term|)`; stored energy integrates
 //! `P_pack * eta_coul(chemistry)` per tick. Discharge: pack gives up
 //! `dE = P_pack * dt`, terminal delivers `P_term = P_pack * eta_dis`.
-//! Electrical losses become heat (B.4.1: electrical losses = heat, energy
+//! Electrical losses become heat (energy
 //! conservation by construction); the Thevenin `R_int` is used ONLY for
 //! power-limit sag, never as a second energy loss.
 //!
-//! # M1 scope notes (spec 0.2)
+//! # Current scope
 //!
-//! F7 (lumped thermal model) and F8 (degradation) are M4. In M1:
+//! A lumped thermal model and degradation tracking are planned future work
+//! and deliberately absent. In the current engine:
 //! - cell temperature == the ambient feed passed to [`BatteryUnit::step`]
-//!   (drives Thevenin cold rise, thermal derate B.4.4, cold-charge rules);
+//!   (drives Thevenin cold rise, the thermal derate, and cold-charge rules);
 //! - `Q_avail` is fixed at usable energy (+ expansion packs), `R_growth` = 0.
 
 use batsim_registry::{BatteryModel, Chemistry, Coupling};
@@ -38,14 +39,14 @@ use serde::{Deserialize, Serialize};
 use crate::chemistry;
 use crate::error::CoreError;
 
-/// Static behavioral config for a battery unit (spec B.2.4, B.2.6).
+/// Static behavioral config for a battery unit.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct BatteryConfig {
-    /// Compute Thevenin voltage / power sag (B.2.4; default true). When
+    /// Compute Thevenin voltage / power sag (default true). When
     /// false, static registry limits apply without SOC/temperature sag.
     pub thevenin_enabled: bool,
     /// Release the user reserve down to the hard SOC floor during outages
-    /// (B.2.6; default true, matching Tesla behavior).
+    /// (default true, matching Tesla behavior).
     pub release_reserve_in_outage: bool,
 }
 
@@ -67,9 +68,10 @@ pub struct BatteryStepInput {
     /// home's dispatch stage and ramp application upstream is NOT assumed —
     /// the unit applies its own ramp/min-on-off internally.
     pub p_term_setpoint_w: f64,
-    /// Ambient temperature seen by the pack (M1: stands in for T_cell).
+    /// Ambient temperature seen by the pack (currently stands in for
+    /// T_cell).
     pub t_amb_c: f64,
-    /// Grid state: reserve floor applies when true (B.2.6).
+    /// Grid state: reserve floor applies when true.
     pub grid_present: bool,
 }
 
@@ -78,7 +80,7 @@ pub struct BatteryStepInput {
 pub struct BatteryStepOutput {
     /// Realized terminal power (W; + discharge, - charge).
     pub p_term_w: f64,
-    /// Conversion losses turned to heat this tick (W) — for the (M4)
+    /// Conversion losses turned to heat this tick (W) - for the future
     /// thermal model and energy-conservation checks.
     pub heat_w: f64,
     /// Terminal voltage from the Thevenin model (0.0 when disabled).
@@ -89,28 +91,28 @@ pub struct BatteryStepOutput {
     pub flags: BatteryFlags,
 }
 
-/// Telemetry-visible limit flags (spec B.9.1 vocabulary).
+/// Telemetry-visible limit flags (the shared telemetry vocabulary).
 ///
 /// A flag struct (not a bitfield) for serde transparency; the bool count
-/// mirrors the B.9.1 vocabulary exactly.
+/// mirrors that vocabulary exactly.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct BatteryFlags {
     /// Thevenin/clipping clamped the request (`PowerLimited`).
     pub power_limited: bool,
-    /// Thermal derate (B.4.4) reduced the limit.
+    /// Thermal derate reduced the limit.
     pub thermal_derated: bool,
-    /// LFP cold-charge inhibition active (B.2.5).
+    /// LFP cold-charge inhibition active.
     pub charge_inhibited_cold: bool,
     /// SOC hit the top of the window.
     pub at_soc_max: bool,
     /// SOC hit the bottom of the window (or reserve floor).
     pub at_soc_min: bool,
-    /// Min on/off timer suppressed a direction change (B.2.7).
+    /// Min on/off timer suppressed a direction change.
     pub min_on_off_suppressed: bool,
 }
 
-/// Device state enum (spec B.9.1 shared vocabulary).
+/// Device state enum (the shared telemetry vocabulary).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeviceState {
     /// Energized, no throughput.
@@ -121,9 +123,9 @@ pub enum DeviceState {
     Discharging,
     /// Zero setpoint, contactors closed.
     Idle,
-    /// Mid backup transfer (M4).
+    /// Mid backup transfer (planned future work).
     Transferring,
-    /// Operating islanded (M4).
+    /// Operating islanded (planned future work).
     Islanded,
     /// Protective trip.
     Tripped,
@@ -133,7 +135,7 @@ pub enum DeviceState {
     Off,
 }
 
-/// Sub-step ceiling for the internal integrator (spec B.1.6: models
+/// Sub-step ceiling for the internal integrator (models
 /// sub-step at <= 5 s when the engine dt is larger).
 const MAX_SUB_STEP_S: u32 = 5;
 
@@ -143,7 +145,7 @@ const MAX_SUB_STEP_S: u32 = 5;
 const WINDOW_BISECT_ITERS: usize = 60;
 
 /// Default self-discharge fold-in when the catalog omits the field
-/// (Part A §5: 0.2 %/day, includes idle/standby draw).
+/// (0.2 %/day, includes idle/standby draw).
 const DEFAULT_SELF_DISCHARGE_PER_DAY: f64 = 0.002;
 
 /// One physical battery unit with full per-tick physics state.
@@ -158,7 +160,7 @@ pub struct BatteryUnit {
     /// Energy spanned by the SOC window: `(max - min) * q_avail` (Wh).
     e_window_wh: f64,
     /// Stored energy above the SOC-window floor (Wh). Integrating this is
-    /// the SOC ODE (B.2.2).
+    /// the SOC ODE.
     e_stored_wh: f64,
     /// SOC window bounds (fractions of `q_avail`).
     soc_min: f64,
@@ -177,7 +179,7 @@ pub struct BatteryUnit {
     /// Peak (short-duration) discharge rating (W); equals the continuous
     /// rating when the model declares none.
     peak_discharge_w: f64,
-    /// Peak-power budget remaining (W*s; B.2.6 accumulator).
+    /// Peak-power budget remaining (W*s; the peak-budget accumulator).
     peak_budget_ws: f64,
     /// Peak budget capacity: `(peak - continuous) * peak_duration_s` (W*s).
     peak_budget_cap_ws: f64,
@@ -185,13 +187,13 @@ pub struct BatteryUnit {
     ramp_w_per_s: f64,
     /// Ramp integrator: last tick's realized terminal power (W).
     p_ramp_w: f64,
-    /// Min-on time (s; B.2.7: 60 for hybrid inverters, else 0).
+    /// Min-on time (s; 60 for hybrid inverters, else 0).
     min_on_s: f64,
     /// Min-off time (s).
     min_off_s: f64,
-    /// Ticks spent in the current activity state (integer, B.2.7).
+    /// Ticks spent in the current activity state (integer).
     ticks_in_state: u64,
-    /// Ticks since the last nonzero throughput (integer, B.2.7).
+    /// Ticks since the last nonzero throughput (integer).
     ticks_since_active: u64,
     /// Base internal resistance of the 400 V pack (ohm; chemistry module).
     r_base_ohm: f64,
@@ -199,9 +201,9 @@ pub struct BatteryUnit {
     v_min_v: f64,
     /// Coulombic efficiency (cached from the chemistry module).
     eta_coul: f64,
-    /// Self-discharge fold-in (fraction/day, Part A §5).
+    /// Self-discharge fold-in (fraction/day).
     self_discharge_frac_per_day: f64,
-    /// Activity state (B.9.1 vocabulary).
+    /// Activity state (the shared telemetry vocabulary).
     state: DeviceState,
 }
 
@@ -211,18 +213,18 @@ struct DynamicLimits {
     discharge_w: f64,
     /// Charge limit before the SOC-window energy clamp (W).
     charge_w: f64,
-    /// Thermal derate factor applied (B.4.4).
+    /// Thermal derate factor applied.
     derate: f64,
-    /// Cold charge-acceptance factor applied (B.2.5).
+    /// Cold charge-acceptance factor applied.
     cold: f64,
     /// Thermally-derated continuous discharge rating (W): the boundary
-    /// between "continuous" and "peak budget" throughput (B.2.6).
+    /// between "continuous" and "peak budget" throughput.
     continuous_derated_w: f64,
 }
 
 /// Validate an expansion-pack combination against the head model's
 /// `expansion` declaration and return the added usable energy (Wh).
-/// Packs add energy only (spec A.3.1); power limits stay the head's.
+/// Packs add energy only; power limits stay the head's.
 fn expansion_energy_wh(
     model: &BatteryModel,
     expansion_pack: Option<(&BatteryModel, u32)>,
@@ -246,7 +248,7 @@ fn expansion_energy_wh(
     }
     if expansion.packs_add_power == Some(true) {
         return Err(CoreError::InvalidConfig(format!(
-            "{}: power-adding expansion packs are not supported (B.2.1)",
+            "{}: power-adding expansion packs are not supported",
             model.model_id
         )));
     }
@@ -265,7 +267,7 @@ impl BatteryUnit {
     /// Construct one unit from a registry model.
     ///
     /// `expansion_pack` is `Some((pack_model, count))` for PW3-style
-    /// energy-only packs (spec A.3.1); the pack's usable energy adds to
+    /// energy-only packs; the pack's usable energy adds to
     /// `Q_avail`, power limits stay the head unit's.
     ///
     /// # Errors
@@ -321,7 +323,7 @@ impl BatteryUnit {
         } else {
             f64::INFINITY
         };
-        // B.2.7 defaults: 60/60 s for hybrid inverters; 0 for
+        // Min on/off defaults: 60/60 s for hybrid inverters; 0 for
         // battery-integrated AC systems that tolerate rapid cycling.
         let (min_on_s, min_off_s) = match model.coupling {
             Coupling::DCCoupledHybrid => (60.0, 60.0),
@@ -360,26 +362,27 @@ impl BatteryUnit {
         })
     }
 
-    /// Advance the unit one tick. Applies, in order (spec B.2/B.1.5 stage
-    /// 5): ramp slew, min on/off enforcement, dynamic limits (chemistry
+    /// Advance the unit one tick. Applies, in order (the battery stage
+    /// of the per-tick pipeline): ramp slew, min on/off enforcement,
+    /// dynamic limits (chemistry
     /// cold rules, thermal derate, Thevenin sag, charge taper, peak
     /// budget), clamped integration of the SOC ODE with separated
     /// charge/discharge efficiencies, throughput bookkeeping.
     pub fn step(&mut self, input: &BatteryStepInput) -> BatteryStepOutput {
         let dt_s = f64::from(input.dt_s.max(1));
-        // B.1.6: internal sub-stepping at <= 5 s, ceil(dt/5) sub-steps.
+        // Internal sub-stepping at <= 5 s, ceil(dt/5) sub-steps.
         // Limits are computed at tick level; the sub-stepped integration
         // keeps per-sub-step SOC-window boundary checks exact.
         let n_sub = input.dt_s.max(1).div_ceil(MAX_SUB_STEP_S);
         let dt_sub_s = dt_s / f64::from(n_sub);
         let mut flags = BatteryFlags::default();
 
-        // 1. Ramp slew (B.2.7): the command slews toward the setpoint.
+        // 1. Ramp slew: the command slews toward the setpoint.
         let slew_w = self.ramp_w_per_s * dt_s;
         let mut p_w =
             self.p_ramp_w + (input.p_term_setpoint_w - self.p_ramp_w).clamp(-slew_w, slew_w);
 
-        // 2. Min on/off suppression (B.2.7): direction changes and stops
+        // 2. Min on/off suppression: direction changes and stops
         // are held until the integer tick timers expire.
         let min_on_ticks = (self.min_on_s / f64::from(input.dt_s.max(1))).ceil() as u64;
         let min_off_ticks = (self.min_off_s / f64::from(input.dt_s.max(1))).ceil() as u64;
@@ -403,8 +406,8 @@ impl BatteryUnit {
             };
         }
 
-        // 3. Dynamic power limits (B.2.4 sag, B.2.6 budget, B.4.4 derate,
-        // B.2.5 cold rules, chemistry discharge cutoff).
+        // 3. Dynamic power limits (Thevenin sag, peak budget, thermal
+        // derate, cold rules, chemistry discharge cutoff).
         let limits = self.dynamic_limits(input.t_amb_c, dt_s);
         let pre_clamp_w = p_w;
         if p_w > limits.discharge_w {
@@ -422,7 +425,7 @@ impl BatteryUnit {
             flags.charge_inhibited_cold = true;
         }
 
-        // 4. SOC window + reserve clamp (B.2.2/B.2.6): solve the largest
+        // 4. SOC window + reserve clamp: solve the largest
         // power whose energy this tick fits the remaining headroom.
         let pre_window_w = p_w;
         if p_w > 0.0 {
@@ -441,7 +444,7 @@ impl BatteryUnit {
         // 5. Integrate the SOC ODE (module-doc energy path), sub-stepped.
         let heat_w = self.integrate_soc(p_w, dt_s, dt_sub_s, n_sub, input.t_amb_c);
 
-        // 6. Peak-budget accumulator (B.2.6 exact update rule): throughput
+        // 6. Peak-budget accumulator (exact update rule): throughput
         // above the (derated) continuous rating discharges the budget;
         // anything at/below recharges it at a quarter of the
         // peak-continuous margin per second.
@@ -488,7 +491,7 @@ impl BatteryUnit {
     }
 
     /// Conversion efficiency at terminal power `p_w` (W) and cell
-    /// temperature: the registry curve value with the B.2.3 cold derate
+    /// temperature: the registry curve value with the cold derate
     /// (`1 - k_T * max(0, T_ref - T_cell)`) applied.
     fn conv_eta(&self, discharge: bool, p_w: f64, t_cell_c: f64) -> f64 {
         let curve = if discharge {
@@ -501,7 +504,7 @@ impl BatteryUnit {
 
     /// Stage 5 of [`Self::step`]: integrate the SOC ODE with separated
     /// charge/discharge efficiencies (module-doc energy path) over
-    /// `n_sub` sub-steps (B.1.6), update throughput counters, and return
+    /// `n_sub` sub-steps, update throughput counters, and return
     /// the conversion-heat power for the tick (W).
     fn integrate_soc(
         &mut self,
@@ -538,23 +541,24 @@ impl BatteryUnit {
     fn dynamic_limits(&self, t_cell_c: f64, dt_s: f64) -> DynamicLimits {
         let derate = chemistry::thermal_derate(t_cell_c);
         let continuous_derated_w = self.continuous_discharge_w * derate;
-        // B.2.6: continuous + remaining budget, capped at the peak rating.
+        // Peak budget: continuous + remaining budget, capped at the
+        // peak rating.
         let mut discharge_w =
             (continuous_derated_w + self.peak_budget_ws / dt_s).min(self.peak_discharge_w * derate);
-        // B.2.5: hard chemistry discharge cutoff (NMC -20 degC).
+        // Hard chemistry discharge cutoff (NMC -20 degC).
         if let Some(cut_c) = chemistry::discharge_cutoff_c(self.model.chemistry) {
             if t_cell_c < cut_c {
                 discharge_w = 0.0;
             }
         }
-        // B.2.4: Thevenin sag under the terminal-voltage cutoff.
+        // Thevenin sag under the terminal-voltage cutoff.
         if self.config.thevenin_enabled {
             let soc = self.soc();
             let r = chemistry::r_int(self.r_base_ohm, soc, 0.0, t_cell_c);
             let v = chemistry::v_oc(self.model.chemistry, soc);
             discharge_w = discharge_w.min(chemistry::thevenin_max_discharge_w(v, r, self.v_min_v));
         }
-        // B.2.5: cold charge-acceptance limit. LFP: fraction of the
+        // Cold charge-acceptance limit. LFP: fraction of the
         // charge rating (prohibited below 0 degC, linear recovery to
         // full at 10 degC). NMC/NCA: the C-RATE ceiling scales linearly
         // from 0.1 C at -10 degC to full at 10 degC (1 C in W is
@@ -680,7 +684,8 @@ impl BatteryUnit {
         self.e_stored_wh
     }
 
-    /// Current available capacity `Q_avail` (Wh). Constant in M1.
+    /// Current available capacity `Q_avail` (Wh). Constant in the current
+    /// engine (degradation tracking is planned future work).
     #[must_use]
     pub const fn usable_energy_wh(&self) -> f64 {
         self.q_avail_wh
@@ -710,8 +715,8 @@ impl BatteryUnit {
     }
 
     /// Standby/self-consumption draw (W) while energized, taken from the AC
-    /// side in metering (spec B.3.2). Derived from the registry
-    /// `self_discharge_frac_per_day` fold-in per Part A §5:
+    /// side in metering. Derived from the registry
+    /// `self_discharge_frac_per_day` fold-in:
     /// `frac_per_day * usable_energy_wh / 24 h`.
     #[must_use]
     pub const fn standby_power_w(&self) -> f64 {
@@ -742,7 +747,7 @@ impl BatteryUnit {
         self.model().chemistry
     }
 
-    /// Current device state (B.9.1 vocabulary).
+    /// Current device state (the shared telemetry vocabulary).
     #[must_use]
     pub const fn state(&self) -> DeviceState {
         self.state
@@ -877,8 +882,8 @@ mod tests {
 
     #[test]
     fn thevenin_sag_anchor_b11_unit_level() {
-        // B.11 thevenin_sag: PW3-shaped LFP unit at 5 % SOC and -5 degC
-        // delivers 40-60 % of nameplate continuous (11.5 kW).
+        // Thevenin-sag conformance anchor: PW3-shaped LFP unit at 5 % SOC
+        // and -5 degC delivers 40-60 % of nameplate continuous (11.5 kW).
         let model = pw3_like();
         let mut unit = BatteryUnit::new(&model, None, 0.05, 0.0, BatteryConfig::default()).unwrap();
         let out = unit.step(&input(11_500.0, -5.0));
@@ -897,7 +902,7 @@ mod tests {
 
     #[test]
     fn lfp_cold_charge_block_and_nmc_cutoff_b11() {
-        // B.11 lfp_cold_charge_block at the unit level.
+        // The LFP cold-charge-block anchor at the unit level.
         let lfp = pw3_like();
         // Below 0 degC: charge limit is exactly 0.
         let mut unit = BatteryUnit::new(&lfp, None, 0.5, 0.0, BatteryConfig::default()).unwrap();
@@ -925,9 +930,9 @@ mod tests {
         let out = nunit.step(&input(-11_500.0, -5.0));
         let cold = chemistry::cold_charge_factor(Chemistry::NMC, -5.0);
         assert!(cold > 0.0 && cold < 1.0);
-        // Charge limit = min(rating, 1 C x cold factor) x thermal derate
-        // (B.4.4): the cold rule scales the C-RATE, not the rating
-        // (B.2.5). 13.5 kWh usable -> 1 C = 13.5 kW.
+        // Charge limit = min(rating, 1 C x cold factor) x thermal derate:
+        // the cold rule scales the C-RATE, not the rating.
+        // 13.5 kWh usable -> 1 C = 13.5 kW.
         approx(
             -out.p_term_w,
             11_500.0_f64.min(13_500.0 * cold) * chemistry::thermal_derate(-5.0),
@@ -1022,7 +1027,7 @@ mod tests {
 
     #[test]
     fn energy_identity_matches_realized_power() {
-        // The exact C.7.2 identity from REALIZED terminal power:
+        // The exact energy identity from REALIZED terminal power:
         // delta_stored = chg * eta_chg * eta_coul - dis / eta_dis.
         let model = model_json(
             "test.identity",
@@ -1066,7 +1071,7 @@ mod tests {
     fn peak_budget_window_and_recovery() {
         // 10 kW continuous, 15 kW peak for 10 s: 10 s at peak, then the
         // clamp falls to continuous; the budget recovers at a quarter of
-        // the peak-continuous margin per second (B.2.6).
+        // the peak-continuous margin per second.
         let model = model_json(
             "test.peak",
             Chemistry::LFP,
@@ -1255,7 +1260,7 @@ mod tests {
         );
         let unit = BatteryUnit::new(&model, None, 0.5, 0.0, BatteryConfig::default()).unwrap();
         approx(unit.standby_power_w(), 0.002 * 13_500.0 / 24.0, 1e-12);
-        // Absent field: Part A §5 default 0.002/day.
+        // Absent field: the catalog default of 0.002/day.
         let mut bare = model.clone();
         bare.self_discharge_frac_per_day = None;
         let unit = BatteryUnit::new(&bare, None, 0.5, 0.0, BatteryConfig::default()).unwrap();
@@ -1338,7 +1343,8 @@ mod tests {
 
     #[test]
     fn sub_stepped_large_dt_matches_summed_small_dt() {
-        // B.1.6: one 30 s tick integrates the same stored energy as six
+        // Sub-stepping: one 30 s tick integrates the same stored energy
+        // as six
         // 5 s ticks at constant setpoint (limits are tick-level, so only
         // rounding differs).
         let model = model_json(

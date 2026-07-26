@@ -1,14 +1,15 @@
-//! Truth telemetry records and meter counters (spec B.9.1; M1 scope).
+//! Truth telemetry records and meter counters.
 //!
-//! M1 emits the lossless per-tick `debug_truth` stream only (B.9.2):
-//! vendor noise classes, quantization, and rate decimation are F12 (M4).
-//! Meter points follow the A.3 topology diagrams: MAIN, PV_AC, BATT_AC,
-//! BACKUP_PANEL (backup-panel metering arrives with outages, F11/M4).
+//! The current engine emits the lossless per-tick `debug_truth` stream
+//! only: vendor noise classes, quantization, and rate decimation are
+//! planned future work. Meter points follow the per-home wiring
+//! topologies: MAIN, PV_AC, BATT_AC, BACKUP_PANEL (backup-panel metering
+//! arrives with outage simulation, also planned future work).
 
 use serde::{Deserialize, Serialize};
 
-/// Bidirectional energy meter: exact f64 accumulators (B.9.1; reported
-/// quantization is an M4 concern).
+/// Bidirectional energy meter: exact f64 accumulators (reported
+/// quantization is planned future work).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Meter {
     /// Cumulative import (Wh).
@@ -43,11 +44,11 @@ impl EnergyCounter {
     }
 }
 
-/// Per-home meter points (A.3 topology diagrams).
+/// Per-home meter points (matching the per-home wiring topologies).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HomeMeters {
     /// Service entrance, bidirectional. Sign convention for the
-    /// instantaneous value: positive = importing from grid (B.1.5 stage 7
+    /// instantaneous value: positive = importing from grid (the grid-balance
     /// formula `P_grid = P_load - P_pv_ac - P_inv_ac`).
     pub main: Meter,
     /// PV production meter (AC side), export-only.
@@ -55,11 +56,11 @@ pub struct HomeMeters {
     /// Battery system meter (AC side), bidirectional.
     pub batt_ac: Meter,
     /// Standby/self-consumption losses of battery system + controllers,
-    /// accounted at the AC side (B.3.2).
+    /// accounted at the AC side.
     pub standby_loss: EnergyCounter,
-    /// PV energy clipped at an inverter (B.3.3, B.7.4).
+    /// PV energy clipped at an inverter.
     pub pv_clipped: EnergyCounter,
-    /// Battery discharge clipped at a shared inverter (B.3.3).
+    /// Battery discharge clipped at a shared inverter.
     pub batt_clipped: EnergyCounter,
 }
 
@@ -76,7 +77,7 @@ pub struct UnitTruth {
     pub heat_w: f64,
 }
 
-/// One home's lossless per-tick truth record (B.9.2 `debug_truth`).
+/// One home's lossless per-tick truth record (the `debug_truth` stream).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HomeTruth {
     /// Engine tick index.

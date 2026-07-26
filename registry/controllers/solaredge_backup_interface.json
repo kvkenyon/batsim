@@ -5,7 +5,7 @@
   "vendor": "SolarEdge",
   "display_name": "SolarEdge Backup Interface",
   "provides_grid_forming": true,
-  "transfer_time_s": { "value": 0.5, "provenance": "estimated", "unit": "s", "note": "Part A §5 default" },
-  "reconnect_s": { "value": 300, "provenance": "estimated", "unit": "s", "note": "Part A §5 default reconnect delay after stable grid returns" },
+  "transfer_time_s": { "value": 0.5, "provenance": "estimated", "unit": "s", "note": "estimated default transfer time" },
+  "reconnect_s": { "value": 300, "provenance": "estimated", "unit": "s", "note": "estimated default reconnect delay after stable grid returns" },
   "supports_generator_input": false
 }

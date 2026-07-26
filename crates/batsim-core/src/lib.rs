@@ -1,15 +1,18 @@
-//! batsim-core: the Part B simulation engine.
+//! batsim-core: the deterministic home-energy simulation engine.
 //!
-//! A pure, synchronous, allocation-frugal library (spec C.2.2): no tokio, no
+//! A pure, synchronous, allocation-frugal library: no tokio, no
 //! network, no `std::time::{SystemTime, Instant}` in simulation paths. All
 //! time is virtual ([`time::SimClock`]); all randomness flows through the
-//! seeded ChaCha stream-splitting subsystem ([`rng`], spec B.1.4).
+//! seeded ChaCha stream-splitting subsystem ([`rng`]).
 //!
-//! M1 scope (spec 0.2): F1-F6, F9, F10, F15, F16 against the batsim-registry
-//! catalog. Thermal lumped model (F7), degradation (F8), outages (F11), and
-//! vendor telemetry noise classes (F12) are M4 and are deliberately absent;
-//! where B.2/B.4 physics needs a cell temperature, the ambient feed stands
-//! in directly.
+//! Current scope: the engine and tick loop, the determinism gate, the
+//! split-efficiency SOC model, Thevenin voltage sag, chemistry modules,
+//! the inverter conversion model, load synthesis, the PV model, dispatch,
+//! and coupling-aware topology routing, against the batsim-registry
+//! catalog. A lumped thermal model, degradation tracking, outages, and
+//! vendor telemetry noise classes are planned future work and are
+//! deliberately absent; where the battery and thermal physics need a cell
+//! temperature, the ambient feed stands in directly.
 
 pub mod battery;
 pub mod chemistry;

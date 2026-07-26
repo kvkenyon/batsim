@@ -1,23 +1,22 @@
-//! Typed serde targets for the Part A registry JSON schemas (spec §4).
+//! Typed serde targets for the device catalog JSON schemas.
 //!
 //! Field names and shapes mirror the JSON schema documents verbatim
 //! (snake_case, draft 2020-12). Every numeric or categorical catalog value
 //! carries a [`Provenance`] marker; unknown values are omitted (`Option`)
-//! rather than invented (spec Part A, provenance convention).
+//! rather than invented.
 //!
-//! Units in this layer follow Part A §1.4: energy kWh, power kW,
-//! temperature °C, durations seconds, efficiencies fractions in `[0, 1]`.
+//! Catalog units: energy kWh, power kW, temperature °C, durations seconds,
+//! efficiencies fractions in `[0, 1]`.
 //! Conversion to the engine's SI watts/watt-hours happens in batsim-core.
 
 use serde::{Deserialize, Serialize};
 
-/// Current schema version accepted for catalog entries (spec §4.2–4.4
-/// `schema_version` const).
+/// Current schema version accepted for catalog entries; entry files must
+/// declare this exact string in `schema_version`.
 pub const SCHEMA_VERSION: &str = "1.0.0";
 
-/// Provenance marker required on every catalog value (spec Part A,
-/// normative convention). `estimated` values MUST NOT be silently promoted
-/// to `spec`.
+/// Provenance marker required on every catalog value. `estimated` values
+/// MUST NOT be silently promoted to `spec`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provenance {
@@ -28,7 +27,7 @@ pub enum Provenance {
 }
 
 /// A number with provenance, optional unit label, and optional note
-/// (`annotatedNumber`, spec §4.1).
+/// (the `annotatedNumber` schema shape).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnnotatedNumber {
@@ -68,7 +67,7 @@ impl AnnotatedNumber {
     }
 }
 
-/// One point of a piecewise efficiency curve (`x_kw` ascending, spec §4.1).
+/// One point of a piecewise efficiency curve (`x_kw` ascending).
 ///
 /// The x-axis is kW at the device's terminal boundary: AC-side for
 /// AC-coupled integrated devices, DC-bus-side for DC-coupled hybrid packs
@@ -83,7 +82,7 @@ pub struct EfficiencyPoint {
 }
 
 /// Piecewise-linear efficiency curve; linear interpolation between points,
-/// clamped (not extrapolated) outside the sampled range (spec §4.1).
+/// clamped (not extrapolated) outside the sampled range.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EfficiencyCurve {
@@ -127,7 +126,7 @@ impl EfficiencyCurve {
     }
 }
 
-/// Cell chemistry (spec §4.1). Selects the Part B chemistry behavior module.
+/// Cell chemistry. Selects the engine's chemistry behavior module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Chemistry {
     /// Lithium iron phosphate: flat OCV, 0 °C charge block, long cycle life.
@@ -138,8 +137,9 @@ pub enum Chemistry {
     NCA,
 }
 
-/// Coupling topology (spec §4.1). Single-valued per entry; the sonnen
-/// Batterie 10 ships as two entries (`_ac` / `_hybrid`) per Part A §5.
+/// Coupling topology. Single-valued per entry; the sonnen
+/// Batterie 10 ships as two entries (`_ac` / `_hybrid`) to cover both
+/// variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Coupling {
     /// AC-coupled with integrated battery inverter (PW2, ecoLinx, Core+).
@@ -150,7 +150,7 @@ pub enum Coupling {
     MicroinverterBased,
 }
 
-/// Operating temperature range in °C (spec §4.1).
+/// Operating temperature range in °C.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TemperatureRange {
@@ -165,8 +165,8 @@ pub struct TemperatureRange {
     pub provenance: Provenance,
 }
 
-/// Warranty terms; every present field carries provenance (spec §4.1).
-/// Telemetry-only in M1: tracked, never enforced (Part A §5).
+/// Warranty terms; every present field carries provenance.
+/// Tracked but never enforced by the engine.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Warranty {
@@ -184,7 +184,7 @@ pub struct Warranty {
     pub capacity_retention_pct: Option<AnnotatedNumber>,
 }
 
-/// Vendor API family to mimic (spec §4.1 `vendorApi.family`).
+/// Vendor API family to mimic (the `vendorApi.family` field).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VendorApiFamily {
@@ -206,7 +206,7 @@ pub enum VendorApiFamily {
     Generic,
 }
 
-/// Vendor API authentication style (spec §4.1).
+/// Vendor API authentication style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthStyle {
@@ -224,7 +224,7 @@ pub enum AuthStyle {
     None,
 }
 
-/// Purpose of a mimicked vendor endpoint (spec §4.1).
+/// Purpose of a mimicked vendor endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EndpointPurpose {
@@ -252,8 +252,8 @@ pub struct VendorEndpoint {
     pub purpose: EndpointPurpose,
 }
 
-/// Vendor-API mimicry metadata (spec §4.1, §4.5). The only Part-A input to
-/// the (M2+) vendor adapter layer.
+/// Vendor-API mimicry metadata. The only catalog input to the vendor
+/// adapter layer planned for the HTTP API.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VendorApi {
@@ -270,7 +270,7 @@ pub struct VendorApi {
     pub provenance: Provenance,
 }
 
-/// Usable SOC window of a battery (spec §4.2).
+/// Usable SOC window of a battery.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SocWindow {
@@ -285,8 +285,8 @@ pub struct SocWindow {
     pub provenance: Provenance,
 }
 
-/// Ramp-rate declaration (spec §4.2). Rarely published; catalog carries
-/// estimated full-swing-in-1s values per Part A §5 default.
+/// Ramp-rate declaration. Rarely published; the catalog carries
+/// estimated full-swing-in-1s values as the default.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RampRate {
@@ -299,7 +299,7 @@ pub struct RampRate {
     pub note: Option<String>,
 }
 
-/// Expansion-pack metadata (spec §4.2). PW3: up to 3 packs, energy only.
+/// Expansion-pack metadata. PW3: up to 3 packs, energy only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Expansion {
@@ -314,7 +314,7 @@ pub struct Expansion {
     pub packs_add_power: Option<bool>,
 }
 
-/// Cooling system type (spec §4.2, B.4.3).
+/// Cooling system type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Cooling {
@@ -328,9 +328,9 @@ pub enum Cooling {
     Unknown,
 }
 
-/// BatteryModel registry entry (spec §4.2). All power values are AC-side at
+/// BatteryModel registry entry. All power values are AC-side at
 /// the device boundary unless the coupling is DC-hybrid, in which case they
-/// are DC-bus-side (Part A §1.4, §3.3).
+/// are DC-bus-side.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BatteryModel {
@@ -401,9 +401,9 @@ pub struct BatteryModel {
     /// Cooling system type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cooling: Option<Cooling>,
-    /// Ramp rate (estimated everywhere in the catalog, per Part A §5).
+    /// Ramp rate (estimated everywhere in the catalog).
     pub ramp_rate: RampRate,
-    /// Self-discharge fraction per day; per Part A §5 this also folds in
+    /// Self-discharge fraction per day; this also folds in
     /// idle/standby draw (a later schema revision may split these).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub self_discharge_frac_per_day: Option<AnnotatedNumber>,
@@ -411,7 +411,7 @@ pub struct BatteryModel {
     pub vendor_api: VendorApi,
 }
 
-/// Inverter topology classification (spec §4.3).
+/// Inverter topology classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InverterTopology {
     /// Shared hybrid inverter with battery DC bus and PV MPPTs.
@@ -424,7 +424,7 @@ pub enum InverterTopology {
     BatteryIntegrated,
 }
 
-/// InverterModel registry entry (spec §4.3).
+/// InverterModel registry entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InverterModel {
@@ -476,7 +476,7 @@ const fn default_true() -> bool {
 }
 
 /// Frequency-shift PV curtailment (Watt-Hz droop) declaration owned by the
-/// controller entry (spec §3.4; default span estimated per Part A §5).
+/// controller entry; the default span is estimated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CurtailmentCurve {
@@ -490,10 +490,10 @@ pub struct CurtailmentCurve {
 
 /// System controller / gateway / transfer device registry entry.
 ///
-/// The controller owns islanding mechanics (spec §3.4): transfer time,
+/// The controller owns islanding mechanics: transfer time,
 /// reconnect delay, frequency-shift PV curtailment, generator interlock.
-/// The spec's Part A §4 does not publish a controller schema; this shape is
-/// the minimal faithful declaration of §3.4/B.3.6 controller behavior.
+/// No catalog JSON schema document covers controllers; this shape is the
+/// minimal faithful declaration of controller islanding behavior.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ControllerModel {
@@ -509,7 +509,7 @@ pub struct ControllerModel {
     pub display_name: String,
     /// Whether this controller forms an islanded microgrid.
     pub provides_grid_forming: bool,
-    /// Transfer time on grid loss (Part A §5 estimated defaults:
+    /// Transfer time on grid loss (estimated defaults:
     /// Tesla Gateway 0.1 s, IQ System Controller 1.0 s, SolarEdge 0.5 s).
     pub transfer_time_s: AnnotatedNumber,
     /// Reconnect delay after stable grid returns (default 300 s).
@@ -523,7 +523,7 @@ pub struct ControllerModel {
     /// Maximum continuous backup-path power through this controller.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_backup_power_kw: Option<AnnotatedNumber>,
-    /// Whether sunlight (PV-only) black-start is supported (B.8.3).
+    /// Whether sunlight (PV-only) black-start is supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pv_blackstart: Option<bool>,
     /// Controller standby draw (gateway/controller vampire load).
@@ -536,7 +536,8 @@ pub struct ControllerModel {
 
 /// PV preset registry entry: a pre-canned residential array description
 /// used when a scenario references a preset instead of inline geometry
-/// (spec §1.1 `pv_presets/`, §3.1 PV array row).
+/// (the `pv_presets/` catalog directory, consumed by the PV array row of a
+/// HomeSystem document).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PvPreset {
@@ -570,7 +571,7 @@ const fn default_dc_ac_ratio() -> f64 {
     1.2
 }
 
-/// Entry kinds under the `registry/` tree (spec §1.1 layout).
+/// Entry kinds under the `registry/` tree, by directory layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EntryKind {
     /// `batteries/*.json`
@@ -662,7 +663,7 @@ impl From<EntryKind> for EntryKindSerde {
     }
 }
 
-/// `catalog.json` manifest (spec §1.1–1.2, §4.6).
+/// `catalog.json` manifest.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CatalogManifest {
@@ -674,7 +675,7 @@ pub struct CatalogManifest {
     pub entries: Vec<CatalogEntry>,
     /// Integrity hash: SHA-256 over the concatenation (in lexicographic
     /// path order) of each entry file's SHA-256 digest bytes, hashed again
-    /// (spec Part A §5, normative default).
+    /// (the normative default).
     pub catalog_sha256: String,
 }
 

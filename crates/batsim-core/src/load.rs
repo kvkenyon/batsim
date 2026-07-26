@@ -1,6 +1,6 @@
-//! Home load profile synthesis (spec B.6; F9).
+//! Home load profile synthesis.
 //!
-//! Per-home, per-tick (stage 1 of B.1.5):
+//! Per-home, per-tick (the load stage of the per-tick pipeline):
 //!
 //! ```text
 //! P_load(t) = sum_enduses [ S_e(dow, hour, season, zone) * scale_e(archetype) ]
@@ -11,35 +11,35 @@
 //! ```
 //!
 //! All stochastic draws come from the `LoadNoise` per-tick substream and
-//! one-time `LoadPhase` init draws (spec B.1.4). State needed across ticks
+//! one-time `LoadPhase` init draws (see [`crate::rng`]). State needed across ticks
 //! (AR(1) value, active appliance events, HVAC cycle phase, EV session)
 //! lives in the [`LoadModel`] struct, not in RNG state.
 //!
-//! # Data provenance (spec B.6.2)
+//! # Data provenance
 //!
 //! The shape tables in this module are synthetic engineering estimates
 //! calibrated to publicly known Texas residential magnitudes (RECS annual
 //! totals, ERCOT seasonal peak timing). They are placeholders for the
-//! ResStock/Pecan Street extraction pipeline (B.6.2 SHOULD) and are
-//! recorded as such in `assets/DATA_SOURCES.md`. The M1 exit criteria do
-//! not include the RECS/KS validation tests (M2+).
+//! ResStock/Pecan Street extraction pipeline and are
+//! recorded as such in `assets/DATA_SOURCES.md`. The RECS/KS validation
+//! tests arrive with the planned scenario pipeline.
 //!
-//! # M1 model choices (documented estimates)
+//! # Current model choices (documented estimates)
 //!
 //! - **Shape tables**: average kW of a reference home (2400 sqft, 2.8
 //!   occupants, CentralAC, Post2000, TX_Central) per end use, indexed by
 //!   day-type x season x hour-of-day, linearly interpolated within the
-//!   hour and held constant within each 1-min block (B.6.3 native 1-min
+//!   hour and held constant within each 1-min block (native 1-min
 //!   resolution). End uses: hvac, water_heat, plug (background
 //!   appliances/standby — discrete spikes live in `R_app`), lighting,
 //!   pool (schedule window), plus the EV session model. Zone enters
-//!   through the HVAC climate factor only (M1 simplification, recorded
+//!   through the HVAC climate factor only (a simplification, recorded
 //!   in DATA_SOURCES.md).
-//! - **Scaling laws** (B.6.3 exactly): HVAC ∝ sqft x climate factor x
+//! - **Scaling laws**: HVAC ∝ sqft x climate factor x
 //!   vintage factor; water heat ∝ occupancy; plug/lighting ∝
 //!   sqft^0.7 x occupancy^0.5.
 //! - **Civil time**: pure integer math at fixed UTC-6 (no DST, no chrono,
-//!   no wall clock — B.1.1). America/Chicago DST is ignored; Texas CDT ~=
+//!   no wall clock). America/Chicago DST is ignored; Texas CDT ~=
 //!   CST for load-shape purposes (documented simplification).
 //! - **RNG discipline**: every `Min1`-mode tick draws exactly five values
 //!   from the per-tick substream in fixed order (arrival, signature,
@@ -56,21 +56,21 @@ use crate::math;
 use crate::pv::{civil_local, normal_from_uniforms, Season};
 use crate::rng::{self, RngPurpose};
 
-/// HVAC equipment class (B.6.1).
+/// HVAC equipment class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HvacType {
     /// Central air conditioner (resistance or gas backup heat in winter;
-    /// the M1 winter shape covers whatever electric share exists).
+    /// the current winter shape covers whatever electric share exists).
     CentralAC,
-    /// Heat pump (aux strip heat below the ~2 C balance point, B.6.3).
+    /// Heat pump (aux strip heat below the ~2 C balance point).
     HeatPump,
     /// Window units (partial-home coverage factor).
     WindowUnits,
-    /// No electric HVAC (rare in TX, B.6.1).
+    /// No electric HVAC (rare in TX).
     None,
 }
 
-/// Water heater class (B.6.1).
+/// Water heater class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WaterHeat {
     /// Electric resistance tank.
@@ -81,7 +81,7 @@ pub enum WaterHeat {
     Gas,
 }
 
-/// Texas climate zones (B.6.1).
+/// Texas climate zones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TxClimateZone {
     /// Houston — hot-humid.
@@ -94,7 +94,7 @@ pub enum TxClimateZone {
     West,
 }
 
-/// Construction vintage (B.6.1).
+/// Construction vintage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Vintage {
     /// Pre-1980 (leaky envelope, old equipment).
@@ -105,20 +105,19 @@ pub enum Vintage {
     Post2000,
 }
 
-/// EV configuration (B.6.1): the EV is a controllable load only; V2X is
-/// explicitly out of scope (Part A §5).
+/// EV configuration: the EV is a controllable load only; V2X is
+/// explicitly out of scope for the device catalog.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct EvConfig {
     /// Battery capacity (kWh; bounds the session energy implicitly).
     pub battery_kwh: f64,
-    /// Miles driven per day (session energy = miles x 0.28 kWh/mile,
-    /// B.6.3).
+    /// Miles driven per day (session energy = miles x 0.28 kWh/mile).
     pub daily_miles: f64,
-    /// Home charge power (kW, 3.3-11.5 per B.6.3).
+    /// Home charge power (kW, 3.3-11.5).
     pub home_charge_kw: f64,
 }
 
-/// Load generator resolution (spec B.6.3). `Min15` disables intra-minute
+/// Load generator resolution. `Min15` disables intra-minute
 /// stochastic layers for fast fleet screening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LoadResolution {
@@ -128,10 +127,10 @@ pub enum LoadResolution {
     Min15,
 }
 
-/// Static archetype configuration for one home's load model (B.6.1).
+/// Static archetype configuration for one home's load model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadConfig {
-    /// Conditioned floor area (sqft; 800..6000 per B.6.1).
+    /// Conditioned floor area (sqft; 800..6000).
     pub sqft: u32,
     /// HVAC equipment class.
     pub hvac: HvacType,
@@ -147,7 +146,7 @@ pub struct LoadConfig {
     pub climate_zone: TxClimateZone,
     /// Construction vintage.
     pub vintage: Vintage,
-    /// Generator resolution (B.6.3).
+    /// Generator resolution.
     pub resolution: LoadResolution,
 }
 
@@ -156,8 +155,8 @@ const REF_SQFT: f64 = 2400.0;
 /// Reference-home occupancy for the shape tables (persons).
 const REF_OCC: f64 = 2.8;
 
-/// HVAC climate factors `(cooling, heating)` per zone (B.6.3 climate
-/// factor; fitted-order estimates: Gulf humidity raises cooling and
+/// HVAC climate factors `(cooling, heating)` per zone (fitted-order
+/// estimates: Gulf humidity raises cooling and
 /// milds winters, Panhandle reverses, West dust-belt is hot-dry with
 /// cold desert nights).
 fn climate_factors(zone: TxClimateZone) -> (f64, f64) {
@@ -169,7 +168,7 @@ fn climate_factors(zone: TxClimateZone) -> (f64, f64) {
     }
 }
 
-/// HVAC vintage efficiency factor (B.6.3): envelope + equipment.
+/// HVAC vintage efficiency factor: envelope + equipment.
 fn vintage_factor(vintage: Vintage) -> f64 {
     match vintage {
         Vintage::Pre1980 => 1.25,
@@ -192,7 +191,7 @@ fn hvac_type_factor(hvac: HvacType) -> f64 {
 
 /// Compressor rated power (kW) of the reference 2400-sqft home by HVAC
 /// type; the duty cycle converts shape-table average power into
-/// on/off cycling at this rating (B.6.3 hysteresis cycling).
+/// on/off cycling at this rating (hysteresis cycling).
 fn hvac_rated_kw(hvac: HvacType) -> f64 {
     match hvac {
         HvacType::CentralAC => 3.4,
@@ -234,8 +233,7 @@ struct ShapeSet {
 
 impl ShapeSet {
     /// Interpolated table value (kW) at (season, weekend?, hour, minute);
-    /// linear between adjacent hourly nodes (B.6.3 15-min-resolution
-    /// lookup with linear interpolation; hour-of-day authoring grid).
+    /// linear between adjacent hourly nodes (hour-of-day authoring grid).
     fn value(&self, season: Season, weekend: bool, hour: usize, minute: usize) -> f64 {
         let rows = if weekend {
             &self.weekend
@@ -256,7 +254,7 @@ impl ShapeSet {
 
 /// HVAC shape (kW avg incl. duty cycling): summer Central-Texas cooling
 /// runs through the night (27 C+ overnight lows), peaks 16:00 with the
-/// ERCOT 4CP window (B.6.3 peak-coincidence target); winter has the
+/// ERCOT 4CP window (the peak-coincidence target); winter has the
 /// morning resistance-heat ramp; shoulder is mild.
 const HVAC_SHAPES: ShapeSet = ShapeSet {
     weekday: [
@@ -337,7 +335,7 @@ const PLUG_SHAPES: ShapeSet = ShapeSet {
     ],
 };
 
-/// Plug weekday base row (season-independent in the M1 estimates).
+/// Plug weekday base row (season-independent in the current estimates).
 const PLUG_WEEKDAY: [f64; 24] = [
     0.130, 0.120, 0.115, 0.110, 0.110, 0.120, 0.145, 0.170, 0.170, 0.150, 0.140, 0.145, 0.150,
     0.150, 0.150, 0.155, 0.170, 0.185, 0.210, 0.230, 0.230, 0.205, 0.175, 0.150,
@@ -391,7 +389,7 @@ const POOL_WINTER: [f64; 24] = [
 ];
 
 /// Poisson arrival rate (events/hour at reference occupancy) for the
-/// appliance point process `R_app` (B.6.3): evening-cooking peak,
+/// appliance point process `R_app`: evening-cooking peak,
 /// morning routine bump, quiet overnight. Weekend row scales up 15 %
 /// (occupants home all day).
 const ARRIVAL_WEEKDAY: [f64; 24] = [
@@ -399,8 +397,9 @@ const ARRIVAL_WEEKDAY: [f64; 24] = [
     0.40, 0.55, 0.70, 0.77, 0.73, 0.59, 0.40, 0.20,
 ];
 
-/// Appliance signature table (B.6.3: fixed (power, duration) signatures
-/// fitted to Pecan Street circuit data in M2; M1 synthetic estimates):
+/// Appliance signature table (fixed (power, duration) signatures;
+/// synthetic estimates - fitting to Pecan Street circuit data is
+/// planned future work):
 /// `(power_w, duration_min_lo, duration_min_hi, weight)`.
 const SIGNATURES: [(f64, f64, f64, f64); 12] = [
     (1200.0, 1.0, 4.0, 20.0),  // microwave
@@ -417,25 +416,25 @@ const SIGNATURES: [(f64, f64, f64, f64); 12] = [
     (4500.0, 10.0, 25.0, 3.0), // oven broil + range (big cook)
 ];
 
-/// Nominal HVAC cycle period (s); the per-home draw jitters it +/-10 %
-/// (B.6.3). 18 min is a plausible Texas compressor cycle at moderate
+/// Nominal HVAC cycle period (s); the per-home draw jitters it +/-10 %.
+/// 18 min is a plausible Texas compressor cycle at moderate
 /// duty.
 const HVAC_PERIOD_S: f64 = 1080.0;
-/// AR(1) base-residual sigma (B.6.3: ~60 W, fitted to Pecan Street
-/// residuals in M2).
+/// AR(1) base-residual sigma (~60 W; fitting to Pecan Street
+/// residuals is planned future work).
 const BASE_SIGMA_W: f64 = 60.0;
-/// AR(1) base-residual correlation time (B.6.3: 5 min).
+/// AR(1) base-residual correlation time (5 min).
 const BASE_TAU_S: f64 = 300.0;
-/// Vampire floor: total load never drops below this (B.6.3, 0.05 kW).
+/// Vampire floor: total load never drops below this (0.05 kW).
 const VAMPIRE_FLOOR_W: f64 = 50.0;
 /// Min15 scaled-noise sigma (W): a single normal draw per 15-min block
 /// standing in for the aggregate of `R_app` + `R_base` at 15-min scale
-/// (B.6.3 "shape-table values plus scaled noise").
+/// (shape-table values plus scaled noise).
 const MIN15_SIGMA_W: f64 = 120.0;
-/// Cap on simultaneously active appliance events (B.10.3: fixed-capacity,
+/// Cap on simultaneously active appliance events (fixed-capacity,
 /// allocation-free per tick). Arrivals beyond the cap are dropped.
 const MAX_EVENTS: usize = 32;
-/// EV session energy per daily mile (Wh/mile; B.6.3: 0.28 kWh/mile).
+/// EV session energy per daily mile (Wh/mile; 0.28 kWh/mile).
 const EV_WH_PER_MILE: f64 = 280.0;
 /// Substream key namespace offsets: per-day EV schedule draws and per-
 /// block Min15 noise draws share the `LoadNoise` purpose tag but must not
@@ -461,14 +460,14 @@ pub struct LoadModel {
     home_entity: u64,
     /// HVAC cycle period after the one-time +/-10 % LoadPhase jitter (s).
     hvac_period_s: f64,
-    /// HVAC cycle phase offset (+/-5 min, LoadPhase; B.6.3 fleet
+    /// HVAC cycle phase offset (+/-5 min, LoadPhase; fleet
     /// desynchronization).
     hvac_phase_s: f64,
-    /// Critical-loads share of total load (B.6.4 default 25-35 %,
+    /// Critical-loads share of total load (default 25-35 %,
     /// per-home LoadPhase draw).
     critical_share: f64,
     /// Heat-pump aux-strip power (W; +3-5 kW step below the 2 C balance
-    /// point, per-home LoadPhase draw, B.6.3).
+    /// point, per-home LoadPhase draw).
     aux_heat_w: f64,
     /// Pool-schedule offset (+/-30 min, LoadPhase).
     pool_offset_s: f64,
@@ -490,8 +489,8 @@ pub struct LoadModel {
 
 impl LoadModel {
     /// Construct from static config, applying one-time seeded per-home
-    /// draws from the `LoadPhase` stream (B.6.3: HVAC cycle-length jitter
-    /// and phase offset; B.6.4: critical-share draw).
+    /// draws from the `LoadPhase` stream (HVAC cycle-length jitter
+    /// and phase offset, critical-share draw).
     #[must_use]
     pub fn new(config: &LoadConfig, master_seed: u64, home_entity: u64) -> Self {
         let mut phase = rng::substream(master_seed, home_entity, RngPurpose::LoadPhase, 0);
@@ -531,7 +530,7 @@ impl LoadModel {
         }
     }
 
-    /// Total home load power (W, >= 0) for one tick (stage 1 of B.1.5).
+    /// Total home load power (W, >= 0) for one tick (the load stage of the per-tick pipeline).
     ///
     /// `t_amb_c` is the scenario ambient feed at this tick (drives the
     /// HVAC duty multiplier and heat-pump aux mode). The evaluation is
@@ -590,13 +589,13 @@ impl LoadModel {
         let total = (water_w + plug_w + light_w + pool_w + hvac_or_mean + ev_w + app_w + base_w)
             .max(VAMPIRE_FLOOR_W);
         self.last_total_w = total;
-        // B.6.4 M1 model: constant per-home share of the last evaluation
-        // (documented; the scenario end-use share table is M2+).
+        // Current model: constant per-home share of the last evaluation
+        // (documented; a scenario end-use share table is planned future work).
         self.last_critical_w = total * self.critical_share;
         total
     }
 
-    /// Critical-loads power (W) at the last evaluation (B.6.4).
+    /// Critical-loads power (W) at the last evaluation.
     #[must_use]
     pub fn last_critical_w(&self) -> f64 {
         self.last_critical_w
@@ -627,7 +626,7 @@ impl LoadModel {
     }
 
     /// Duty fraction demanded by shape x temperature (and the heat-pump
-    /// aux mode, B.6.3: below the 2 C balance point the compressor runs
+    /// aux mode: below the 2 C balance point the compressor runs
     /// continuous and the aux strip steps in).
     fn hvac_duty(&self, hvac_avg_w: f64, season: Season, t_amb_c: f64) -> f64 {
         let rated_w = hvac_rated_kw(self.config.hvac) * 1000.0 * self.hvac_scale;
@@ -643,7 +642,7 @@ impl LoadModel {
         }
     }
 
-    /// HVAC power with thermostat duty cycling (B.6.3): a fixed per-home
+    /// HVAC power with thermostat duty cycling: a fixed per-home
     /// period grid (jittered +/-10 %, phase +/-5 min from LoadPhase) with
     /// on-time = duty x period models the hysteresis on/off pattern while
     /// keeping the cycle-average equal to the shape x temperature demand.
@@ -729,7 +728,7 @@ impl LoadModel {
     }
 
     /// Min15 scaled noise: one normal draw per 15-min block, held
-    /// constant within the block (B.6.3; stateless block-keyed stream).
+    /// constant within the block (stateless block-keyed stream).
     fn min15_noise_w(&self, unix_time_s: u64) -> f64 {
         let block = unix_time_s / 900;
         let mut stream = rng::substream(
@@ -743,7 +742,7 @@ impl LoadModel {
         MIN15_SIGMA_W * normal_from_uniforms(bm1, bm2)
     }
 
-    /// EV charging power (W): evening plug-in session per day (B.6.3).
+    /// EV charging power (W): evening plug-in session per day.
     /// Stateless: the day's schedule draws from a day-keyed substream, so
     /// the evaluation is identical no matter when the scenario starts.
     /// Sessions spill past midnight when the energy requires it (the
@@ -770,8 +769,8 @@ impl LoadModel {
                 DAY_KEY_OFFSET + day,
             );
             let u_plug: f64 = stream.gen();
-            // Plug-in ~18:00 +/- 2 h (B.6.3 weekday commuters; M1 uses the
-            // same schedule every day, documented simplification).
+            // Plug-in ~18:00 +/- 2 h (weekday commuters; the current model uses
+            // the same schedule every day, documented simplification).
             let plug_s = (16.0 + 4.0 * u_plug) * 3600.0;
             let local_s = if day_offset == 0 {
                 sec_of_day
@@ -877,8 +876,8 @@ mod tests {
     #[test]
     fn annual_energy_within_band() {
         // Full-year run at dt = 60 s for the reference home: the synthetic
-        // tables must land in the 8-16 MWh Texas band (B.6.3 / RECS
-        // quartile sanity, M1 estimate level).
+        // tables must land in the 8-16 MWh Texas band (RECS
+        // quartile sanity, estimate level).
         let mut m = LoadModel::new(&reference_config(), 8, 0x0007_7000);
         let mut wh = 0.0;
         let ticks_per_day = 1440u64;
@@ -935,7 +934,7 @@ mod tests {
 
     #[test]
     fn fleet_of_200_load_factor_in_band() {
-        // B.6.3 mandatory target: fleet-average load factor 0.45-0.6.
+        // Mandatory calibration target: fleet-average load factor 0.45-0.6.
         // 200 mixed-archetype homes over a July week (Mon-Sun), dt = 60 s.
         let mut fleet: Vec<LoadModel> = (0..200u64)
             .map(|i| {
@@ -1044,7 +1043,7 @@ mod tests {
     #[test]
     fn heat_pump_aux_heat_cold_snap() {
         // At -2 C ambient the heat pump's aux strip adds a 3-5 kW step
-        // (B.6.3) that CentralAC lacks; aligned streams isolate HVAC.
+        // that CentralAC lacks; aligned streams isolate HVAC.
         let mut hp_cfg = reference_config();
         hp_cfg.hvac = HvacType::HeatPump;
         let mut hp = LoadModel::new(&hp_cfg, 33, 0x0006_6000);
@@ -1118,7 +1117,7 @@ mod tests {
         let share = m.last_critical_w() / total;
         assert!(
             (0.25..=0.35).contains(&share),
-            "critical share {share} outside 25-35 % (B.6.4)"
+            "critical share {share} outside 25-35 %"
         );
     }
 }

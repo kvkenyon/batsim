@@ -1,16 +1,16 @@
-//! Chemistry modules (spec B.2.4, B.2.5; F5): per-chemistry OCV tables,
+//! Chemistry modules: per-chemistry OCV tables,
 //! internal-resistance modifiers, cold-temperature charge rules, coulombic
 //! efficiency, and the shared thermal-derate curve.
 //!
 //! LFP vs NMC differences are data + small pure functions here; the battery
 //! unit consumes them. All interpolation that touches LFP's flat region
-//! uses Fritsch-Carlson monotone cubic (B.2.4: linear interpolation at the
-//! knees is explicitly not acceptable).
+//! uses Fritsch-Carlson monotone cubic: linear interpolation at the
+//! knees is explicitly not acceptable.
 //!
 //! # Pack scaling
 //!
 //! The tables below are cell voltages scaled to a nominal pack voltage of
-//! 400 V (spec B.2.4): the per-chemistry column is
+//! 400 V: the per-chemistry column is
 //! `v_cell(soc) * (400 / v_cell_nominal)` with `v_cell_nominal = 3.2 V`
 //! (LFP) and `3.6 V` (NMC), so both tables sit on the same 400 V pack
 //! scale and chemistry differences live in the *shape* only.
@@ -27,7 +27,7 @@
 
 use batsim_registry::Chemistry;
 
-/// Nominal pack voltage the OCV tables are scaled to (V, spec B.2.4).
+/// Nominal pack voltage the OCV tables are scaled to (V).
 pub const NOMINAL_PACK_V: f64 = 400.0;
 
 /// SOC abscissa of the 17-point OCV tables: 0, 6.25, 12.5, ..., 100 %
@@ -36,7 +36,7 @@ pub const OCV_SOC_POINTS: usize = 17;
 
 /// LFP pack OCV table (V) at the 17 SOC abscissa points, 400 V pack scale.
 ///
-/// Shape requirements (spec B.2.4): a flat mid-range (<= 3 % swing over
+/// Shape requirements: a flat mid-range (<= 3 % swing over
 /// SOC 15-90 %, realized here as ~2.8 %) with distinct knees below 10 %
 /// and above 95 % SOC.
 pub const LFP_OCV_V: [f64; OCV_SOC_POINTS] = [
@@ -46,11 +46,12 @@ pub const LFP_OCV_V: [f64; OCV_SOC_POINTS] = [
 
 /// NMC pack OCV table (V) at the 17 SOC abscissa points, 400 V pack scale.
 ///
-/// Shape requirement (spec B.2.4): near-linear with a 15-20 % swing
+/// Shape requirement: near-linear with a 15-20 % swing
 /// across the window (realized as ~16.9 %). The 0 % point sits at 366 V
 /// (3.29 V/cell): NMC vendors float the usable floor well above the pack
 /// cutoff, which keeps the Thevenin model from throttling the last
-/// ~10 % of usable energy at 25 degC (B.11 rte_conformance).
+/// ~10 % of usable energy at 25 degC (the round-trip-efficiency
+/// conformance anchor for tesla.powerwall_3).
 pub const NMC_OCV_V: [f64; OCV_SOC_POINTS] = [
     366.00, 369.70, 373.50, 377.20, 380.90, 384.50, 388.00, 391.40, 394.80, 398.10, 401.30, 404.60,
     407.90, 411.30, 415.00, 421.00, 428.00,
@@ -123,7 +124,7 @@ fn fritsch_carlson_eval(xs: &[f64], ys: &[f64], x_eval: f64) -> f64 {
     h00 * ys[idx] + h10 * width * tangent[idx] + h01 * ys[idx + 1] + h11 * width * tangent[idx + 1]
 }
 
-/// Coulombic (charge) efficiency by chemistry (spec B.2.2 defaults:
+/// Coulombic (charge) efficiency by chemistry (defaults:
 /// LFP 0.99, NMC 0.98).
 #[must_use]
 pub const fn eta_coul(chemistry: Chemistry) -> f64 {
@@ -135,7 +136,7 @@ pub const fn eta_coul(chemistry: Chemistry) -> f64 {
 
 /// Open-circuit voltage at a SOC fraction and cell temperature, from the
 /// per-chemistry 17-point table with Fritsch-Carlson monotone cubic
-/// interpolation (spec B.2.4). Temperature shifts are applied by the
+/// interpolation. Temperature shifts are applied by the
 /// caller through `R_int`, not here.
 #[must_use]
 pub fn v_oc(chemistry: Chemistry, soc: f64) -> f64 {
@@ -145,7 +146,7 @@ pub fn v_oc(chemistry: Chemistry, soc: f64) -> f64 {
 
 /// Base internal resistance (ohm) of the nominal 400 V pack, derived from
 /// an estimated I^2R loss at the rated continuous pack power
-/// (spec B.2.4 "estimated where not published").
+/// (estimated where not published).
 ///
 /// # Calibration (chosen fraction, voltage-cutoff model)
 ///
@@ -153,10 +154,10 @@ pub fn v_oc(chemistry: Chemistry, soc: f64) -> f64 {
 /// at the rated continuous current, `I_rated = p_rated_w /
 /// NOMINAL_PACK_V`, giving `R_base = 0.077 * p_rated_w / I_rated^2`.
 /// The 7.7 % value is an estimated effective pack resistance (cells,
-/// contactors, harness) calibrated against the B.11 `thevenin_sag`
-/// anchor: the LFP reference device `tesla.powerwall_3` (11.5 kW
-/// continuous) at 5 % SOC and -5 degC delivers ~54 % of nameplate
-/// continuous (required band: 40-60 %).
+/// contactors, harness) calibrated against the Thevenin-sag
+/// conformance anchor for tesla.powerwall_3: the LFP reference device
+/// (11.5 kW continuous) at 5 % SOC and -5 degC delivers ~54 % of
+/// nameplate continuous (required band: 40-60 %).
 ///
 /// Voltage-cutoff model: [`thevenin_max_discharge_w`] enforces the
 /// terminal-voltage cutoff `V_term >= v_min` with `v_min =
@@ -166,7 +167,7 @@ pub fn v_oc(chemistry: Chemistry, soc: f64) -> f64 {
 #[must_use]
 pub fn base_internal_resistance(p_rated_w: f64) -> f64 {
     /// Estimated effective I^2R loss fraction at rated continuous power;
-    /// see the rustdoc above for calibration against B.11 `thevenin_sag`.
+    /// see the rustdoc above for the conformance-anchor calibration.
     const IR_LOSS_FRAC_AT_RATED: f64 = 0.077;
     if p_rated_w <= 0.0 {
         return 0.0;
@@ -176,13 +177,14 @@ pub fn base_internal_resistance(p_rated_w: f64) -> f64 {
 }
 
 /// Terminal-voltage cutoff as a fraction of the nominal pack voltage
-/// (spec B.2.4 estimated model; see [`base_internal_resistance`]).
+/// (estimated model; see [`base_internal_resistance`]).
 pub const V_MIN_CUTOFF_FRAC: f64 = 0.85;
 
-/// Internal resistance with SOC/temperature/aging modifiers (spec B.2.4):
+/// Internal resistance with SOC/temperature/aging modifiers:
 /// low-SOC rise `k_soc_low = 1.5`, high-SOC rise `k_soc_hi = 0.3`, cold
 /// rise `k_T_r = 0.06` per 10 degC below 25 degC, hot rise 0.5 %/degC
-/// above 35 degC, and aging growth `r_growth` (M1: always 0, F8 is M4).
+/// above 35 degC, and aging growth `r_growth` (currently always 0;
+/// degradation tracking is planned future work).
 ///
 /// Exact form:
 ///
@@ -196,13 +198,13 @@ pub const V_MIN_CUTOFF_FRAC: f64 = 0.85;
 /// ```
 #[must_use]
 pub fn r_int(r_base_ohm: f64, soc: f64, r_growth: f64, cell_c: f64) -> f64 {
-    /// Low-SOC resistance-rise coefficient (spec B.2.4).
+    /// Low-SOC resistance-rise coefficient.
     const K_SOC_LOW: f64 = 1.5;
-    /// High-SOC resistance-rise coefficient (spec B.2.4).
+    /// High-SOC resistance-rise coefficient.
     const K_SOC_HI: f64 = 0.3;
-    /// Cold resistance rise per 10 degC below 25 degC (spec B.2.4).
+    /// Cold resistance rise per 10 degC below 25 degC.
     const K_T_R: f64 = 0.06;
-    /// Hot resistance rise per degC above 35 degC (spec B.2.4).
+    /// Hot resistance rise per degC above 35 degC.
     const K_T_HOT_PER_C: f64 = 0.005;
     let soc_term = 1.0 + K_SOC_LOW * (0.15 - soc).max(0.0) / 0.15;
     let soc_hi_term = 1.0 + K_SOC_HI * (soc - 0.95).max(0.0) / 0.05;
@@ -211,8 +213,8 @@ pub fn r_int(r_base_ohm: f64, soc: f64, r_growth: f64, cell_c: f64) -> f64 {
     r_base_ohm * soc_term * soc_hi_term * cold_term * hot_term * (1.0 + r_growth)
 }
 
-/// Solve the Thevenin discharge current for a requested pack power
-/// (spec B.2.4). On negative discriminant the request is infeasible:
+/// Solve the Thevenin discharge current for a requested pack power.
+/// On negative discriminant the request is infeasible:
 /// returns the maximum-power-point current `v_oc / (2 r_int)` and sets
 /// `limited = true`.
 ///
@@ -238,8 +240,8 @@ pub fn thevenin_current_discharge(v_oc: f64, r_int: f64, p_req_w: f64) -> (f64, 
 
 /// Maximum deliverable pack power (W) under terminal-voltage cutoff:
 /// solves for the current where `V_term` hits `v_min_frac * v_nominal`,
-/// calibrated with [`base_internal_resistance`] so the B.11 `thevenin_sag`
-/// anchor holds.
+/// calibrated with [`base_internal_resistance`] so the Thevenin-sag
+/// conformance anchor for tesla.powerwall_3 holds.
 ///
 /// `V_term = V_oc - I*R >= v_min` gives `I_max = (V_oc - v_min) / R` and
 /// `P_max = I_max * v_min`; the quadratic voltage-drop bound is the active
@@ -261,20 +263,20 @@ pub fn thevenin_max_discharge_w(v_oc: f64, r_int: f64, v_min: f64) -> f64 {
     i_max * v_min
 }
 
-/// Cold conversion-efficiency derate factor (spec B.2.3): multiply the
+/// Cold conversion-efficiency derate factor: multiply the
 /// interpolated curve eta by `1 - k_T * max(0, T_ref - T_cell)`,
 /// k_T = 0.002 /degC, T_ref = 25 degC. Hot-side efficiency change is
-/// neglected (resistance growth handles it via B.2.4).
+/// neglected (resistance growth handles it via the `r_int` modifiers).
 #[must_use]
 pub fn cold_eta_factor(cell_c: f64) -> f64 {
-    /// Cold efficiency-derate coefficient per degC (spec B.2.3).
+    /// Cold efficiency-derate coefficient per degC.
     const K_T: f64 = 0.002;
-    /// Reference temperature (degC, spec B.2.3).
+    /// Reference temperature (degC).
     const T_REF: f64 = 25.0;
     (1.0 - K_T * (T_REF - cell_c).max(0.0)).max(0.0)
 }
 
-/// Charge-acceptance limit factor vs cell temperature (spec B.2.5).
+/// Charge-acceptance limit factor vs cell temperature.
 ///
 /// LFP: charge is prohibited below 0 degC, ramping linearly 0 -> full
 /// over 0-10 degC. NMC/NCA: derated to a 0.1 C floor at -10 degC, ramping
@@ -303,10 +305,10 @@ pub fn cold_charge_factor(chemistry: Chemistry, cell_c: f64) -> f64 {
     }
 }
 
-/// Hard discharge cutoff temperature (degC), if the chemistry has one
-/// (spec B.2.5): NMC/NCA discharge must stop below -20 degC; LFP relies
+/// Hard discharge cutoff temperature (degC), if the chemistry has one:
+/// NMC/NCA discharge must stop below -20 degC; LFP relies
 /// on the thermal derate reaching zero instead (it already hits 0 at
-/// -20 degC, B.4.4).
+/// -20 degC on the shared thermal-derate curve).
 #[must_use]
 pub const fn discharge_cutoff_c(chemistry: Chemistry) -> Option<f64> {
     match chemistry {
@@ -315,8 +317,8 @@ pub const fn discharge_cutoff_c(chemistry: Chemistry) -> Option<f64> {
     }
 }
 
-/// Shared thermal derate factor `d_T` vs cell temperature (spec B.4.4
-/// piecewise curve, exact):
+/// Shared thermal derate factor `d_T` vs cell temperature (piecewise
+/// curve, exact):
 ///
 /// ```text
 /// 0.0                        T_cell < -20
@@ -328,7 +330,8 @@ pub const fn discharge_cutoff_c(chemistry: Chemistry) -> Option<f64> {
 /// ```
 ///
 /// The overtemp latch / `ThermalTrip` event pair is state-machine business
-/// of the unit (M4), not this pure curve; M1 clamps continuously.
+/// of the unit (planned with the future thermal model), not this pure
+/// curve; the current engine clamps continuously.
 #[must_use]
 pub fn thermal_derate(cell_c: f64) -> f64 {
     if cell_c < -20.0 {
@@ -420,7 +423,8 @@ mod tests {
     #[test]
     fn thevenin_sag_anchor_b11() {
         // PW3-shaped LFP unit: 11.5 kW continuous, 5 % SOC, -5 degC must
-        // deliver 40-60 % of nameplate continuous (spec B.11 thevenin_sag).
+        // deliver 40-60 % of nameplate continuous (the Thevenin-sag
+        // conformance anchor).
         let p_cont_w = 11_500.0;
         let r_base = base_internal_resistance(p_cont_w);
         let r = r_int(r_base, 0.05, 0.0, -5.0);
@@ -460,7 +464,8 @@ mod tests {
 
     #[test]
     fn lfp_cold_charge_block_and_nmc_derate_b11() {
-        // LFP: charge power = 0 below 0 degC (spec B.11 lfp_cold_charge_block).
+        // LFP: charge power = 0 below 0 degC (the LFP cold-charge-block
+        // anchor).
         assert_eq!(cold_charge_factor(Chemistry::LFP, -5.0), 0.0);
         assert_eq!(cold_charge_factor(Chemistry::LFP, -0.001), 0.0);
         // Linear recovery 0 -> 10 degC.

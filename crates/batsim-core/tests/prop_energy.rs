@@ -1,5 +1,4 @@
-//! Energy-conservation and operating-window property tests (spec C.7.2;
-//! M1 exit criterion 2).
+//! Energy-conservation and operating-window property tests.
 //!
 //! Invariants defended, over random device parameters x random setpoint
 //! sequences:

@@ -21,42 +21,42 @@
       "kind": "battery",
       "model_id": "enphase.iq_battery_5p",
       "entry_version": "1.1.0",
-      "sha256": "fda05a4320d6b3359c46f5bab2b011bb18fddc38a4eaa788994e0af598c19971"
+      "sha256": "e464da33abccd9d42d701a81a5025be38d0bc626405e1449de990cb8a822dda9"
     },
     {
       "path": "batteries/solaredge_home_battery_400v.json",
       "kind": "battery",
       "model_id": "solaredge.home_battery_400v",
       "entry_version": "1.1.0",
-      "sha256": "630518c937b92388948304b898b5d5720a4711421afa6e15c7d32b152e40e2fe"
+      "sha256": "ad7aea593af185d61d3e443a095cba7ecfe4d907c325666a2089289128a8129d"
     },
     {
       "path": "batteries/sonnen_ecolinx.json",
       "kind": "battery",
       "model_id": "sonnen.ecolinx",
       "entry_version": "1.0.0",
-      "sha256": "943f2e45a658c7fb445f8cc03ab06a0916b665c2a22ef0e2d6741d43e09fefe2"
+      "sha256": "7bcdade2dc28d80c9b2ab7ee4b80159a770dc60391bae4802c69eaad9e63122f"
     },
     {
       "path": "batteries/sonnen_sonnenbatterie_10_ac.json",
       "kind": "battery",
       "model_id": "sonnen.sonnenbatterie_10_ac",
       "entry_version": "1.0.0",
-      "sha256": "4ae23531acbefe70b93e177078d2f060dcd0177c1da51bde6808fc7cb2aa238b"
+      "sha256": "9e040e3814776471ca98267cc6832a8b5211c64058af5d9e588383cff0d00067"
     },
     {
       "path": "batteries/sonnen_sonnenbatterie_10_hybrid.json",
       "kind": "battery",
       "model_id": "sonnen.sonnenbatterie_10_hybrid",
       "entry_version": "1.1.0",
-      "sha256": "53cc71445ba64eae6162e15f591e5664b0f71f54083ec4a5951b9f7d0ddd3953"
+      "sha256": "efe4d09efc694f79dfac287fb42f09d605b97491c6bc299cc94068f4be57c9b5"
     },
     {
       "path": "batteries/sonnen_sonnencore_plus.json",
       "kind": "battery",
       "model_id": "sonnen.sonnencore_plus",
       "entry_version": "1.0.0",
-      "sha256": "aadc30c6780c41f3af5145d8d1190c01c505f296c16849f1ade67bdfc87a0ec3"
+      "sha256": "50602210e6f60488bd41474388a8f44291cf2c0bae9195b67f73141d711ccdf3"
     },
     {
       "path": "batteries/tesla_powerwall_2.json",
@@ -70,7 +70,7 @@
       "kind": "battery",
       "model_id": "tesla.powerwall_3",
       "entry_version": "1.1.0",
-      "sha256": "670936d16ad17bb336ed8de3337f4bfd5bc089df9f4e8de1c66cab8b6b6b59eb"
+      "sha256": "aa5aabaf27b325296e3975eedbdb242e8d1e7a280eeddcf46bab1eb768348987"
     },
     {
       "path": "batteries/tesla_pw3_expansion_pack.json",
@@ -84,28 +84,28 @@
       "kind": "controller",
       "model_id": "enphase.iq_system_controller_2",
       "entry_version": "1.0.0",
-      "sha256": "d5b1d310087152b849bfc5a86e6036099515ff07a582786ea5822a8282b6a32a"
+      "sha256": "a4b9cc115b37f4915343ac26fec52999d65a27974e4590177320761e38d47068"
     },
     {
       "path": "controllers/solaredge_backup_interface.json",
       "kind": "controller",
       "model_id": "solaredge.backup_interface",
       "entry_version": "1.0.0",
-      "sha256": "1e7ed17a353eeb9def87f8429912562090a8b8a32f3a943a9fd7a1038d721805"
+      "sha256": "8e50c49b92332bc468e837792016f923193d28e29cda3a2825440f5548963774"
     },
     {
       "path": "controllers/sonnen_sonnenprotect.json",
       "kind": "controller",
       "model_id": "sonnen.sonnenprotect",
       "entry_version": "1.0.0",
-      "sha256": "f9d11bfe47f0ee30a4b8e9692d182dca0f2808824b9e1f8c2b31eb3da33f865e"
+      "sha256": "79c74ca158fc9224a70c5f4c3f31e71936ad68cc7c9dd17c1f5b7f73284d07fd"
     },
     {
       "path": "controllers/tesla_gateway_2.json",
       "kind": "controller",
       "model_id": "tesla.gateway_2",
       "entry_version": "1.0.0",
-      "sha256": "619638288491d0a43acc986bd51f44eb7dc679962bcbf99f00dd4d9080f52948"
+      "sha256": "4d8734e3a311d2c554997f01cb1051b88e2cf3595eeb1a95845b02371b9491c0"
     },
     {
       "path": "inverters/enphase_iq8d_micro.json",
@@ -150,5 +150,5 @@
       "sha256": "1ace56bbb1e11f27ade26afcbdfe16ff667362d28f6a6e25198385444e06e268"
     }
   ],
-  "catalog_sha256": "b2196d617b1524ba6f0ca4f625837cfbd4b279f3362c2f989d8912d36d8f5842"
+  "catalog_sha256": "846d3f115454c1b5df06dc02046c5cf2dfc6cfdbc107ea8e3c99f74a958f85b1"
 }

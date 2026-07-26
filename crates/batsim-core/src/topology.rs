@@ -1,17 +1,16 @@
-//! Coupling-aware device construction and energy-path routing (spec A.3,
-//! B.3.4; F16).
+//! Coupling-aware device construction and energy-path routing.
 //!
 //! Turns a validated [`SystemSpec`] into the live device set of a [`Home`].
 //! The routing rules the home tick executes (explicit loss points):
 //!
-//! - **AC-coupled** (A.3.2): PV DC -> PV inverter (L1) -> AC panel; battery
+//! - **AC-coupled**: PV DC -> PV inverter (L1) -> AC panel; battery
 //!   charge AC -> battery inverter (L2) -> pack; discharge pack -> battery
 //!   inverter (L3) -> AC. PV and battery reach the panel over parallel
 //!   paths; there is no shared inverter bottleneck.
-//! - **DC-coupled hybrid** (A.3.3): PV DC -> MPPT -> hybrid DC bus;
+//! - **DC-coupled hybrid**: PV DC -> MPPT -> hybrid DC bus;
 //!   PV->battery via the battery's DC-DC curve (L2', single inversion);
 //!   one DC->AC inversion (L3') at the hybrid inverter whose AC rating caps
-//!   PV + battery discharge combined (PV priority, B.3.3); grid charging
+//!   PV + battery discharge combined (PV priority); grid charging
 //!   remains a double conversion (AC -> hybrid -> DC-DC -> pack).
 
 use batsim_registry::{Coupling, Registry, SystemSpec};
@@ -23,8 +22,8 @@ use crate::load::{LoadConfig, LoadModel};
 use crate::pv::{PvArray, PvConfig, SubArray};
 use crate::rng;
 
-/// RNG slot assignments within a home (spec B.1.4 entity mapping; fixed,
-/// never reuse). Battery units occupy slots `1..=64`.
+/// RNG slot assignments within a home (entity mapping for the seeded
+/// RNG; fixed, never reuse). Battery units occupy slots `1..=64`.
 pub const SLOT_BATTERY_BASE: u64 = 1;
 /// PV array stream slot.
 pub const SLOT_PV: u64 = 0x100;
@@ -32,7 +31,7 @@ pub const SLOT_PV: u64 = 0x100;
 pub const SLOT_LOAD: u64 = 0x101;
 
 /// Site-level PV parameters that come from the scenario rather than the
-/// HomeSystem document (B.7.1: array geometry is home-scenario data).
+/// HomeSystem document (array geometry is home-scenario data).
 #[derive(Debug, Clone, Copy)]
 pub struct PvSiteConfig {
     /// Site latitude (deg).
@@ -41,7 +40,7 @@ pub struct PvSiteConfig {
     pub longitude_deg: f64,
     /// Fixed shading derate in [0, 0.3].
     pub shading_factor: f64,
-    /// Seeded cloud-variability overlay (B.7.5).
+    /// Seeded cloud-variability overlay.
     pub cloud_noise: bool,
 }
 
@@ -54,14 +53,14 @@ pub struct HomeBuildConfig {
     pub pv_site: Option<PvSiteConfig>,
     /// Battery behavior config.
     pub battery: BatteryConfig,
-    /// PV-first vs battery-first at a shared hybrid inverter (B.3.3).
+    /// PV-first vs battery-first at a shared hybrid inverter.
     pub pv_priority: bool,
 }
 
 /// The constructed device set of one home.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HomeDevices {
-    /// Battery units, one per physical unit (B.2.1), in declaration order.
+    /// Battery units, one per physical unit, in declaration order.
     pub batteries: Vec<BatteryUnit>,
     /// The shared hybrid inverter (DC-coupled systems; also carries PV when
     /// `pv_inverter_model_id` is null).
@@ -72,7 +71,7 @@ pub struct HomeDevices {
     pub pv: Option<PvArray>,
     /// The load model.
     pub load: LoadModel,
-    /// Summed controller standby draw (W; B.3.2).
+    /// Summed controller standby draw (W).
     pub controller_standby_w: f64,
     /// PV-priority at the shared inverter.
     pub pv_priority: bool,
@@ -81,13 +80,13 @@ pub struct HomeDevices {
     pub pv_ac_cap_w: Option<f64>,
 }
 
-/// Build the device set for one home from a validated system spec.
+/// Build the device set for one home from a validated [`SystemSpec`].
 ///
 /// `home_idx` is the home's stable index in the world arena; it keys all
-/// per-home RNG substreams (B.1.4).
+/// per-home RNG substreams.
 ///
 /// # Errors
-/// [`CoreError::InvalidSystem`] when the spec references models the
+/// [`CoreError::InvalidSystem`] when the [`SystemSpec`] references models the
 /// registry lacks (composition validation should have caught these;
 /// re-checked here), or PV site config is missing for a system with PV.
 pub fn build_devices(
@@ -113,7 +112,7 @@ pub fn build_devices(
             batsim_registry::types::InverterTopology::StringPVOnly
             | batsim_registry::types::InverterTopology::MicroinverterPV => &mut pv_inverter,
             batsim_registry::types::InverterTopology::BatteryIntegrated => {
-                // Folded into BatteryUnit terminal semantics (A.3.1).
+                // Folded into BatteryUnit terminal semantics (battery-integrated topology).
                 continue;
             }
         };
@@ -165,10 +164,10 @@ pub fn build_devices(
                 rng::entity_device(home_idx, SLOT_PV),
             );
             // The array's declared DC/AC ratio caps the PV path's AC
-            // output independently of the inverter nameplate (B.7.4).
+            // output independently of the inverter nameplate.
             pv_ac_cap_w = Some(pv_cfg.kw_dc / pv_cfg.dc_ac_ratio * 1000.0);
             // PV lands on the hybrid inverter's MPPTs when no explicit PV
-            // inverter is named (A.4.4); a named PV inverter must exist and
+            // inverter is named; a named PV inverter must exist and
             // wins over an `inverters[]`-declared PV-topology entry.
             if let Some(inv_id) = &pv_cfg.pv_inverter_model_id {
                 let named_already_built = pv_inverter
@@ -341,7 +340,7 @@ fn build_batteries(
             None
         };
         for _unit_idx in 0..bat_ref.quantity {
-            // Identical units; per-unit serials are an M2 concern.
+            // Identical units; per-unit serials are future work.
             batteries.push(BatteryUnit::new(
                 model,
                 pack,
@@ -355,7 +354,7 @@ fn build_batteries(
 }
 
 /// Whether a unit's terminal boundary is the AC panel (vs the hybrid DC
-/// bus). Drives which stage handles its conversion (B.3.4).
+/// bus). Drives which stage handles its conversion.
 #[must_use]
 pub const fn is_ac_terminal(coupling: Coupling) -> bool {
     matches!(coupling, Coupling::ACCoupled | Coupling::MicroinverterBased)

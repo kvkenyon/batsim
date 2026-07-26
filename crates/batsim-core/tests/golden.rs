@@ -1,11 +1,11 @@
-//! Golden SOC traces per device model (spec C.7.1; M1 exit criterion 1).
+//! Golden SOC traces per device model.
 //!
 //! For every catalog battery model: a fixed 48-hour scripted scenario
 //! (deterministic PV curve, load archetype, diurnal ambient, two dispatch
 //! commands) is stepped at dt = 1 s. The golden records per-minute SOC
 //! samples, final meter counters, and a SHA-256 of the full per-tick
-//! truth series — the hash makes per-tick equivalence exact, and the
-//! samples make drift human-reviewable (spec: SOC within 1e-4 of golden,
+//! truth series - the hash makes per-tick equivalence exact, and the
+//! samples make drift human-reviewable (SOC within 1e-4 of golden,
 //! cumulative energy within 1e-6 relative).
 //!
 //! Regenerate only via `INSTA_UPDATE=always cargo test -p batsim-core
