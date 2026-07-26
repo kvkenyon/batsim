@@ -43,7 +43,7 @@ pub enum RngPurpose {
 ///
 /// Home-level streams use `entity_home(home_idx)`; per-device streams use
 /// `entity_device(home_idx, slot)` with `slot` the device's stable index
-/// within the home (batteries 1.., PV 0x100, load 0x101, etc. — slot
+/// within the home (batteries 1.., PV 0x100, load 0x101, etc. - slot
 /// assignments are fixed at the call site and documented there).
 #[must_use]
 pub const fn entity_device(home_idx: u64, slot: u64) -> u64 {
@@ -72,7 +72,7 @@ pub fn hash64(master_seed: u64, entity_id: u64, purpose: RngPurpose, tick: u64) 
 /// Construct the ChaCha8 substream for one `(entity, purpose, tick)`.
 ///
 /// Seeding cost is tens of ns; callers construct streams per
-/// tick on the stack — no RNG state is ever serialized.
+/// tick on the stack - no RNG state is ever serialized.
 #[must_use]
 pub fn substream(master_seed: u64, entity_id: u64, purpose: RngPurpose, tick: u64) -> ChaCha8Rng {
     ChaCha8Rng::seed_from_u64(hash64(master_seed, entity_id, purpose, tick))

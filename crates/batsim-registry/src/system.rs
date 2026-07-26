@@ -1192,7 +1192,7 @@ mod tests {
     }
 
     /// Enphase IQ Battery 10: 12 x IQ8D microinverters, but continuous
-    /// 3.84 kW / peak 7.68 kW — BELOW the 12 x 0.64 = 7.68 kW ceiling.
+    /// 3.84 kW / peak 7.68 kW - BELOW the 12 x 0.64 = 7.68 kW ceiling.
     fn enphase_10() -> BatteryModel {
         let mut m = battery(
             "enphase.iq_battery_10",

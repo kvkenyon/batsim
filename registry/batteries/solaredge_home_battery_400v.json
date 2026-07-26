@@ -33,7 +33,7 @@
     ],
     "provenance": "estimated"
   },
-  "rte_pv_coupled": { "value": 0.945, "provenance": "spec", "unit": "frac", "note": "manufacturer claim for PV→battery→AC path; exceeds what the battery + Home Hub component curves reproduce — kept as published claim" },
+  "rte_pv_coupled": { "value": 0.945, "provenance": "spec", "unit": "frac", "note": "manufacturer claim for PV→battery→AC path; exceeds what the battery + Home Hub component curves reproduce - kept as published claim" },
   "rte_ac_coupled": { "value": 0.90, "provenance": "estimated", "unit": "frac", "note": "double-conversion grid-charge round trip; not published; component curves renormalized so eta_chg x eta_coul x eta_dis x eta_hyb^2 lands here at 0.5C (grid charge on a hybrid is a double conversion)" },
   "grid_forming_in_backup": true,
   "requires_controller_id": "solaredge.backup_interface",

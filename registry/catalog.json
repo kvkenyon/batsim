@@ -28,7 +28,7 @@
       "kind": "battery",
       "model_id": "solaredge.home_battery_400v",
       "entry_version": "1.1.0",
-      "sha256": "ad7aea593af185d61d3e443a095cba7ecfe4d907c325666a2089289128a8129d"
+      "sha256": "b8fad2ce6e91b0ad22a5b67150d027b3510123ff579d0615feaa8116f38122eb"
     },
     {
       "path": "batteries/sonnen_ecolinx.json",
@@ -49,7 +49,7 @@
       "kind": "battery",
       "model_id": "sonnen.sonnenbatterie_10_hybrid",
       "entry_version": "1.1.0",
-      "sha256": "efe4d09efc694f79dfac287fb42f09d605b97491c6bc299cc94068f4be57c9b5"
+      "sha256": "a5830a1ca96d0f00a011377eaf641a1bbcd1f98e17bbb51a2315009ea5bbd483"
     },
     {
       "path": "batteries/sonnen_sonnencore_plus.json",
@@ -150,5 +150,5 @@
       "sha256": "1ace56bbb1e11f27ade26afcbdfe16ff667362d28f6a6e25198385444e06e268"
     }
   ],
-  "catalog_sha256": "846d3f115454c1b5df06dc02046c5cf2dfc6cfdbc107ea8e3c99f74a958f85b1"
+  "catalog_sha256": "90334f893ab3ac7013d12a409aef0cb9a9218c10c552628dfc9fcdf088e5709f"
 }

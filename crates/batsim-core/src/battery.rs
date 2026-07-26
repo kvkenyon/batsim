@@ -65,7 +65,7 @@ pub struct BatteryStepInput {
     /// Timestep in seconds (engine `dt`).
     pub dt_s: u32,
     /// Requested terminal power (W; + discharge, - charge), after the
-    /// home's dispatch stage and ramp application upstream is NOT assumed —
+    /// home's dispatch stage and ramp application upstream is NOT assumed -
     /// the unit applies its own ramp/min-on-off internally.
     pub p_term_setpoint_w: f64,
     /// Ambient temperature seen by the pack (currently stands in for

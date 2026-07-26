@@ -21,7 +21,7 @@
 //!
 //! - **Solar position**: NOAA solar calculator series (geom. mean
 //!   longitude/anomaly, equation of center, apparent longitude, obliquity
-//!   correction, equation of time) — PSA/NOAA-class, accuracy <= 0.05 deg
+//!   correction, equation of time) - PSA/NOAA-class, accuracy <= 0.05 deg
 //!   for 1950-2050. Extraterrestrial irradiance `G_sc = 1367 W/m^2`
 //!   with the Spencer/Iqbal eccentricity-correction day-angle series. All
 //!   transcendentals route through the libm-backed [`crate::math`] module
@@ -342,7 +342,7 @@ impl SkyState {
     /// ~1.00-1.01 in every season. This is a hard structural requirement,
     /// not a cosmetic one: the multiplier is clamped to [0.2, 1.05],
     /// so the causal servo (see [`PvArray::dc_power_w`]) has only ~5 % of
-    /// upward correction room but effectively unlimited downward room —
+    /// upward correction room but effectively unlimited downward room -
     /// the raw process must therefore sit slightly ABOVE 1 on average,
     /// where every hour's correction is deliverable; a below-1 stationary
     /// mean makes cloudy-day hours mathematically unrecoverable
@@ -585,7 +585,7 @@ impl PvArray {
     /// scales DNI/DHI before transposition, so by linearity the noisy
     /// basis is exactly `m(t) * S(t)`. At the first tick of each local
     /// clock hour the smooth full-hour energy `A(T)` is trapezoid-
-    /// integrated from the deterministic feed (13 nodes at 5-min spacing —
+    /// integrated from the deterministic feed (13 nodes at 5-min spacing -
     /// exact for a smooth feed, and causal since the feed is a pure
     /// function of time). Per tick, with `B(t)` the noisy energy so far,
     /// `S_int(t)` the smooth energy so far, `mu_eff` the expected raw
@@ -617,8 +617,8 @@ impl PvArray {
     ///   `g *= clamp(A/B, 0.95, 1.05)` (bounded [0.85, 1.2]): an integral
     ///   controller folding the closed hour's residual into subsequent
     ///   ticks' normalization state. It absorbs the one systematic loss
-    ///   no in-hour scheme can fix — the flicker's asymmetric clipping
-    ///   at the 1.05 ceiling (~1 %) — without the target-inflation
+    ///   no in-hour scheme can fix - the flicker's asymmetric clipping
+    ///   at the 1.05 ceiling (~1 %) - without the target-inflation
     ///   ratchet a naive fold provably creates (measured: +7.5 %
     ///   undeliverable target inflation, -1.1 % run drift).
     ///

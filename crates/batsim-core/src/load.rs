@@ -31,7 +31,7 @@
 //!   day-type x season x hour-of-day, linearly interpolated within the
 //!   hour and held constant within each 1-min block (native 1-min
 //!   resolution). End uses: hvac, water_heat, plug (background
-//!   appliances/standby — discrete spikes live in `R_app`), lighting,
+//!   appliances/standby - discrete spikes live in `R_app`), lighting,
 //!   pool (schedule window), plus the EV session model. Zone enters
 //!   through the HVAC climate factor only (a simplification, recorded
 //!   in DATA_SOURCES.md).
@@ -84,13 +84,13 @@ pub enum WaterHeat {
 /// Texas climate zones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TxClimateZone {
-    /// Houston — hot-humid.
+    /// Houston - hot-humid.
     GulfCoast,
-    /// Austin / San Antonio / Dallas — hot, mixed.
+    /// Austin / San Antonio / Dallas - hot, mixed.
     Central,
-    /// Panhandle — colder winters.
+    /// Panhandle - colder winters.
     North,
-    /// El Paso / Midland — hot-dry.
+    /// El Paso / Midland - hot-dry.
     West,
 }
 
@@ -324,7 +324,7 @@ const WATER_WEEKEND: [f64; 24] = [
     0.27, 0.33, 0.40, 0.48, 0.52, 0.44, 0.32, 0.22,
 ];
 
-/// Plug/background shape (kW): fridge cycling, electronics, standby —
+/// Plug/background shape (kW): fridge cycling, electronics, standby -
 /// the smooth part of appliance load; discrete spikes are `R_app`'s job.
 const PLUG_SHAPES: ShapeSet = ShapeSet {
     weekday: [PLUG_WEEKDAY, PLUG_WEEKDAY, PLUG_WEEKDAY],
@@ -1065,7 +1065,7 @@ mod tests {
         // 15-min block the only variation is the deterministic shape
         // interpolation and HVAC duty-mean, so consecutive-tick jumps are
         // small; Min1 shows large jumps (HVAC duty cycling, appliance
-        // spikes) — the metric must be able to tell the two apart.
+        // spikes) - the metric must be able to tell the two apart.
         let mut cfg = reference_config();
         cfg.resolution = LoadResolution::Min15;
         let mut m = LoadModel::new(&cfg, 44, 0x0005_5001);
