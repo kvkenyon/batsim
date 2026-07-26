@@ -311,9 +311,12 @@ impl HomeSystem {
     ///   matching kind (batteries, inverters, controllers, PV inverter).
     /// - Quantities are >= 1; SOC/reserve fractions lie in `[0, 1]`;
     ///   each battery's initial SOC lies inside its model's SOC window.
-    /// - `backup_capable` requires exactly one present controller entry
-    ///   with `provides_grid_forming`, and every battery's
-    ///   `requires_controller_id` (when declared) present in `controllers[]`.
+    /// - `backup_capable` requires either exactly one present controller
+    ///   entry with `provides_grid_forming`, or, with no such controller,
+    ///   a self-forming fleet: at least one present battery, every one
+    ///   grid-forming in backup with an integrated inverter. Every
+    ///   battery's `requires_controller_id` (when declared) must be
+    ///   present in `controllers[]`.
     /// - DC-coupled hybrid batteries without an integrated inverter
     ///   intersect some present inverter's `compatible_battery_ids`.
     /// - Per battery model, unit count <= Σ `max_batteries × quantity`

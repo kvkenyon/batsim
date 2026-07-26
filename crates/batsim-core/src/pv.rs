@@ -22,9 +22,10 @@
 //!   longitude/anomaly, equation of center, apparent longitude, obliquity
 //!   correction, equation of time) — PSA/NOAA-class, accuracy <= 0.05 deg
 //!   for 1950-2050 (B.7.2). Extraterrestrial irradiance `G_sc = 1367 W/m^2`
-//!   with the Spencer/Iqbal eccentricity-correction day-angle series. Only
-//!   `std` `f64` transcendentals (B.10.1: no fast-math flags anywhere in
-//!   the workspace profile).
+//!   with the Spencer/Iqbal eccentricity-correction day-angle series. All
+//!   transcendentals route through the libm-backed [`crate::math`] module
+//!   for cross-platform bit-exactness (B.10.1: no fast-math flags
+//!   anywhere in the workspace profile).
 //! - **Clear sky**: Hottel (1976) beam transmittance model A (23 km
 //!   visibility standard atmosphere) at fixed 0.2 km site altitude, with
 //!   the Liu & Jordan (1960) diffuse transmittance relation and the
