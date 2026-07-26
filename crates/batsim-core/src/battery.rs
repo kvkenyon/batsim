@@ -249,4 +249,10 @@ impl BatteryUnit {
     pub fn reserve_frac(&self) -> f64 {
         todo!("implemented by physics task")
     }
+
+    /// Update the user backup-reserve floor (dispatch `SetReserve`).
+    pub fn set_reserve_frac(&mut self, frac: f64) {
+        let _ = frac;
+        todo!("implemented by physics task")
+    }
 }

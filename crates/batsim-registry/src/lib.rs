@@ -20,7 +20,9 @@ pub mod validate;
 
 pub use error::RegistryError;
 pub use load::Registry;
+pub use system::{HomeSystem, SystemSpec};
 pub use types::{
     AnnotatedNumber, BatteryModel, Chemistry, ControllerModel, Coupling, EfficiencyCurve,
-    EfficiencyPoint, InverterModel, Provenance, PvPreset, TemperatureRange, VendorApi, Warranty,
+    EfficiencyPoint, InverterModel, InverterTopology, Provenance, PvPreset, TemperatureRange,
+    VendorApi, Warranty,
 };

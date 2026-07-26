@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{RegistryError, Violation};
 use crate::load::Registry;
+use crate::types::{BatteryModel, ControllerModel, Coupling, InverterModel, InverterTopology};
 
 /// A battery line item in a HomeSystem document (spec §4.4).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -265,20 +266,42 @@ pub struct HomeSystem {
 
 /// A resolved, validated system: the composition-time output consumed by
 /// batsim-core at simulation-init (spec §3.1).
+///
+/// Beyond the four `total_*` aggregates required by spec §3.1, this struct
+/// carries resolved composition facts that batsim-core would otherwise have
+/// to re-derive: the grid-forming controller identity and the storage
+/// coupling classification.
 #[derive(Debug, Clone)]
 pub struct SystemSpec {
     /// The (validated) source document.
     pub system: HomeSystem,
-    /// Total usable battery energy across all units and packs, kWh.
+    /// Total usable battery energy across all units and packs, kWh:
+    /// `Σ quantity × (head usable + packs-per-unit × pack usable)`.
     pub total_usable_energy_kwh: f64,
     /// Total continuous discharge power at device boundaries, kW.
+    /// Expansion packs add energy only (spec §3.1), never power.
     pub total_discharge_power_kw: f64,
     /// Total continuous charge power, kW.
     pub total_charge_power_kw: f64,
     /// Computed backup-path continuous power:
-    /// `min(total battery continuous, total inverter backup rating)`
-    /// (spec §3.1). `None` when not backup-capable.
+    /// `min(total battery continuous, backup-path rating)` (spec §3.1).
+    /// `None` when not backup-capable.
+    ///
+    /// Backup-path rating resolution order (first present wins):
+    /// 1. Σ `max_backup_power_kw` over present controllers that declare it
+    ///    (gateway/transfer-device throughput cap);
+    /// 2. else Σ (`max_ac_output_kw_backup` else `rated_ac_output_kw`) over
+    ///    present explicit inverters (hybrid backup rating);
+    /// 3. else the batteries' own continuous discharge sum (covers
+    ///    integrated-inverter batteries such as PW3 with no explicit
+    ///    InverterModel entry), which makes the `min` an identity.
     pub backup_path_power_kw: Option<f64>,
+    /// `model_id` of the single grid-forming controller resolved during
+    /// validation (spec §3.1 backup rule). `None` when not backup-capable.
+    pub resolved_controller_model_id: Option<String>,
+    /// Whether any present battery is DC-coupled hybrid (spec §3.3). Part B
+    /// uses this to select the single-inversion PV-storage loss path.
+    pub has_dc_coupled_storage: bool,
 }
 
 impl HomeSystem {
@@ -286,22 +309,532 @@ impl HomeSystem {
     /// and §4.6 cross-reference checks; on success return the resolved
     /// [`SystemSpec`]. All violations are enumerated, never fail-fast.
     ///
-    /// Enforced rules (spec §3.1):
-    /// - Every referenced `model_id` resolves to an entry of matching kind.
-    /// - `backup_capable` requires exactly one grid-forming controller, or
-    ///   every battery having `grid_forming_in_backup` with the controller
-    ///   named by its `requires_controller_id` present.
-    /// - DC-coupled batteries reference a compatible hybrid inverter.
-    /// - SolarEdge: battery count <= 3 x Home Hub count.
-    /// - PW3: expansion packs <= 3 per head unit; packs add no power.
-    /// - Enphase: continuous power == 0.64 kW x total IQ8D count.
-    /// - Generator only when a present controller supports generator input.
+    /// Enforced rules (spec §3.1, §4.4, §4.6):
+    /// - `schema_version` equals [`crate::types::SCHEMA_VERSION`].
+    /// - Every referenced `model_id` resolves to a registry entry of
+    ///   matching kind (batteries, inverters, controllers, PV inverter).
+    /// - Quantities are >= 1; SOC/reserve fractions lie in `[0, 1]`;
+    ///   each battery's initial SOC lies inside its model's SOC window.
+    /// - `backup_capable` requires exactly one present controller entry
+    ///   with `provides_grid_forming`, and every battery's
+    ///   `requires_controller_id` (when declared) present in `controllers[]`.
+    /// - DC-coupled hybrid batteries without an integrated inverter
+    ///   intersect some present inverter's `compatible_battery_ids`.
+    /// - Per battery model, unit count <= Σ `max_batteries × quantity`
+    ///   over present compatible inverters when every such inverter
+    ///   declares `max_batteries` (SolarEdge: 3 × Home Hub count).
+    /// - Expansion packs only on models declaring
+    ///   `expansion_pack_model_id`; packs <= `max_units_per_inverter - 1`
+    ///   (PW3: 3); `packs_add_power = false` (energy only).
+    /// - Microinverter-based batteries (Enphase): continuous ratings equal
+    ///   `microinverter_count × power_per_microinverter_kw` (0.64 kW per
+    ///   IQ8D) within 1e-6.
+    /// - A generator requires a present controller with
+    ///   `supports_generator_input`.
+    /// - A null `pv_inverter_model_id` requires a present hybrid landing
+    ///   pad (hybrid inverter MPPTs or an integrated-inverter DC-coupled
+    ///   battery such as PW3).
     ///
     /// # Errors
     /// [`RegistryError::Validation`] enumerating every violation.
     pub fn validate(&self, registry: &Registry) -> Result<SystemSpec, RegistryError> {
-        let _ = registry;
-        todo!("implemented by composer task")
+        let mut violations: Vec<Violation> = Vec::new();
+
+        // -- Schema version -------------------------------------------------
+        let expected = crate::types::SCHEMA_VERSION;
+        let found = &self.schema_version;
+        if found != expected {
+            violations.push(violation(
+                "schema_version",
+                format!("unsupported schema_version `{found}`; expected `{expected}`"),
+            ));
+        }
+
+        // -- Reference resolution + per-item numerics ------------------------
+        let battery_models: Vec<Option<&BatteryModel>> = self
+            .batteries
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                if b.quantity == 0 {
+                    violations.push(violation(
+                        &format!("batteries[{i}].quantity"),
+                        "quantity must be >= 1",
+                    ));
+                }
+                if !(0.0..=1.0).contains(&b.initial_soc_frac) {
+                    violations.push(violation(
+                        &format!("batteries[{i}].initial_soc_frac"),
+                        "initial SOC fraction must lie in [0, 1]",
+                    ));
+                }
+                if !(0.0..=1.0).contains(&b.reserve_frac) {
+                    violations.push(violation(
+                        &format!("batteries[{i}].reserve_frac"),
+                        "reserve fraction must lie in [0, 1]",
+                    ));
+                }
+                let model = registry.battery(&b.model_id);
+                match model {
+                    Some(m) => {
+                        let soc = b.initial_soc_frac;
+                        let (lo, hi) = (m.soc_window.min_soc_frac, m.soc_window.max_soc_frac);
+                        if soc < lo || soc > hi {
+                            let id = &m.model_id;
+                            violations.push(violation(
+                                &format!("batteries[{i}].initial_soc_frac"),
+                                format!("initial SOC {soc} outside usable window [{lo}, {hi}] of `{id}`"),
+                            ));
+                        }
+                    }
+                    None => {
+                        let id = &b.model_id;
+                        violations.push(violation(
+                            &format!("batteries[{i}].model_id"),
+                            format!("unknown battery model `{id}`"),
+                        ));
+                    }
+                }
+                model
+            })
+            .collect();
+
+        let inverter_models: Vec<Option<&InverterModel>> = self
+            .inverters
+            .iter()
+            .enumerate()
+            .map(|(i, inv)| {
+                if inv.quantity == 0 {
+                    violations.push(violation(
+                        &format!("inverters[{i}].quantity"),
+                        "quantity must be >= 1",
+                    ));
+                }
+                let model = registry.inverter(&inv.model_id);
+                if model.is_none() {
+                    let id = &inv.model_id;
+                    violations.push(violation(
+                        &format!("inverters[{i}].model_id"),
+                        format!("unknown inverter model `{id}`"),
+                    ));
+                }
+                model
+            })
+            .collect();
+
+        let controller_models: Vec<Option<&ControllerModel>> = self
+            .controllers
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                if c.quantity == 0 {
+                    violations.push(violation(
+                        &format!("controllers[{i}].quantity"),
+                        "quantity must be >= 1",
+                    ));
+                }
+                let model = registry.controller(&c.model_id);
+                if model.is_none() {
+                    let id = &c.model_id;
+                    violations.push(violation(
+                        &format!("controllers[{i}].model_id"),
+                        format!("unknown controller model `{id}`"),
+                    ));
+                }
+                model
+            })
+            .collect();
+
+        // Present = referenced with quantity >= 1 and resolved in the registry.
+        let present_inverters: Vec<(&InverterModel, u32)> = self
+            .inverters
+            .iter()
+            .zip(&inverter_models)
+            .filter(|(r, _)| r.quantity > 0)
+            .filter_map(|(r, m)| m.map(|m| (m, r.quantity)))
+            .collect();
+        let present_controllers: Vec<(&ControllerModel, u32)> = self
+            .controllers
+            .iter()
+            .zip(&controller_models)
+            .filter(|(r, _)| r.quantity > 0)
+            .filter_map(|(r, m)| m.map(|m| (m, r.quantity)))
+            .collect();
+
+        // -- Backup composition (spec §3.1 rule 1, §4.6) ----------------------
+        if self.backup_capable {
+            let grid_forming = present_controllers
+                .iter()
+                .filter(|(c, _)| c.provides_grid_forming)
+                .count();
+            if grid_forming != 1 {
+                violations.push(violation(
+                    "controllers",
+                    format!(
+                        "backup_capable requires exactly one present controller entry with \
+                         provides_grid_forming = true; found {grid_forming}"
+                    ),
+                ));
+            }
+            for (i, b) in self.batteries.iter().enumerate() {
+                if let Some(m) = battery_models[i] {
+                    if let Some(req) = &m.requires_controller_id {
+                        let present = self
+                            .controllers
+                            .iter()
+                            .any(|c| c.quantity > 0 && &c.model_id == req);
+                        if !present {
+                            let id = &m.model_id;
+                            violations.push(violation(
+                                &format!("batteries[{i}].model_id"),
+                                format!(
+                                    "backup_capable: `{id}` requires controller `{req}`, which is \
+                                     not present in controllers[]"
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        // -- DC-coupled batteries need a compatible hybrid inverter ----------
+        // Batteries with an integrated inverter (PW3) ARE their own hybrid
+        // inverter, so the explicit-inverter intersection is skipped for them.
+        for (i, b) in self.batteries.iter().enumerate() {
+            let Some(m) = battery_models[i] else { continue };
+            if b.quantity == 0 || m.coupling != Coupling::DCCoupledHybrid {
+                continue;
+            }
+            if m.integrated_inverter == Some(true) {
+                continue;
+            }
+            let compatible = present_inverters
+                .iter()
+                .any(|(inv, _)| inv.compatible_battery_ids.iter().any(|id| id == &m.model_id));
+            if !compatible {
+                let id = &m.model_id;
+                violations.push(violation(
+                    &format!("batteries[{i}].model_id"),
+                    format!(
+                        "DC-coupled battery `{id}` requires a present hybrid inverter listing it in \
+                         compatible_battery_ids"
+                    ),
+                ));
+            }
+        }
+
+        // -- Per-model compatible-inverter capacity (SolarEdge: <= 3 per Hub) -
+        // Generalized: for each battery model with at least one present
+        // compatible inverter, the unit count is bounded by the sum of
+        // max_batteries x quantity over those inverters — but only when every
+        // compatible present inverter declares max_batteries (an undeclared
+        // limit means unbounded capacity, so no bound is enforced).
+        let mut checked_models: Vec<&str> = Vec::new();
+        for (i, _) in self.batteries.iter().enumerate() {
+            let Some(m) = battery_models[i] else { continue };
+            if checked_models.contains(&m.model_id.as_str()) {
+                continue;
+            }
+            checked_models.push(&m.model_id);
+            let compatible: Vec<(&InverterModel, u32)> = present_inverters
+                .iter()
+                .filter(|(inv, _)| inv.compatible_battery_ids.iter().any(|id| id == &m.model_id))
+                .map(|(inv, q)| (*inv, *q))
+                .collect();
+            if compatible.is_empty()
+                || !compatible.iter().all(|(inv, _)| inv.max_batteries.is_some())
+            {
+                continue;
+            }
+            let capacity: u32 = compatible
+                .iter()
+                .map(|(inv, q)| inv.max_batteries.map_or(0, |mb| mb.saturating_mul(*q)))
+                .sum();
+            let units: u32 = self
+                .batteries
+                .iter()
+                .filter(|x| x.model_id == m.model_id)
+                .map(|x| x.quantity)
+                .sum();
+            if units > capacity {
+                let id = &m.model_id;
+                violations.push(violation(
+                    &format!("batteries[{i}].model_id"),
+                    format!(
+                        "{units} unit(s) of `{id}` exceed compatible-inverter capacity {capacity} \
+                         (sum of max_batteries over present inverters)"
+                    ),
+                ));
+            }
+        }
+
+        // -- Expansion packs (PW3: <= 3 per head unit, energy only) -----------
+        for (i, b) in self.batteries.iter().enumerate() {
+            if b.expansion_packs_per_unit == 0 {
+                continue;
+            }
+            let Some(m) = battery_models[i] else { continue };
+            let field = format!("batteries[{i}].expansion_packs_per_unit");
+            let id = &m.model_id;
+            match &m.expansion {
+                Some(exp) if exp.expansion_pack_model_id.is_some() => {
+                    if let Some(max_units) = exp.max_units_per_inverter {
+                        let max_packs = max_units.saturating_sub(1);
+                        if b.expansion_packs_per_unit > max_packs {
+                            let packs = b.expansion_packs_per_unit;
+                            violations.push(violation(
+                                &field,
+                                format!(
+                                    "{packs} expansion packs per unit exceed {max_packs} \
+                                     (max_units_per_inverter {max_units} minus the head unit)"
+                                ),
+                            ));
+                        }
+                    }
+                    if exp.packs_add_power == Some(true) {
+                        violations.push(violation(
+                            &field,
+                            format!(
+                                "`{id}` declares packs_add_power = true; expansion packs must add \
+                                 energy only"
+                            ),
+                        ));
+                    }
+                    if let Some(pack_id) = &exp.expansion_pack_model_id {
+                        if registry.battery(pack_id).is_none() {
+                            violations.push(violation(
+                                &field,
+                                format!("expansion pack model `{pack_id}` does not resolve to a battery entry"),
+                            ));
+                        }
+                    }
+                }
+                _ => violations.push(violation(
+                    &field,
+                    format!("`{id}` does not declare an expansion_pack_model_id; expansion packs are not supported"),
+                )),
+            }
+        }
+
+        // -- Microinverter power cross-check (Enphase: 0.64 kW x IQ8D count) --
+        let mut checked_micro: Vec<&str> = Vec::new();
+        for (i, _) in self.batteries.iter().enumerate() {
+            let Some(m) = battery_models[i] else { continue };
+            if checked_micro.contains(&m.model_id.as_str()) {
+                continue;
+            }
+            checked_micro.push(&m.model_id);
+            let (Some(count), Some(per_micro)) =
+                (m.microinverter_count, m.power_per_microinverter_kw.as_ref())
+            else {
+                continue;
+            };
+            let recomputed = f64::from(count) * per_micro.value;
+            let id = &m.model_id;
+            let per = per_micro.value;
+            for (label, rating) in [
+                ("discharge", &m.continuous_discharge_power_kw),
+                ("charge", &m.continuous_charge_power_kw),
+            ] {
+                let rated = rating.value;
+                if (recomputed - rated).abs() > 1e-6 {
+                    violations.push(violation(
+                        &format!("batteries[{i}].model_id"),
+                        format!(
+                            "microinverter cross-check failed for `{id}`: {count} microinverter(s) x \
+                             {per} kW = {recomputed} kW, but continuous {label} rating is {rated} kW"
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // -- Generator interlock (spec §3.1) ----------------------------------
+        if let Some(g) = &self.generator {
+            if g.rated_kw <= 0.0 {
+                violations.push(violation("generator.rated_kw", "rated power must be > 0"));
+            }
+            let supported = present_controllers
+                .iter()
+                .any(|(c, _)| c.supports_generator_input);
+            if !supported {
+                violations.push(violation(
+                    "generator",
+                    "a generator requires a present controller with supports_generator_input = true",
+                ));
+            }
+        }
+
+        // -- PV array ----------------------------------------------------------
+        if let Some(pv) = &self.pv {
+            if pv.kw_dc <= 0.0 {
+                violations.push(violation("pv.kw_dc", "array nameplate must be > 0"));
+            }
+            if !(0.0..=90.0).contains(&pv.tilt_deg) {
+                violations.push(violation("pv.tilt_deg", "tilt must lie in [0, 90] degrees"));
+            }
+            if pv.dc_ac_ratio <= 0.0 {
+                violations.push(violation("pv.dc_ac_ratio", "DC/AC ratio must be > 0"));
+            }
+            if let Orientation::Azimuth(a) = pv.orientation {
+                if a > 359 {
+                    violations.push(violation(
+                        "pv.orientation",
+                        "azimuth must lie in 0..=359 degrees",
+                    ));
+                }
+            }
+            match &pv.pv_inverter_model_id {
+                Some(pid) => {
+                    if registry.inverter(pid).is_none() {
+                        violations.push(violation(
+                            "pv.pv_inverter_model_id",
+                            format!("unknown inverter model `{pid}`"),
+                        ));
+                    }
+                }
+                None => {
+                    // PV with no dedicated inverter must land on hybrid MPPTs:
+                    // either an explicit hybrid inverter, or a DC-coupled
+                    // battery with an integrated inverter (PW3 MPPTs).
+                    let landing_pad = present_inverters
+                        .iter()
+                        .any(|(inv, _)| inv.topology == InverterTopology::HybridDCCoupled)
+                        || self.batteries.iter().zip(&battery_models).any(|(r, m)| {
+                            r.quantity > 0
+                                && m.is_some_and(|m| {
+                                    m.coupling == Coupling::DCCoupledHybrid
+                                        && m.integrated_inverter == Some(true)
+                                })
+                        });
+                    if !landing_pad {
+                        violations.push(violation(
+                            "pv.pv_inverter_model_id",
+                            "null PV inverter requires a present hybrid landing pad (hybrid \
+                             inverter MPPTs or an integrated-inverter DC-coupled battery)",
+                        ));
+                    }
+                }
+            }
+        }
+
+        // -- Remaining numerics ------------------------------------------------
+        if self.main_panel.service_rating_a <= 0.0 {
+            violations.push(violation(
+                "main_panel.service_rating_a",
+                "service rating must be > 0",
+            ));
+        }
+        if let Some(limit) = self.main_panel.interconnection_limit_kw {
+            if limit < 0.0 {
+                violations.push(violation(
+                    "main_panel.interconnection_limit_kw",
+                    "interconnection limit must be >= 0",
+                ));
+            }
+        }
+        if let Some(bp) = &self.backup_panel {
+            if bp.critical_loads_peak_kw < 0.0 {
+                violations.push(violation(
+                    "backup_panel.critical_loads_peak_kw",
+                    "critical-loads peak must be >= 0",
+                ));
+            }
+        }
+        for (i, ev) in self.ev_chargers.iter().enumerate() {
+            if ev.rated_kw <= 0.0 {
+                violations.push(violation(
+                    &format!("ev_chargers[{i}].rated_kw"),
+                    "rated power must be > 0",
+                ));
+            }
+        }
+
+        if !violations.is_empty() {
+            return Err(RegistryError::Validation { violations });
+        }
+
+        // -- Resolved SystemSpec (spec §3.1 aggregates) ------------------------
+        let mut total_usable_energy_kwh = 0.0;
+        let mut total_discharge_power_kw = 0.0;
+        let mut total_charge_power_kw = 0.0;
+        for (b, m) in self.batteries.iter().zip(&battery_models) {
+            let Some(m) = m else { continue };
+            let q = f64::from(b.quantity);
+            let head_usable = m.usable_energy_kwh.value;
+            // Packs add their usable energy per head unit, never power.
+            let pack_usable = if b.expansion_packs_per_unit > 0 {
+                m.expansion
+                    .as_ref()
+                    .and_then(|e| e.expansion_pack_model_id.as_deref())
+                    .and_then(|pid| registry.battery(pid))
+                    .map_or(0.0, |p| p.usable_energy_kwh.value)
+            } else {
+                0.0
+            };
+            total_usable_energy_kwh +=
+                q * (head_usable + f64::from(b.expansion_packs_per_unit) * pack_usable);
+            total_discharge_power_kw += q * m.continuous_discharge_power_kw.value;
+            total_charge_power_kw += q * m.continuous_charge_power_kw.value;
+        }
+
+        // Backup-path rating resolution order (see SystemSpec field docs):
+        // controller throughput cap > explicit inverter backup rating >
+        // the batteries' own integrated rating.
+        let backup_path_power_kw = if self.backup_capable {
+            let mut controller_sum = 0.0;
+            let mut any_controller_rating = false;
+            for (c, q) in &present_controllers {
+                if let Some(max) = &c.max_backup_power_kw {
+                    controller_sum += max.value * f64::from(*q);
+                    any_controller_rating = true;
+                }
+            }
+            let inverter_sum: f64 = present_inverters
+                .iter()
+                .map(|(inv, q)| {
+                    inv.max_ac_output_kw_backup
+                        .as_ref()
+                        .unwrap_or(&inv.rated_ac_output_kw)
+                        .value
+                        * f64::from(*q)
+                })
+                .sum();
+            let path_rating = if any_controller_rating {
+                controller_sum
+            } else if inverter_sum > 0.0 {
+                inverter_sum
+            } else {
+                total_discharge_power_kw
+            };
+            Some(total_discharge_power_kw.min(path_rating))
+        } else {
+            None
+        };
+
+        let resolved_controller_model_id = if self.backup_capable {
+            present_controllers
+                .iter()
+                .find(|(c, _)| c.provides_grid_forming)
+                .map(|(c, _)| c.model_id.clone())
+        } else {
+            None
+        };
+
+        let has_dc_coupled_storage = self.batteries.iter().zip(&battery_models).any(|(r, m)| {
+            r.quantity > 0 && m.is_some_and(|m| m.coupling == Coupling::DCCoupledHybrid)
+        });
+
+        Ok(SystemSpec {
+            system: self.clone(),
+            total_usable_energy_kwh,
+            total_discharge_power_kw,
+            total_charge_power_kw,
+            backup_path_power_kw,
+            resolved_controller_model_id,
+            has_dc_coupled_storage,
+        })
     }
 
     /// Parse a HomeSystem JSON document.
