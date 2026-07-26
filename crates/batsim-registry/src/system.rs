@@ -505,7 +505,7 @@ impl HomeSystem {
     }
 
     /// Backup composition: a backup-capable
-    /// system forms its island in one of two ways — either exactly one
+    /// system forms its island in one of two ways - either exactly one
     /// present controller entry with `provides_grid_forming = true`, or,
     /// when no such controller is present, a battery fleet that forms the
     /// grid itself: at least one present battery, and every present battery
@@ -1383,7 +1383,7 @@ mod tests {
         let registry = Registry::from_parts(vec![pw3()], vec![], vec![gateway()]);
 
         // No controller at all: PW3 can form the grid itself, so the fleet
-        // rule is satisfied — but PW3 declares a required controller, and
+        // rule is satisfied - but PW3 declares a required controller, and
         // that check still rejects the system on the battery line item.
         let mut sys = base_system();
         sys.batteries = vec![battery_ref(PW3, 1)];

@@ -3,7 +3,7 @@
 //! `SimWorld` at dt = 1 s under adversarial dispatch.
 //!
 //! Every term below is a REALIZED value from the per-tick truth record
-//! (or a per-tick delta of a cumulative meter) — never a requested
+//! (or a per-tick delta of a cumulative meter) - never a requested
 //! setpoint. Ramp limits, SOC-window clamps, curtailment, and clipping
 //! all make realized power differ from requested power; the balances
 //! must hold for what the home actually did.
