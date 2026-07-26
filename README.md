@@ -42,16 +42,16 @@ Requires a Rust toolchain (pinned to 1.83.0 via `rust-toolchain.toml`).
 
 ```sh
 # Simulate one Powerwall 3 home for 24 h and print its SOC trace
-cargo run --example single_home_trace
+cargo run -p batsim-core --example single_home_trace
 
 # Simulate a small fleet across device families and report energy
-cargo run --example fleet_energy
+cargo run -p batsim-core --example fleet_energy
 
 # Browse the device catalog
-cargo run --example catalog_browser
+cargo run -p batsim-core --example catalog_browser
 
 # Same seed twice: prove the results are bit-identical
-cargo run --example determinism_demo
+cargo run -p batsim-core --example determinism_demo
 ```
 
 Minimal library usage:

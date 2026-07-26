@@ -509,8 +509,8 @@ pub struct ControllerModel {
     pub display_name: String,
     /// Whether this controller forms an islanded microgrid.
     pub provides_grid_forming: bool,
-    /// Transfer time on grid loss (estimated defaults:
-    /// Tesla Gateway 0.1 s, IQ System Controller 1.0 s, SolarEdge 0.5 s).
+    /// Transfer time on grid loss (estimated defaults: Tesla Gateway 0.1 s,
+    /// IQ System Controller 1.0 s, SolarEdge 0.5 s, sonnenprotect 1.5 s).
     pub transfer_time_s: AnnotatedNumber,
     /// Reconnect delay after stable grid returns (default 300 s).
     #[serde(default, skip_serializing_if = "Option::is_none")]
