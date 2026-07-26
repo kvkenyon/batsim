@@ -13,7 +13,7 @@ jobs:
 
       # Pinned toolchain per spec C.2.3 (rust-toolchain.toml: 1.83.0)
       - name: Install Rust toolchain
-        run: rustup toolchain install 1.83.0 --component clippy rustfmt --profile minimal
+        run: rustup toolchain install 1.83.0 --component clippy,rustfmt --profile minimal
 
       - uses: Swatinem/rust-cache@v2
 
