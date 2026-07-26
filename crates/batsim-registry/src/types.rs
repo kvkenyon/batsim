@@ -571,7 +571,7 @@ const fn default_dc_ac_ratio() -> f64 {
 }
 
 /// Entry kinds under the `registry/` tree (spec §1.1 layout).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EntryKind {
     /// `batteries/*.json`
     Battery,
@@ -584,6 +584,9 @@ pub enum EntryKind {
 }
 
 impl EntryKind {
+    /// All entry kinds, in canonical (sorted) order.
+    pub const ALL: [Self; 4] = [Self::Battery, Self::Inverter, Self::Controller, Self::PvPreset];
+
     /// Subdirectory name within the registry tree.
     #[must_use]
     pub const fn dir(self) -> &'static str {
@@ -593,6 +596,12 @@ impl EntryKind {
             Self::Controller => "controllers",
             Self::PvPreset => "pv_presets",
         }
+    }
+
+    /// Resolve a registry-tree directory name to its kind.
+    #[must_use]
+    pub fn from_dir(dir: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|k| k.dir() == dir)
     }
 }
 
