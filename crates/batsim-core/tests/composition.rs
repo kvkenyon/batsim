@@ -330,3 +330,69 @@ fn dispatch_scheduled_out_of_order_still_fires_on_time() {
         "the tick-2 manual discharge must be active by tick 3, got {at_tick_3}"
     );
 }
+
+/// Mixed topology: PW3 (integrated hybrid) plus PV on a DEDICATED string
+/// inverter (`pv_inverter_model_id` non-null). Stage 2 converts the array
+/// at the string inverter; the hybrid bus must not convert and meter the
+/// same DC a second time (review finding pv-double-counted-with-both-
+/// inverters). Physical bound: AC out can never exceed DC in.
+#[test]
+fn mixed_string_pv_and_hybrid_never_converts_the_array_twice() {
+    let registry = Registry::embedded().unwrap();
+    let doc = serde_json::json!({
+        "schema_version": "1.0.0",
+        "system_id": "00000000-0000-0000-0000-00000000000b",
+        "batteries": [{
+            "model_id": "tesla.powerwall_3", "quantity": 1,
+            "initial_soc_frac": 0.8, "reserve_frac": 0.2
+        }],
+        "inverters": [],
+        "controllers": [],
+        "pv": {
+            "kw_dc": 8.0,
+            "orientation": "S",
+            "tilt_deg": 25.0,
+            "dc_ac_ratio": 1.2,
+            "pv_inverter_model_id": "generic.string_pv_8kw"
+        },
+        "main_panel": {"service_rating_a": 200.0},
+        "backup_capable": false,
+        "grid_meter": {"esiid": "1008900000000000000001"}
+    });
+    let system = HomeSystem::from_json(&serde_json::to_string(&doc).unwrap()).unwrap();
+    let spec = system.validate(&registry).expect("system validates");
+    let cfg = HomeBuildConfig {
+        pv_site: Some(common::std_pv_site()),
+        ..build_config()
+    };
+    let devices = build_devices(&spec, &registry, &cfg, 42, 0).unwrap();
+    let mut home = Home::new(devices, true);
+    home.set_mode(ControlMode::Idle);
+
+    let mut checked = 0u32;
+    for tick in 0..20 {
+        home.step(tick, NOON_UNIX_S + tick * 60, 60, 30.0);
+        let rec = home.truth().last().unwrap();
+        if rec.p_pv_dc_w > 100.0 {
+            checked += 1;
+            assert!(
+                rec.p_pv_ac_w <= rec.p_pv_dc_w,
+                "array converted twice: pv_ac {} > pv_dc {}",
+                rec.p_pv_ac_w,
+                rec.p_pv_dc_w
+            );
+        }
+    }
+    assert!(checked > 0, "expected PV production at solar noon");
+    // Sanity: the string inverter really did convert (PV was not dropped
+    // instead of double-counted).
+    let pv_wh: f64 = home
+        .truth()
+        .iter()
+        .map(|r| r.p_pv_ac_w * 60.0 / 3600.0)
+        .sum();
+    assert!(
+        pv_wh > 1_000.0,
+        "PV should deliver real energy, got {pv_wh} Wh"
+    );
+}

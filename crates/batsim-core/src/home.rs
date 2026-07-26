@@ -390,11 +390,6 @@ impl Home {
     /// B.3.3) and return (pv_ac_w, batt_ac_w) at the panel.
     fn stage_inverter(&mut self, exo: &Exogenous, batt: &BatteryStage, dt_s: u32) -> (f64, f64) {
         let unit_realized = &batt.units;
-        // Discharge the dispatch stage never let the pack produce is the
-        // real B.3.3 curtailment; book it before the residual below.
-        self.meters
-            .batt_clipped
-            .accumulate(batt.curtailed_ac_w, dt_s);
         let mut p_batt_ac: f64 = unit_realized
             .iter()
             .zip(&self.devices.batteries)
@@ -406,13 +401,29 @@ impl Home {
         let Some(inv) = &self.devices.hybrid_inverter else {
             return (p_pv_ac, p_batt_ac);
         };
+        // Command curtailment from stage 5 (B.3.3), converted to the DC
+        // side so this counter is homogeneous with the residual clip
+        // below and with `pv_clipped` (both DC-side).
+        self.meters.batt_clipped.accumulate(
+            batt.curtailed_ac_w / inv.eta_at_w(batt.curtailed_ac_w.max(1.0)),
+            dt_s,
+        );
         let hyb_batt_dc: f64 = unit_realized
             .iter()
             .zip(&self.devices.batteries)
             .filter(|(_, u)| !is_ac_terminal(u.model().coupling))
             .map(|(o, _)| o.p_term_w)
             .sum();
-        let p_bus = exo.pv_dc + hyb_batt_dc;
+        // The array lands on the hybrid bus ONLY when it is MPPT-landed
+        // (A.4.4: `pv_inverter_model_id == null`). With a dedicated PV
+        // inverter, stage 2 already converted the array - converting it
+        // again here would double-count and double-meter the same DC.
+        let pv_bus_dc = if self.devices.pv_inverter.is_some() {
+            0.0
+        } else {
+            exo.pv_dc
+        };
+        let p_bus = pv_bus_dc + hyb_batt_dc;
         if p_bus > 0.0 {
             // One conversion of the summed DC (the physics), then attribute
             // the shared AC rating between the two sources that actually put

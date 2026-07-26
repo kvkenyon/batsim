@@ -213,13 +213,6 @@ pub fn build_devices(
     })
 }
 
-/// Find the catalog hybrid inverter that is physically integrated into a
-/// declared DC-coupled battery, for systems whose `inverters[]` names none
-/// (validation exempts integrated-inverter batteries; the DC power still
-/// needs an AC path, otherwise stage 6 would silently drop it).
-///
-/// Returns `None` when no declared battery is a DC-coupled integrated
-/// unit; errors when one is but the catalog has no compatible hybrid.
 /// How many units a named PV inverter needs to carry the whole array.
 ///
 /// A string inverter is one box for the array; a per-module unit (the
@@ -271,6 +264,17 @@ fn integrated_hybrid_unit_count(
         .sum()
 }
 
+/// Find the catalog hybrid inverter that is physically integrated into a
+/// declared DC-coupled battery, for systems whose `inverters[]` names none
+/// (validation exempts integrated-inverter batteries; the DC power still
+/// needs an AC path, otherwise stage 6 would silently drop it).
+///
+/// Returns `None` when no declared battery is a DC-coupled integrated
+/// unit; errors when one is but the catalog has no compatible hybrid.
+///
+/// # Errors
+/// [`CoreError::InvalidSystem`] when an integrated DC-coupled battery has
+/// no compatible hybrid inverter in the catalog.
 fn synthesize_integrated_hybrid(
     sys: &batsim_registry::system::HomeSystem,
     registry: &Registry,
