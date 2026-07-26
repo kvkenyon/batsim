@@ -16,20 +16,23 @@
 mod common;
 
 use batsim_core::dispatch::{ControlMode, DispatchAction, ScheduledDispatch};
+use batsim_core::engine::SimWorld;
 use batsim_registry::Registry;
 use sha2::{Digest, Sha256};
 
 const TICKS: u64 = 48 * 3600;
 const SAMPLE_EVERY: u64 = 60;
+const PW3: &str = "tesla.powerwall_3";
 
-fn golden_for(model_id: &str) -> (serde_json::Value, String) {
-    let registry = Registry::embedded().expect("embedded registry");
-    let mut world = common::build_world(&registry, model_id, 1, 0xB4751, true, true);
-    // Two dispatch commands (C.7.1): at 20:00 UTC (15:00 CDT, battery
-    // full from the morning PV charge) switch to manual and hold a 3 kW
-    // discharge for the rest of the scenario. The trace then exercises
-    // overnight self-consumption discharge, morning PV charge to full,
-    // and a commanded discharge back to the reserve floor.
+/// Apply the scripted dispatch and step the full scenario, returning the
+/// snapshot summary, the per-tick truth hash, and the raw SOC samples.
+///
+/// Two dispatch commands: at 20:00 UTC (15:00 CDT, battery full from the
+/// morning PV charge) switch to manual and hold a 3 kW discharge for the
+/// rest of the scenario. The trace then exercises overnight
+/// self-consumption discharge, morning PV charge to full, and a commanded
+/// discharge back to the reserve floor.
+fn run_scenario(mut world: SimWorld, model_label: &str) -> (serde_json::Value, String, Vec<f64>) {
     world
         .dispatch(
             0,
@@ -64,7 +67,7 @@ fn golden_for(model_id: &str) -> (serde_json::Value, String) {
     let home = world.home(0).unwrap();
     let meters = home.meters();
     let summary = serde_json::json!({
-        "model_id": model_id,
+        "model_id": model_label,
         "soc_samples_per_min": soc_samples,
         "final_soc": (home.soc_mean() * 1e6).round() / 1e6,
         "main_import_kwh": (meters.main.import_wh / 1000.0 * 1e6).round() / 1e6,
@@ -74,7 +77,12 @@ fn golden_for(model_id: &str) -> (serde_json::Value, String) {
         "pv_kwh": (meters.pv_ac.wh / 1000.0 * 1e6).round() / 1e6,
         "standby_kwh": (meters.standby_loss.wh / 1000.0 * 1e6).round() / 1e6,
     });
-    (summary, format!("{:x}", hasher.finalize()))
+    (summary, format!("{:x}", hasher.finalize()), soc_samples)
+}
+
+/// SOC sample at `hh`:00 UTC (samples land on whole minutes from tick 60).
+fn soc_at(samples: &[f64], hh: usize) -> f64 {
+    samples[hh * 3600 / SAMPLE_EVERY as usize - 1]
 }
 
 #[test]
@@ -85,7 +93,8 @@ fn golden_soc_traces() {
         if model.continuous_discharge_power_kw.value == 0.0 {
             continue;
         }
-        let (summary, hash) = golden_for(&model.model_id);
+        let world = common::build_world(&registry, &model.model_id, 1, 0xB4751, true, true);
+        let (summary, hash, _) = run_scenario(world, &model.model_id);
         let mut settings = insta::Settings::clone_current();
         settings.set_snapshot_path("golden");
         settings.set_snapshot_suffix(model.model_id.replace('.', "_"));
@@ -94,4 +103,59 @@ fn golden_soc_traces() {
             insta::assert_snapshot!(hash);
         });
     }
+}
+
+/// Head unit plus one energy-only expansion pack on the same scripted
+/// scenario: doubled usable energy behind unchanged power limits. The
+/// snapshot pins the full trace; the assertions pin the structural
+/// relationships the snapshot alone leaves implicit.
+#[test]
+fn golden_pw3_head_plus_expansion_pack() {
+    let registry = Registry::embedded().expect("embedded registry");
+    let pack_spec = common::one_battery_system_with_packs(&registry, PW3, 1, true);
+    let pack_world = common::build_world_with(&registry, &pack_spec, 1, 0xB4751, true, true);
+    let (summary, hash, pack_soc) = run_scenario(pack_world, "tesla.powerwall_3+1_pack");
+
+    // Head-only reference over the identical scenario: same realized
+    // powers, half the usable energy.
+    let head_world = common::build_world(&registry, PW3, 1, 0xB4751, true, true);
+    let (head_summary, _, head_soc) = run_scenario(head_world, PW3);
+
+    // SOC slope: over the commanded 3 kW discharge while both systems sit
+    // clear of their windows (20:00-22:00), the energy drawn is identical,
+    // so the head's SOC falls twice as fast as the doubled-window system's.
+    let head_drop = soc_at(&head_soc, 20) - soc_at(&head_soc, 22);
+    let pack_drop = soc_at(&pack_soc, 20) - soc_at(&pack_soc, 22);
+    let ratio = head_drop / pack_drop;
+    assert!(
+        (1.9..2.1).contains(&ratio),
+        "head drop {head_drop} vs pack drop {pack_drop}: ratio {ratio} != 2"
+    );
+
+    // Reserve floor: the same reserve fraction now spans twice the
+    // energy; the long discharge still parks the pack system exactly on
+    // the floor, never below it.
+    let final_soc = summary["final_soc"].as_f64().unwrap();
+    assert!(
+        (final_soc - 0.2).abs() < 1e-6,
+        "pack system ended at {final_soc}, expected the 0.2 reserve floor"
+    );
+
+    // Energy accounting: every pack kilowatt-hour moves through the head
+    // unit's inverter and meter, so the pack system exports strictly more
+    // battery energy than the head-only run of the same scenario.
+    let pack_export = summary["batt_export_kwh"].as_f64().unwrap();
+    let head_export = head_summary["batt_export_kwh"].as_f64().unwrap();
+    assert!(
+        pack_export > head_export,
+        "pack export {pack_export} kWh did not exceed head-only {head_export} kWh"
+    );
+
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_path("golden");
+    settings.set_snapshot_suffix("tesla_powerwall_3_plus_expansion_pack");
+    settings.bind(|| {
+        insta::assert_json_snapshot!(summary);
+        insta::assert_snapshot!(hash);
+    });
 }

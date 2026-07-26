@@ -45,6 +45,17 @@ pub fn std_pv_site() -> PvSiteConfig {
 /// Compose a one-battery HomeSystem document for a catalog model, with the
 /// vendor-required inverter/controller present.
 pub fn one_battery_system(registry: &Registry, model_id: &str, with_pv: bool) -> SystemSpec {
+    one_battery_system_with_packs(registry, model_id, 0, with_pv)
+}
+
+/// Compose a one-battery HomeSystem document carrying `packs_per_unit`
+/// energy-only expansion packs on the head unit (0 for all other models).
+pub fn one_battery_system_with_packs(
+    registry: &Registry,
+    model_id: &str,
+    packs_per_unit: u32,
+    with_pv: bool,
+) -> SystemSpec {
     let model = registry.battery(model_id).expect("catalog battery");
     let mut inverters = Vec::new();
     let mut controllers = Vec::new();
@@ -78,7 +89,7 @@ pub fn one_battery_system(registry: &Registry, model_id: &str, with_pv: bool) ->
     let mut doc = serde_json::json!({
         "schema_version": "1.0.0",
         "system_id": "00000000-0000-0000-0000-000000000001",
-        "batteries": [{"model_id": model_id, "quantity": 1, "initial_soc_frac": 0.5, "reserve_frac": 0.2}],
+        "batteries": [{"model_id": model_id, "quantity": 1, "expansion_packs_per_unit": packs_per_unit, "initial_soc_frac": 0.5, "reserve_frac": 0.2}],
         "inverters": inverters,
         "controllers": controllers,
         "main_panel": {"service_rating_a": 200.0},
@@ -101,6 +112,19 @@ pub fn build_world(
     with_pv: bool,
     record_truth: bool,
 ) -> SimWorld {
+    let spec = one_battery_system(registry, model_id, with_pv);
+    build_world_with(registry, &spec, n, seed, with_pv, record_truth)
+}
+
+/// Build a deterministic world of `n` identical homes for a resolved system.
+pub fn build_world_with(
+    registry: &Registry,
+    spec: &SystemSpec,
+    n: usize,
+    seed: u64,
+    with_pv: bool,
+    record_truth: bool,
+) -> SimWorld {
     let mut world = SimWorld::new(
         SimClock::from_rfc3339(GOLDEN_EPOCH, 1).unwrap(),
         seed,
@@ -110,7 +134,6 @@ pub fn build_world(
         },
     )
     .unwrap();
-    let spec = one_battery_system(registry, model_id, with_pv);
     let cfg = HomeBuildConfig {
         load: std_load_config(),
         pv_site: with_pv.then(std_pv_site),
@@ -118,7 +141,7 @@ pub fn build_world(
         pv_priority: true,
     };
     for idx in 0..n {
-        let devices = build_devices(&spec, registry, &cfg, seed, idx as u64).unwrap();
+        let devices = build_devices(spec, registry, &cfg, seed, idx as u64).unwrap();
         world.add_home(Home::new(devices, record_truth));
     }
     world
