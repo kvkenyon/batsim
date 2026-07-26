@@ -326,9 +326,10 @@ impl HomeSystem {
     /// - Expansion packs only on models declaring
     ///   `expansion_pack_model_id`; packs <= `max_units_per_inverter - 1`
     ///   (PW3: 3); `packs_add_power = false` (energy only).
-    /// - Microinverter-based batteries (Enphase): continuous ratings equal
-    ///   `microinverter_count × power_per_microinverter_kw` (0.64 kW per
-    ///   IQ8D) within 1e-6.
+    /// - Microinverter-based batteries (Enphase): continuous ratings must
+    ///   not exceed `microinverter_count × power_per_microinverter_kw`
+    ///   (0.64 kW per IQ8D is a ceiling, exact for the 5P, loose for the
+    ///   IQ 10/10C), and peak >= continuous discharge.
     /// - A generator requires a present controller with
     ///   `supports_generator_input`.
     /// - A null `pv_inverter_model_id` requires a present hybrid landing
@@ -706,9 +707,14 @@ impl HomeSystem {
         }
     }
 
-    /// Microinverter power cross-check (Enphase: 0.64 kW x IQ8D count,
-    /// spec §3.1). Recomputed per-model and compared to the catalog's
-    /// continuous ratings with a 1e-6 kW tolerance.
+    /// Microinverter power ceiling check (Enphase: 0.64 kW x IQ8D count,
+    /// spec §3.1). The derived 0.64 kW/microinverter value is a CEILING, not
+    /// an equality: it holds exactly for the 5P (6 x 0.64 = 3.84 kW) but the
+    /// IQ 10/10C declare continuous ratings BELOW 12 x 0.64 kW. Enforced per
+    /// distinct model: continuous charge/discharge must not exceed
+    /// `microinverter_count x power_per_microinverter_kw` (1e-6 kW
+    /// tolerance), and a declared peak discharge rating must be >= the
+    /// continuous discharge rating.
     fn check_microinverter_power(
         &self,
         battery_models: &[Option<&BatteryModel>],
@@ -726,7 +732,7 @@ impl HomeSystem {
             else {
                 continue;
             };
-            let recomputed = f64::from(count) * per_micro.value;
+            let ceiling = f64::from(count) * per_micro.value;
             let id = &m.model_id;
             let per = per_micro.value;
             for (label, rating) in [
@@ -734,13 +740,25 @@ impl HomeSystem {
                 ("charge", &m.continuous_charge_power_kw),
             ] {
                 let rated = rating.value;
-                if (recomputed - rated).abs() > 1e-6 {
+                if rated > ceiling + 1e-6 {
                     violations.push(violation(
                         &format!("batteries[{i}].model_id"),
                         format!(
-                            "microinverter cross-check failed for `{id}`: {count} \
-                             microinverter(s) x {per} kW = {recomputed} kW, but continuous \
-                             {label} rating is {rated} kW"
+                            "microinverter ceiling exceeded for `{id}`: continuous {label} \
+                             rating {rated} kW > {count} microinverter(s) x {per} kW = \
+                             {ceiling} kW"
+                        ),
+                    ));
+                }
+            }
+            if let Some(peak) = &m.peak_discharge_power_kw {
+                let (peak_kw, cont_kw) = (peak.value, m.continuous_discharge_power_kw.value);
+                if peak_kw + 1e-6 < cont_kw {
+                    violations.push(violation(
+                        &format!("batteries[{i}].model_id"),
+                        format!(
+                            "peak discharge rating {peak_kw} kW of `{id}` is below its \
+                             continuous discharge rating {cont_kw} kW"
                         ),
                     ));
                 }
@@ -1104,6 +1122,24 @@ mod tests {
         m
     }
 
+    /// Enphase IQ Battery 10: 12 x IQ8D microinverters, but continuous
+    /// 3.84 kW / peak 7.68 kW — BELOW the 12 x 0.64 = 7.68 kW ceiling.
+    fn enphase_10() -> BatteryModel {
+        let mut m = battery(
+            "enphase.iq_battery_10",
+            Coupling::MicroinverterBased,
+            10.0,
+            3.84,
+            3.84,
+        );
+        m.peak_discharge_power_kw = Some(AnnotatedNumber::spec(7.68, "kW"));
+        m.microinverter_count = Some(12);
+        m.power_per_microinverter_kw = Some(AnnotatedNumber::spec(0.64, "kW"));
+        m.requires_controller_id = Some(ENP_CTRL.to_owned());
+        m.integrated_inverter = Some(true);
+        m
+    }
+
     fn controller(model_id: &str, grid_forming: bool, generator: bool) -> ControllerModel {
         ControllerModel {
             schema_version: crate::types::SCHEMA_VERSION.to_owned(),
@@ -1391,8 +1427,9 @@ mod tests {
     }
 
     #[test]
-    fn enphase_microinverter_crosscheck() {
-        // 2 x 5P: 2 x 6 x 0.64 = 7.68 kW continuous, 10 kWh usable.
+    fn enphase_microinverter_ceiling() {
+        // 2 x 5P: 2 x 6 x 0.64 = 7.68 kW continuous, 10 kWh usable; the 5P
+        // sits exactly at the ceiling.
         let registry = Registry::from_parts(vec![enphase_5p()], vec![], vec![enphase_controller()]);
         let mut sys = base_system();
         sys.batteries = vec![battery_ref(ENP_5P, 2)];
@@ -1400,21 +1437,44 @@ mod tests {
         sys.backup_capable = true;
         let spec = sys
             .validate(&registry)
-            .expect("2x5P passes the cross-check");
+            .expect("2x5P passes the ceiling check");
         assert_close(spec.total_usable_energy_kwh, 10.0);
         assert_close(spec.total_discharge_power_kw, 7.68);
         assert_close(spec.total_charge_power_kw, 7.68);
         assert_close(spec.backup_path_power_kw.expect("backup-capable"), 7.68);
         assert!(!spec.has_dc_coupled_storage);
 
-        // Doctored model: rating no longer matches 6 x 0.64 kW.
+        // IQ 10: continuous 3.84 kW is BELOW the 12 x 0.64 = 7.68 kW
+        // ceiling; the catalog's own entry must pass.
+        let registry = Registry::from_parts(vec![enphase_10()], vec![], vec![enphase_controller()]);
+        let mut sys = base_system();
+        sys.batteries = vec![battery_ref("enphase.iq_battery_10", 1)];
+        sys.controllers = vec![controller_ref(ENP_CTRL, 1)];
+        sys.backup_capable = true;
+        sys.validate(&registry)
+            .expect("IQ 10 under the ceiling passes");
+
+        // Doctored model: continuous rating ABOVE the ceiling.
         let mut dirty = enphase_5p();
-        dirty.continuous_discharge_power_kw = AnnotatedNumber::spec(4.0, "kW");
+        dirty.continuous_discharge_power_kw = AnnotatedNumber::spec(3.9, "kW");
         let registry = Registry::from_parts(vec![dirty], vec![], vec![enphase_controller()]);
+        let mut sys = base_system();
+        sys.batteries = vec![battery_ref(ENP_5P, 1)];
+        sys.controllers = vec![controller_ref(ENP_CTRL, 1)];
+        sys.backup_capable = true;
         let v = violations_of(sys.validate(&registry));
         assert_eq!(v.len(), 1);
         assert_field(&v, "batteries[0].model_id");
-        assert!(v[0].message.contains("microinverter cross-check"));
+        assert!(v[0].message.contains("microinverter ceiling"));
+
+        // Doctored model: peak below continuous.
+        let mut dirty = enphase_10();
+        dirty.peak_discharge_power_kw = Some(AnnotatedNumber::spec(3.0, "kW"));
+        let registry = Registry::from_parts(vec![dirty], vec![], vec![enphase_controller()]);
+        sys.batteries = vec![battery_ref("enphase.iq_battery_10", 1)];
+        let v = violations_of(sys.validate(&registry));
+        assert_eq!(v.len(), 1);
+        assert!(v[0].message.contains("peak discharge rating"));
     }
 
     #[test]
