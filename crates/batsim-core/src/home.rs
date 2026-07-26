@@ -31,6 +31,15 @@ pub struct Home {
     truth: Vec<HomeTruth>,
 }
 
+/// Stage-5 result: the per-unit realized outputs plus the battery AC
+/// discharge that was curtailed *before* integration because the shared
+/// hybrid inverter had no AC headroom left for it (B.3.3).
+#[derive(Debug, Clone, Default)]
+struct BatteryStage {
+    units: Vec<BatteryStepOutput>,
+    curtailed_ac_w: f64,
+}
+
 /// Intermediate per-tick exogenous values shared across stages.
 #[derive(Debug, Clone, Copy, Default)]
 struct Exogenous {
@@ -127,10 +136,10 @@ impl Home {
         self.apply_due_dispatches(tick);
         let exo = self.stages_load_pv(tick, unix_time_s, dt_s, t_amb_c);
         let p_batt_ac_set = self.stage_dispatch(&exo);
-        let unit_realized = self.stage_battery(p_batt_ac_set, &exo, dt_s, t_amb_c);
-        let (p_pv_ac, p_batt_ac) = self.stage_inverter(&exo, &unit_realized, dt_s);
+        let batt = self.stage_battery(p_batt_ac_set, &exo, dt_s, t_amb_c);
+        let (p_pv_ac, p_batt_ac) = self.stage_inverter(&exo, &batt, dt_s);
         self.stage_metering(&exo, p_pv_ac, p_batt_ac, dt_s);
-        self.stage_telemetry(tick, unix_time_s, &exo, p_pv_ac, p_batt_ac, &unit_realized);
+        self.stage_telemetry(tick, unix_time_s, &exo, p_pv_ac, p_batt_ac, &batt.units);
     }
 
     /// Tick-top: apply due dispatch actions in queue order.
@@ -234,11 +243,14 @@ impl Home {
         exo: &Exogenous,
         dt_s: u32,
         t_amb_c: f64,
-    ) -> Vec<BatteryStepOutput> {
+    ) -> BatteryStage {
         let n = self.devices.batteries.len();
         let mut realized = vec![BatteryStepOutput::default(); n];
         if n == 0 {
-            return realized;
+            return BatteryStage {
+                units: realized,
+                curtailed_ac_w: 0.0,
+            };
         }
         // Separate terminal classes.
         let ac_idx: Vec<usize> = (0..n)
@@ -257,8 +269,10 @@ impl Home {
         );
 
         // Hybrid (DC-bus) units.
+        let mut curtailed_ac_w = 0.0;
         if !dc_idx.is_empty() {
-            let p_dc_set = self.hybrid_dc_setpoint(p_batt_ac_set, exo);
+            let (p_dc_set, curtailed) = self.hybrid_dc_setpoint(p_batt_ac_set, exo);
+            curtailed_ac_w = curtailed;
             Self::split_and_step(
                 &mut self.devices.batteries,
                 &dc_idx,
@@ -268,7 +282,10 @@ impl Home {
                 &mut realized,
             );
         }
-        realized
+        BatteryStage {
+            units: realized,
+            curtailed_ac_w,
+        }
     }
 
     /// The DC-bus setpoint for the hybrid units, translated from the
@@ -279,9 +296,15 @@ impl Home {
     /// Zero when no hybrid inverter exists: `build_devices` guarantees one
     /// for any DC-coupled battery, so this is an unreachable safety floor
     /// rather than a silent energy drop.
-    fn hybrid_dc_setpoint(&self, p_batt_ac_set: f64, exo: &Exogenous) -> f64 {
+    ///
+    /// Returns `(p_dc_setpoint_w, curtailed_ac_w)`. The discharge target is
+    /// curtailed here, before the pack integrates it, by the AC headroom PV
+    /// already occupies at the shared inverter (B.3.3 PV priority): a pack
+    /// may never discharge energy the shared inverter cannot pass, so the
+    /// curtailment is a command reduction, not a downstream clip.
+    fn hybrid_dc_setpoint(&self, p_batt_ac_set: f64, exo: &Exogenous) -> (f64, f64) {
         let Some(inv) = self.devices.hybrid_inverter.as_ref() else {
-            return 0.0;
+            return (0.0, 0.0);
         };
         let pv_surplus_dc = if matches!(self.mode, ControlMode::SelfConsumption)
             && self.devices.pv_inverter.is_none()
@@ -293,15 +316,32 @@ impl Home {
             0.0
         };
         if pv_surplus_dc > 0.0 && p_batt_ac_set <= 0.0 {
-            -pv_surplus_dc
+            (-pv_surplus_dc, 0.0)
         } else if p_batt_ac_set >= 0.0 {
-            // Discharge: DC required from the battery for an AC target.
-            inv.dc_required_for_ac(p_batt_ac_set)
+            // Discharge: DC required from the battery for the AC target it
+            // is actually allowed to reach through the shared inverter.
+            let ac_target = p_batt_ac_set.min(self.hybrid_batt_ac_headroom_w(inv, exo));
+            (inv.dc_required_for_ac(ac_target), p_batt_ac_set - ac_target)
         } else {
             // Charge: DC delivered to the bus from an AC draw
             // (conservation-true: DC = AC x eta, D1 decision).
-            -inv.ac_to_dc(-p_batt_ac_set).p_out_w
+            (-inv.ac_to_dc(-p_batt_ac_set).p_out_w, 0.0)
         }
+    }
+
+    /// AC output the shared hybrid inverter can still pass to the battery
+    /// once PV has been admitted (B.3.3). With `pv_priority` off the battery
+    /// is admitted first and owns the whole rating.
+    fn hybrid_batt_ac_headroom_w(
+        &self,
+        inv: &crate::inverter::InverterUnit,
+        exo: &Exogenous,
+    ) -> f64 {
+        if !self.devices.pv_priority || self.devices.pv_inverter.is_some() {
+            return inv.rated_ac_w();
+        }
+        let pv_ac = inv.dc_to_ac_capped(exo.pv_dc, self.pv_ac_cap_w()).p_out_w;
+        (inv.rated_ac_w() - pv_ac).max(0.0)
     }
 
     /// AC-side cap on the PV path from the array's DC/AC ratio (B.7.4).
@@ -348,12 +388,13 @@ impl Home {
 
     /// Stage 6: resolve the hybrid inverter's shared AC cap (PV priority,
     /// B.3.3) and return (pv_ac_w, batt_ac_w) at the panel.
-    fn stage_inverter(
-        &mut self,
-        exo: &Exogenous,
-        unit_realized: &[BatteryStepOutput],
-        dt_s: u32,
-    ) -> (f64, f64) {
+    fn stage_inverter(&mut self, exo: &Exogenous, batt: &BatteryStage, dt_s: u32) -> (f64, f64) {
+        let unit_realized = &batt.units;
+        // Discharge the dispatch stage never let the pack produce is the
+        // real B.3.3 curtailment; book it before the residual below.
+        self.meters
+            .batt_clipped
+            .accumulate(batt.curtailed_ac_w, dt_s);
         let mut p_batt_ac: f64 = unit_realized
             .iter()
             .zip(&self.devices.batteries)
@@ -374,28 +415,25 @@ impl Home {
         let p_bus = exo.pv_dc + hyb_batt_dc;
         if p_bus > 0.0 {
             // One conversion of the summed DC (the physics), then attribute
-            // the shared AC rating between the two sources that actually
-            // put power on the bus. PV occupies the bus first; a charging
-            // battery contributes no AC candidate (its share is negative
-            // and already netted into `p_bus`).
+            // the shared AC rating between the two sources that actually put
+            // power on the bus. PV priority was already enforced upstream by
+            // curtailing the battery command, so here the pack's realized DC
+            // is non-negotiable (its energy has left the cells) and any
+            // residual overflow curtails PV, which is losslessly curtailable
+            // at the MPPT. A charging battery contributes no AC candidate:
+            // its share is negative and already netted into `p_bus`.
             let eta = inv.eta_at_w(p_bus);
-            let pv_dc_share = exo.pv_dc.max(0.0).min(p_bus);
-            let batt_dc_share = p_bus - pv_dc_share;
+            let batt_dc_share = hyb_batt_dc.max(0.0).min(p_bus);
+            let pv_dc_share = p_bus - batt_dc_share;
             // The array's DC/AC ratio caps the PV path before the shared
             // rating does (B.7.4); the overhang is PV curtailment.
             let pv_ac_uncapped = pv_dc_share * eta;
             let pv_ac_candidate = pv_ac_uncapped.min(self.pv_ac_cap_w());
             let batt_ac_candidate = batt_dc_share * eta;
-            let (pv_admitted, batt_admitted) = resolve_shared_ac_cap(
-                inv.rated_ac_w(),
-                pv_ac_candidate,
-                batt_ac_candidate,
-                self.devices.pv_priority,
-            );
+            let (pv_admitted, batt_admitted) =
+                resolve_shared_ac_cap(inv.rated_ac_w(), pv_ac_candidate, batt_ac_candidate, false);
             p_pv_ac += pv_admitted;
             p_batt_ac += batt_admitted;
-            // Clipping is attributed to whichever source actually
-            // overflowed, measured back on the DC side (B.3.3).
             self.meters
                 .pv_clipped
                 .accumulate((pv_ac_uncapped - pv_admitted) / eta, dt_s);

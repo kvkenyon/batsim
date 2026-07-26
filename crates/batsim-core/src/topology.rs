@@ -126,8 +126,20 @@ pub fn build_devices(
         }
         *slot = Some(InverterUnit::with_quantity(model, inv_ref.quantity, 0.0));
     }
-    if hybrid_inverter.is_none() {
-        hybrid_inverter = synthesize_integrated_hybrid(sys, registry)?;
+    // An integrated hybrid comes with each head unit, so the AC path must
+    // scale with them whether it was declared or synthesized.
+    let integrated_units = integrated_hybrid_unit_count(sys, registry);
+    match &hybrid_inverter {
+        None => hybrid_inverter = synthesize_integrated_hybrid(sys, registry, integrated_units)?,
+        Some(inv) if integrated_units > 0 && inv.quantity() < integrated_units => {
+            return Err(CoreError::InvalidSystem(format!(
+                "`{}` declares quantity {} but the system has {integrated_units} \
+                 integrated-inverter head units",
+                inv.model().model_id,
+                inv.quantity()
+            )));
+        }
+        Some(_) => {}
     }
 
     let mut pv_ac_cap_w = None;
@@ -166,7 +178,8 @@ pub fn build_devices(
                     let model = registry.inverter(inv_id).ok_or_else(|| {
                         CoreError::InvalidSystem(format!("unknown PV inverter `{inv_id}`"))
                     })?;
-                    pv_inverter = Some(InverterUnit::new(model, 0.0));
+                    let units = pv_inverter_unit_count(model, pv_cfg.kw_dc)?;
+                    pv_inverter = Some(InverterUnit::with_quantity(model, units, 0.0));
                 }
             }
             Some(pv)
@@ -207,9 +220,61 @@ pub fn build_devices(
 ///
 /// Returns `None` when no declared battery is a DC-coupled integrated
 /// unit; errors when one is but the catalog has no compatible hybrid.
+/// How many units a named PV inverter needs to carry the whole array.
+///
+/// A string inverter is one box for the array; a per-module unit (the
+/// microinverter and battery-integrated ratings are per module, e.g. 0.64 kW
+/// for `enphase.iq8d_micro`) is deployed one per module group, so it scales
+/// to the array's DC nameplate instead of capping it at a single unit.
+///
+/// # Errors
+/// [`CoreError::InvalidSystem`] when the named model is a hybrid inverter:
+/// a hybrid is the shared battery/PV inverter, never a PV string inverter.
+fn pv_inverter_unit_count(
+    model: &batsim_registry::InverterModel,
+    array_kw_dc: f64,
+) -> Result<u32, CoreError> {
+    use batsim_registry::types::InverterTopology;
+    match model.topology {
+        InverterTopology::StringPVOnly => Ok(1),
+        InverterTopology::MicroinverterPV | InverterTopology::BatteryIntegrated => {
+            let per_unit_kw = model.rated_ac_output_kw.value;
+            if per_unit_kw <= 0.0 {
+                return Err(CoreError::InvalidSystem(format!(
+                    "PV inverter `{}` has a non-positive AC rating",
+                    model.model_id
+                )));
+            }
+            Ok((array_kw_dc / per_unit_kw).ceil().max(1.0) as u32)
+        }
+        InverterTopology::HybridDCCoupled => Err(CoreError::InvalidSystem(format!(
+            "`{}` is a hybrid inverter and cannot serve as the PV string \
+             inverter; leave `pv_inverter_model_id` null to land PV on its MPPTs",
+            model.model_id
+        ))),
+    }
+}
+
+/// Total DC-coupled integrated-inverter head units the system declares.
+fn integrated_hybrid_unit_count(
+    sys: &batsim_registry::system::HomeSystem,
+    registry: &Registry,
+) -> u32 {
+    sys.batteries
+        .iter()
+        .filter(|b| {
+            registry.battery(&b.model_id).is_some_and(|m| {
+                m.coupling == Coupling::DCCoupledHybrid && m.integrated_inverter == Some(true)
+            })
+        })
+        .map(|b| b.quantity)
+        .sum()
+}
+
 fn synthesize_integrated_hybrid(
     sys: &batsim_registry::system::HomeSystem,
     registry: &Registry,
+    integrated_units: u32,
 ) -> Result<Option<InverterUnit>, CoreError> {
     for bat_ref in &sys.batteries {
         let Some(model) = registry.battery(&bat_ref.model_id) else {
@@ -236,7 +301,7 @@ fn synthesize_integrated_hybrid(
             })?;
         return Ok(Some(InverterUnit::with_quantity(
             inv,
-            bat_ref.quantity,
+            integrated_units,
             0.0,
         )));
     }
