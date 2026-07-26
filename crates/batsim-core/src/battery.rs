@@ -745,6 +745,11 @@ mod tests {
     use batsim_registry::Coupling;
 
     /// Build a BatteryModel from JSON (registry types only; no catalog).
+    ///
+    /// The argument list mirrors the JSON fields under test; grouping
+    /// them into a struct would only obscure which field each test
+    /// varies.
+    #[allow(clippy::too_many_arguments)]
     fn model_json(
         model_id: &str,
         chemistry: Chemistry,

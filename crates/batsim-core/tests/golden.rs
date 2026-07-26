@@ -25,13 +25,16 @@ const SAMPLE_EVERY: u64 = 60;
 fn golden_for(model_id: &str) -> (serde_json::Value, String) {
     let registry = Registry::embedded().expect("embedded registry");
     let mut world = common::build_world(&registry, model_id, 1, 0xB4751, true, true);
-    // Two dispatch commands (C.7.1): switch to manual at 11:00 and hold a
-    // 3 kW discharge from the battery for the rest of the scenario.
+    // Two dispatch commands (C.7.1): at 20:00 UTC (15:00 CDT, battery
+    // full from the morning PV charge) switch to manual and hold a 3 kW
+    // discharge for the rest of the scenario. The trace then exercises
+    // overnight self-consumption discharge, morning PV charge to full,
+    // and a commanded discharge back to the reserve floor.
     world
         .dispatch(
             0,
             ScheduledDispatch {
-                execute_at_tick: 11 * 3600,
+                execute_at_tick: 20 * 3600,
                 action: DispatchAction::SetMode(ControlMode::Manual),
             },
         )
@@ -40,7 +43,7 @@ fn golden_for(model_id: &str) -> (serde_json::Value, String) {
         .dispatch(
             0,
             ScheduledDispatch {
-                execute_at_tick: 11 * 3600,
+                execute_at_tick: 20 * 3600,
                 action: DispatchAction::SetManualSetpoint(3000.0),
             },
         )

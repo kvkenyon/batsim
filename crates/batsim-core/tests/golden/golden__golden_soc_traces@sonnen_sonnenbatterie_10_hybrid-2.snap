@@ -1,0 +1,5 @@
+---
+source: crates/batsim-core/tests/golden.rs
+expression: hash
+---
+c6ff4aa28a88fc6f03510fa29e395116bed261cb6c0a2ce8dd315427e19b73a1

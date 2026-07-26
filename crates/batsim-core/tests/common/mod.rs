@@ -58,6 +58,7 @@ pub fn one_battery_system(registry: &Registry, model_id: &str, with_pv: bool) ->
     if let Some(ctrl) = &model.requires_controller_id {
         controllers.push(serde_json::json!({"model_id": ctrl, "quantity": 1}));
     }
+    let backup_capable = !controllers.is_empty();
     let pv = with_pv.then(|| {
         // DC-coupled systems land PV on the hybrid inverter's MPPTs
         // (null); AC-coupled systems need a dedicated string inverter.
@@ -81,7 +82,7 @@ pub fn one_battery_system(registry: &Registry, model_id: &str, with_pv: bool) ->
         "inverters": inverters,
         "controllers": controllers,
         "main_panel": {"service_rating_a": 200.0},
-        "backup_capable": true,
+        "backup_capable": backup_capable,
         "grid_meter": {"esiid": "1008900000000000000001"}
     });
     if let Some(pv) = pv {

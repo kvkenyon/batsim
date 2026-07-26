@@ -149,20 +149,20 @@ pub fn v_oc(chemistry: Chemistry, soc: f64) -> f64 {
 ///
 /// # Calibration (chosen fraction, voltage-cutoff model)
 ///
-/// * **Loss fraction**: `R_base` dissipates 7.7 % of `p_rated_w` as I^2R
-///   heat at the rated continuous current, `I_rated = p_rated_w /
-///   NOMINAL_PACK_V`, giving `R_base = 0.077 * p_rated_w / I_rated^2`.
-///   7.7 % is an estimated effective pack resistance (cells + contactors
-///   + harness), calibrated so the B.11 `thevenin_sag` anchor lands near
-///   the middle of its window: for the LFP reference device
-///   (`tesla.powerwall_3`, 11.5 kW continuous) at 5 % SOC and -5 degC the
-///   deliverable power is ~54 % of nameplate continuous (required:
-///   40-60 %).
-/// * **Voltage-cutoff model**: [`thevenin_max_discharge_w`] enforces the
-///   terminal-voltage cutoff `V_term >= v_min` with `v_min =
-///   V_MIN_CUTOFF_FRAC * NOMINAL_PACK_V` (0.85 * 400 = 340 V). Power
-///   requested below the cutoff is unavailable; the clamp reports the
-///   power at which the terminal would sit exactly at `v_min`.
+/// Loss fraction: `R_base` dissipates 7.7 % of `p_rated_w` as I^2R heat
+/// at the rated continuous current, `I_rated = p_rated_w /
+/// NOMINAL_PACK_V`, giving `R_base = 0.077 * p_rated_w / I_rated^2`.
+/// The 7.7 % value is an estimated effective pack resistance (cells,
+/// contactors, harness) calibrated against the B.11 `thevenin_sag`
+/// anchor: the LFP reference device `tesla.powerwall_3` (11.5 kW
+/// continuous) at 5 % SOC and -5 degC delivers ~54 % of nameplate
+/// continuous (required band: 40-60 %).
+///
+/// Voltage-cutoff model: [`thevenin_max_discharge_w`] enforces the
+/// terminal-voltage cutoff `V_term >= v_min` with `v_min =
+/// V_MIN_CUTOFF_FRAC * NOMINAL_PACK_V` (0.85 * 400 = 340 V). Power
+/// requested below the cutoff is unavailable; the clamp reports the
+/// power at which the terminal would sit exactly at `v_min`.
 #[must_use]
 pub fn base_internal_resistance(p_rated_w: f64) -> f64 {
     /// Estimated effective I^2R loss fraction at rated continuous power;

@@ -39,64 +39,66 @@ fn measure_rte(registry: &Registry, model: &BatteryModel) -> f64 {
     };
 
     let mut unit = BatteryUnit::new(model, None, 0.0, 0.0, BatteryConfig::default()).unwrap();
-    let mut e_chg_ac = 0.0f64;
-    let mut e_dis_ac = 0.0f64;
 
-    let mut drive = |unit: &mut BatteryUnit, p_ac_kw: f64, seconds: u64, charge: bool| {
-        // Hybrid-path efficiency at a power level: curve x-axis is AC kW;
-        // one fixed-point step from the DC side is ample (D1 decision).
-        let hyb_eta = |p_w: f64| -> f64 {
-            hybrid
-                .as_ref()
-                .map_or(1.0, |inv| {
-                    inv.model().efficiency_curve.eval(p_w.abs() / 1000.0)
-                })
-                .max(1e-6)
+    let (e_chg_ac, e_dis_ac) = {
+        let mut e_chg_ac = 0.0f64;
+        let mut e_dis_ac = 0.0f64;
+        let mut drive = |unit: &mut BatteryUnit, p_ac_kw: f64, seconds: u64, charge: bool| {
+            // Hybrid-path efficiency at a power level: curve x-axis is AC kW;
+            // one fixed-point step from the DC side is ample (D1 decision).
+            let hyb_eta = |p_w: f64| -> f64 {
+                hybrid
+                    .as_ref()
+                    .map_or(1.0, |inv| {
+                        inv.model().efficiency_curve.eval(p_w.abs() / 1000.0)
+                    })
+                    .max(1e-6)
+            };
+            for _ in 0..seconds {
+                // Translate the AC-side request to the unit's terminal
+                // (conservation-true: charge DC = AC x eta; discharge
+                // DC = AC / eta).
+                let p_term_req = match (&hybrid, charge) {
+                    (Some(_), true) => -p_ac_kw * 1000.0 * hyb_eta(p_ac_kw * 1000.0),
+                    (Some(_), false) => p_ac_kw * 1000.0 / hyb_eta(p_ac_kw * 1000.0),
+                    (None, true) => -p_ac_kw * 1000.0,
+                    (None, false) => p_ac_kw * 1000.0,
+                };
+                let out = unit.step(&BatteryStepInput {
+                    dt_s: 1,
+                    p_term_setpoint_w: p_term_req,
+                    t_amb_c: 25.0,
+                    grid_present: true,
+                });
+                // Meter the AC side of the path from the REALIZED terminal
+                // power (discharge: AC = DC x eta; charge: AC = DC / eta).
+                let p_ac_realized = match &hybrid {
+                    Some(_) if out.p_term_w >= 0.0 => out.p_term_w * hyb_eta(out.p_term_w),
+                    Some(_) => out.p_term_w / hyb_eta(out.p_term_w),
+                    None => out.p_term_w,
+                };
+                if p_ac_realized >= 0.0 {
+                    e_dis_ac += p_ac_realized / 3600.0;
+                } else {
+                    e_chg_ac += -p_ac_realized / 3600.0;
+                }
+            }
         };
-        for _ in 0..seconds {
-            // Translate the AC-side request to the unit's terminal
-            // (conservation-true: charge DC = AC x eta; discharge
-            // DC = AC / eta).
-            let p_term_req = match (&hybrid, charge) {
-                (Some(_), true) => -p_ac_kw * 1000.0 * hyb_eta(p_ac_kw * 1000.0),
-                (Some(_), false) => p_ac_kw * 1000.0 / hyb_eta(p_ac_kw * 1000.0),
-                (None, true) => -p_ac_kw * 1000.0,
-                (None, false) => p_ac_kw * 1000.0,
-            };
-            let out = unit.step(&BatteryStepInput {
-                dt_s: 1,
-                p_term_setpoint_w: p_term_req,
-                t_amb_c: 25.0,
-                grid_present: true,
-            });
-            // Meter the AC side of the path from the REALIZED terminal
-            // power (discharge: AC = DC x eta; charge: AC = DC / eta).
-            let p_ac_realized = match &hybrid {
-                Some(_) if out.p_term_w >= 0.0 => out.p_term_w * hyb_eta(out.p_term_w),
-                Some(_) => out.p_term_w / hyb_eta(out.p_term_w),
-                None => out.p_term_w,
-            };
-            if p_ac_realized >= 0.0 {
-                e_dis_ac += p_ac_realized / 3600.0;
-            } else {
-                e_chg_ac += -p_ac_realized / 3600.0;
+
+        // Charge 2 h at 0.5 C (clamped to rating), rest 10 min, then
+        // discharge at 0.5 C to cutoff (guarded against non-termination).
+        drive(&mut unit, p_chg_kw, 2 * 3600, true);
+        drive(&mut unit, 0.0, 600, true);
+        let mut guard = 0u64;
+        while unit.soc() > model.soc_window.min_soc_frac + 1e-9 {
+            drive(&mut unit, p_dis_kw, 1, false);
+            guard += 1;
+            if guard > 12 * 3600 {
+                break;
             }
         }
+        (e_chg_ac, e_dis_ac)
     };
-
-    // Charge 2 h at 0.5 C (clamped to rating), rest 10 min, then
-    // discharge at 0.5 C to cutoff (guarded against non-termination).
-    drive(&mut unit, p_chg_kw, 2 * 3600, true);
-    drive(&mut unit, 0.0, 600, true);
-    let mut guard = 0u64;
-    while unit.soc() > model.soc_window.min_soc_frac + 1e-9 {
-        drive(&mut unit, p_dis_kw, 1, false);
-        guard += 1;
-        if guard > 12 * 3600 {
-            break;
-        }
-    }
-    drop(drive);
     e_dis_ac / e_chg_ac
 }
 
