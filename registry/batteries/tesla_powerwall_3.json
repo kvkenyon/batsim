@@ -1,0 +1,63 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "tesla.powerwall_3",
+  "vendor": "Tesla",
+  "display_name": "Tesla Powerwall 3",
+  "chemistry": "LFP",
+  "coupling": "DCCoupledHybrid",
+  "nameplate_energy_kwh": { "value": 13.5, "provenance": "spec", "unit": "kWh" },
+  "usable_energy_kwh": { "value": 13.5, "provenance": "spec", "unit": "kWh" },
+  "continuous_discharge_power_kw": { "value": 11.5, "provenance": "spec", "unit": "kW", "note": "on-grid continuous AC" },
+  "peak_discharge_power_kw": { "value": 11.5, "provenance": "estimated", "unit": "kW", "note": "backup peak ratings config-dependent; not cleanly published" },
+  "peak_duration_s": { "value": 10, "provenance": "estimated", "unit": "s" },
+  "continuous_charge_power_kw": { "value": 11.5, "provenance": "estimated", "unit": "kW", "note": "grid charge AC-side; PV DC charge limited by MPPT/battery DC rating" },
+  "soc_window": { "min_soc_frac": 0.0, "max_soc_frac": 1.0, "reserve_floor_frac": 0.2, "provenance": "spec" },
+  "charge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.5, "efficiency": 0.90 },
+      { "x_kw": 2.0, "efficiency": 0.945 },
+      { "x_kw": 5.0, "efficiency": 0.95 },
+      { "x_kw": 11.5, "efficiency": 0.93 }
+    ],
+    "provenance": "estimated"
+  },
+  "discharge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.5, "efficiency": 0.90 },
+      { "x_kw": 2.0, "efficiency": 0.945 },
+      { "x_kw": 5.0, "efficiency": 0.95 },
+      { "x_kw": 11.5, "efficiency": 0.93 }
+    ],
+    "provenance": "estimated"
+  },
+  "rte_pv_coupled": { "value": 0.945, "provenance": "estimated", "unit": "frac", "note": "single-inversion DC path; derived from component claims" },
+  "rte_ac_coupled": { "value": 0.89, "provenance": "estimated", "unit": "frac", "note": "Tesla-published ~89% solar-to-grid storage-cycle figure used as AC RTE proxy" },
+  "grid_forming_in_backup": true,
+  "requires_controller_id": "tesla.gateway_2",
+  "integrated_inverter": true,
+  "microinverter_count": null,
+  "power_per_microinverter_kw": null,
+  "expansion": { "max_units_per_inverter": 4, "expansion_pack_model_id": "tesla.pw3_expansion_pack", "packs_add_power": false },
+  "warranty": {
+    "years": { "value": 10, "provenance": "spec", "unit": "yr" },
+    "cycles": { "value": 999999, "provenance": "spec", "unit": "cycles", "note": "unlimited when solar-charged; sentinel value" },
+    "capacity_retention_pct": { "value": 70, "provenance": "spec", "unit": "pct" }
+  },
+  "operating_temperature": { "min_c": -20, "max_c": 50, "provenance": "spec" },
+  "cooling": "active_liquid",
+  "ramp_rate": { "max_kw_per_s": 11.5, "provenance": "estimated", "note": "full-swing in ~1 s assumed for Li-ion inverter; not published" },
+  "self_discharge_frac_per_day": { "value": 0.002, "provenance": "estimated", "unit": "frac/day", "note": "includes idle/standby draw; not published" },
+  "vendor_api": {
+    "family": "tesla_local_gateway",
+    "auth_style": "bearer_local_login",
+    "base_path_hint": "/api",
+    "endpoints": [
+      { "path": "/api/login/Basic", "purpose": "auth" },
+      { "path": "/api/system_status/soe", "purpose": "soc" },
+      { "path": "/api/meters/aggregates", "purpose": "telemetry" },
+      { "path": "/api/operation", "purpose": "mode_config" }
+    ],
+    "provenance": "spec"
+  }
+}

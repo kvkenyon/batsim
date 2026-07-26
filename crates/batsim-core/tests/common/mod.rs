@@ -5,9 +5,7 @@
 use batsim_core::battery::BatteryConfig;
 use batsim_core::engine::{AmbientFeed, SimWorld};
 use batsim_core::home::Home;
-use batsim_core::load::{
-    HvacType, LoadConfig, LoadResolution, TxClimateZone, Vintage, WaterHeat,
-};
+use batsim_core::load::{HvacType, LoadConfig, LoadResolution, TxClimateZone, Vintage, WaterHeat};
 use batsim_core::time::SimClock;
 use batsim_core::topology::{build_devices, HomeBuildConfig, PvSiteConfig};
 use batsim_registry::{HomeSystem, Registry, SystemSpec};
@@ -46,18 +44,11 @@ pub fn std_pv_site() -> PvSiteConfig {
 
 /// Compose a one-battery HomeSystem document for a catalog model, with the
 /// vendor-required inverter/controller present.
-pub fn one_battery_system(
-    registry: &Registry,
-    model_id: &str,
-    with_pv: bool,
-) -> SystemSpec {
+pub fn one_battery_system(registry: &Registry, model_id: &str, with_pv: bool) -> SystemSpec {
     let model = registry.battery(model_id).expect("catalog battery");
     let mut inverters = Vec::new();
     let mut controllers = Vec::new();
-    if matches!(
-        model.coupling,
-        batsim_registry::Coupling::DCCoupledHybrid
-    ) {
+    if matches!(model.coupling, batsim_registry::Coupling::DCCoupledHybrid) {
         let inv = registry
             .inverters()
             .find(|i| i.compatible_battery_ids.iter().any(|b| b == model_id))

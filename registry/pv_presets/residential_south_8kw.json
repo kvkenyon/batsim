@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "preset_id": "residential.south_8kw",
+  "display_name": "Residential south-facing 8 kW array",
+  "kw_dc": { "value": 8.0, "provenance": "estimated", "unit": "kW", "note": "synthetic preset, not a datasheet product" },
+  "tilt_deg": 25,
+  "azimuth_deg": 180,
+  "dc_ac_ratio": 1.2,
+  "pv_inverter_model_id": "generic.string_pv_8kw"
+}

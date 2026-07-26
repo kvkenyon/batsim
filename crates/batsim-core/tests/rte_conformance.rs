@@ -28,7 +28,11 @@ fn measure_rte(registry: &Registry, model: &BatteryModel) -> f64 {
     let hybrid = if matches!(model.coupling, Coupling::DCCoupledHybrid) {
         registry
             .inverters()
-            .find(|i| i.compatible_battery_ids.iter().any(|b| b == &model.model_id))
+            .find(|i| {
+                i.compatible_battery_ids
+                    .iter()
+                    .any(|b| b == &model.model_id)
+            })
             .map(|m| batsim_core::inverter::InverterUnit::new(m, 0.0))
     } else {
         None
@@ -116,7 +120,11 @@ fn rte_conformance() {
             ));
         }
     }
-    assert!(failures.is_empty(), "RTE conformance failures:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "RTE conformance failures:\n{}",
+        failures.join("\n")
+    );
 }
 
 /// Diagnostic (not a conformance gate): print measured RTE per device for

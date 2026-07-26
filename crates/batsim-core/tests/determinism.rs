@@ -45,8 +45,7 @@ fn run_24h(parallel: bool) -> String {
             pv_priority: true,
         };
         let devices =
-            batsim_core::topology::build_devices(&spec, &registry, &cfg, SEED, idx as u64)
-                .unwrap();
+            batsim_core::topology::build_devices(&spec, &registry, &cfg, SEED, idx as u64).unwrap();
         world.add_home(batsim_core::home::Home::new(devices, true));
     }
 

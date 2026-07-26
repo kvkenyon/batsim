@@ -97,7 +97,11 @@ impl Home {
         if n == 0 {
             return 0.0;
         }
-        self.devices.batteries.iter().map(crate::battery::BatteryUnit::soc).sum::<f64>()
+        self.devices
+            .batteries
+            .iter()
+            .map(crate::battery::BatteryUnit::soc)
+            .sum::<f64>()
             / n as f64
     }
 
@@ -125,7 +129,9 @@ impl Home {
 
     /// Tick-top: apply due dispatch actions in queue order.
     fn apply_due_dispatches(&mut self, tick: u64) {
-        let split = self.dispatch_queue.partition_point(|c| c.execute_at_tick <= tick);
+        let split = self
+            .dispatch_queue
+            .partition_point(|c| c.execute_at_tick <= tick);
         let due: Vec<ScheduledDispatch> = self.dispatch_queue.drain(..split).collect();
         for cmd in due {
             match cmd.action {
@@ -137,12 +143,20 @@ impl Home {
     }
 
     /// Stages 1-2: load and PV (B.1.5).
-    fn stages_load_pv(&mut self, tick: u64, unix_time_s: u64, dt_s: u32, t_amb_c: f64) -> Exogenous {
+    fn stages_load_pv(
+        &mut self,
+        tick: u64,
+        unix_time_s: u64,
+        dt_s: u32,
+        t_amb_c: f64,
+    ) -> Exogenous {
         let p_load = self.devices.load.power_w(unix_time_s, tick, dt_s, t_amb_c);
         let p_load_critical = self.devices.load.last_critical_w();
-        let p_pv_dc = self.devices.pv.as_mut().map_or(0.0, |pv| {
-            pv.dc_power_w(unix_time_s, tick, dt_s, t_amb_c)
-        });
+        let p_pv_dc = self
+            .devices
+            .pv
+            .as_mut()
+            .map_or(0.0, |pv| pv.dc_power_w(unix_time_s, tick, dt_s, t_amb_c));
         // Dedicated string inverter: PV converts here (loss L1, A.3.2) and
         // never touches the battery path. Hybrid: PV DC lands on the bus
         // and converts in stage 6.
@@ -436,12 +450,7 @@ impl Home {
 }
 
 /// Step one unit with a setpoint and return realized terminal power.
-fn step_one(
-    unit: &mut crate::battery::BatteryUnit,
-    p_set: f64,
-    dt_s: u32,
-    t_amb_c: f64,
-) -> f64 {
+fn step_one(unit: &mut crate::battery::BatteryUnit, p_set: f64, dt_s: u32, t_amb_c: f64) -> f64 {
     unit.step(&BatteryStepInput {
         dt_s,
         p_term_setpoint_w: p_set,

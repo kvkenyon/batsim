@@ -1,0 +1,60 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "tesla.powerwall_2",
+  "vendor": "Tesla",
+  "display_name": "Tesla Powerwall 2",
+  "chemistry": "NMC",
+  "coupling": "ACCoupled",
+  "nameplate_energy_kwh": { "value": 14.0, "provenance": "spec", "unit": "kWh" },
+  "usable_energy_kwh": { "value": 13.5, "provenance": "spec", "unit": "kWh" },
+  "continuous_discharge_power_kw": { "value": 5.0, "provenance": "spec", "unit": "kW", "note": "continuous charge & discharge" },
+  "peak_discharge_power_kw": { "value": 7.0, "provenance": "spec", "unit": "kW" },
+  "peak_duration_s": { "value": 10, "provenance": "spec", "unit": "s" },
+  "continuous_charge_power_kw": { "value": 5.0, "provenance": "spec", "unit": "kW" },
+  "soc_window": { "min_soc_frac": 0.0, "max_soc_frac": 1.0, "reserve_floor_frac": 0.2, "provenance": "estimated" },
+  "charge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.25, "efficiency": 0.88 },
+      { "x_kw": 1.0, "efficiency": 0.932 },
+      { "x_kw": 2.5, "efficiency": 0.965 },
+      { "x_kw": 5.0, "efficiency": 0.9583 }
+    ],
+    "provenance": "estimated"
+  },
+  "discharge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.25, "efficiency": 0.88 },
+      { "x_kw": 1.0, "efficiency": 0.932 },
+      { "x_kw": 2.5, "efficiency": 0.965 },
+      { "x_kw": 5.0, "efficiency": 0.9583 }
+    ],
+    "provenance": "estimated"
+  },
+  "rte_pv_coupled": { "value": 0.90, "provenance": "spec", "unit": "frac", "note": "AC-coupled; PV-to-grid storage path identical to grid path" },
+  "rte_ac_coupled": { "value": 0.90, "provenance": "spec", "unit": "frac" },
+  "grid_forming_in_backup": true,
+  "requires_controller_id": "tesla.gateway_2",
+  "integrated_inverter": true,
+  "warranty": {
+    "years": { "value": 10, "provenance": "spec", "unit": "yr" },
+    "cycles": { "value": 999999, "provenance": "spec", "unit": "cycles", "note": "unlimited when solar-charged; sentinel value" },
+    "capacity_retention_pct": { "value": 70, "provenance": "spec", "unit": "pct" }
+  },
+  "operating_temperature": { "min_c": -20, "max_c": 50, "provenance": "spec" },
+  "cooling": "active_liquid",
+  "ramp_rate": { "max_kw_per_s": 5.0, "provenance": "estimated", "note": "full-swing in ~1 s assumed for Li-ion inverter; not published" },
+  "self_discharge_frac_per_day": { "value": 0.002, "provenance": "estimated", "unit": "frac/day", "note": "includes idle/standby draw; not published" },
+  "vendor_api": {
+    "family": "tesla_local_gateway",
+    "auth_style": "bearer_local_login",
+    "base_path_hint": "/api",
+    "endpoints": [
+      { "path": "/api/login/Basic", "purpose": "auth" },
+      { "path": "/api/system_status/soe", "purpose": "soc" },
+      { "path": "/api/meters/aggregates", "purpose": "telemetry" },
+      { "path": "/api/operation", "purpose": "mode_config" }
+    ],
+    "provenance": "spec"
+  }
+}

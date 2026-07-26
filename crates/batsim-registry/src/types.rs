@@ -585,7 +585,12 @@ pub enum EntryKind {
 
 impl EntryKind {
     /// All entry kinds, in canonical (sorted) order.
-    pub const ALL: [Self; 4] = [Self::Battery, Self::Inverter, Self::Controller, Self::PvPreset];
+    pub const ALL: [Self; 4] = [
+        Self::Battery,
+        Self::Inverter,
+        Self::Controller,
+        Self::PvPreset,
+    ];
 
     /// Subdirectory name within the registry tree.
     #[must_use]
@@ -682,14 +687,29 @@ mod tests {
     fn efficiency_curve_interpolates_and_clamps() {
         let curve = EfficiencyCurve {
             points: vec![
-                EfficiencyPoint { x_kw: 0.5, efficiency: 0.90 },
-                EfficiencyPoint { x_kw: 2.0, efficiency: 0.95 },
-                EfficiencyPoint { x_kw: 5.0, efficiency: 0.93 },
+                EfficiencyPoint {
+                    x_kw: 0.5,
+                    efficiency: 0.90,
+                },
+                EfficiencyPoint {
+                    x_kw: 2.0,
+                    efficiency: 0.95,
+                },
+                EfficiencyPoint {
+                    x_kw: 5.0,
+                    efficiency: 0.93,
+                },
             ],
             provenance: Provenance::Estimated,
         };
-        assert!((curve.eval(0.0) - 0.90).abs() < 1e-12, "clamp below first point");
-        assert!((curve.eval(99.0) - 0.93).abs() < 1e-12, "clamp above last point");
+        assert!(
+            (curve.eval(0.0) - 0.90).abs() < 1e-12,
+            "clamp below first point"
+        );
+        assert!(
+            (curve.eval(99.0) - 0.93).abs() < 1e-12,
+            "clamp above last point"
+        );
         let mid = curve.eval(1.25);
         assert!((mid - 0.925).abs() < 1e-12, "midpoint interp: {mid}");
         // Negative input evaluates by magnitude (charge/discharge symmetric).

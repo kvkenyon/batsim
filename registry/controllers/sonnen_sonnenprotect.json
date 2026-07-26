@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "sonnen.sonnenprotect",
+  "vendor": "sonnen",
+  "display_name": "sonnen sonnenProtect",
+  "provides_grid_forming": true,
+  "transfer_time_s": { "value": 1.5, "provenance": "estimated", "unit": "s", "note": "sonnen transfer default per B.3.6 (1–2 s range)" },
+  "reconnect_s": { "value": 300, "provenance": "estimated", "unit": "s", "note": "Part A §5 default reconnect delay after stable grid returns" },
+  "supports_generator_input": false,
+  "pv_blackstart": true,
+  "standby_power_w": { "value": 25, "provenance": "estimated", "unit": "W", "note": "sonnen controller vampire load, B.3.2" },
+  "vendor_api": {
+    "family": "sonnen_local_v2",
+    "auth_style": "token_header",
+    "base_path_hint": "/api/v2",
+    "endpoints": [
+      { "path": "/api/v2/status", "purpose": "telemetry" },
+      { "path": "/api/v2/configurations", "purpose": "mode_config" },
+      { "path": "/api/v2/setpoint/charge", "purpose": "setpoint_dispatch" },
+      { "path": "/api/v2/setpoint/discharge", "purpose": "setpoint_dispatch" }
+    ],
+    "provenance": "spec"
+  }
+}

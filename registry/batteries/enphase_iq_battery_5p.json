@@ -1,0 +1,63 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "enphase.iq_battery_5p",
+  "vendor": "Enphase",
+  "display_name": "Enphase IQ Battery 5P",
+  "chemistry": "LFP",
+  "coupling": "MicroinverterBased",
+  "nameplate_energy_kwh": { "value": 5.0, "provenance": "spec", "unit": "kWh" },
+  "usable_energy_kwh": { "value": 4.96, "provenance": "spec", "unit": "kWh" },
+  "continuous_discharge_power_kw": { "value": 3.84, "provenance": "spec", "unit": "kW", "note": "6 × IQ8D @ 0.64 kW" },
+  "peak_discharge_power_kw": { "value": 7.68, "provenance": "spec", "unit": "kW" },
+  "peak_duration_s": { "value": 3, "provenance": "spec", "unit": "s" },
+  "continuous_charge_power_kw": { "value": 3.84, "provenance": "spec", "unit": "kW" },
+  "soc_window": { "min_soc_frac": 0.0, "max_soc_frac": 1.0, "reserve_floor_frac": 0.1, "provenance": "spec" },
+  "charge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.3, "efficiency": 0.88 },
+      { "x_kw": 1.0, "efficiency": 0.92 },
+      { "x_kw": 1.92, "efficiency": 0.93 },
+      { "x_kw": 3.84, "efficiency": 0.915 }
+    ],
+    "provenance": "estimated"
+  },
+  "discharge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.3, "efficiency": 0.88 },
+      { "x_kw": 1.0, "efficiency": 0.92 },
+      { "x_kw": 1.92, "efficiency": 0.93 },
+      { "x_kw": 3.84, "efficiency": 0.915 }
+    ],
+    "provenance": "estimated"
+  },
+  "rte_pv_coupled": { "value": 0.90, "provenance": "spec", "unit": "frac", "note": "AC-coupled round trip, Enphase-published ~90%" },
+  "rte_ac_coupled": { "value": 0.90, "provenance": "spec", "unit": "frac" },
+  "grid_forming_in_backup": true,
+  "requires_controller_id": "enphase.iq_system_controller_2",
+  "integrated_inverter": true,
+  "microinverter_count": 6,
+  "power_per_microinverter_kw": { "value": 0.64, "provenance": "spec", "unit": "kW" },
+  "expansion": { "max_units_per_inverter": null, "expansion_pack_model_id": null, "packs_add_power": true },
+  "warranty": {
+    "years": { "value": 15, "provenance": "spec", "unit": "yr" },
+    "cycles": { "value": 6000, "provenance": "spec", "unit": "cycles" },
+    "capacity_retention_pct": { "value": 60, "provenance": "spec", "unit": "pct" }
+  },
+  "operating_temperature": { "min_c": -20, "max_c": 50, "derating_note": "power derating above ~45 C", "provenance": "spec" },
+  "cooling": "passive",
+  "ramp_rate": { "max_kw_per_s": 3.84, "provenance": "estimated", "note": "sub-second full-swing assumed; not published" },
+  "self_discharge_frac_per_day": { "value": 0.002, "provenance": "estimated", "unit": "frac/day" },
+  "vendor_api": {
+    "family": "enphase_envoy_local",
+    "auth_style": "jwt_via_cloud",
+    "base_path_hint": "/",
+    "endpoints": [
+      { "path": "/ivp/ensemble/inventory", "purpose": "inventory" },
+      { "path": "/ivp/ensemble/soc", "purpose": "soc" },
+      { "path": "/api/v1/production", "purpose": "telemetry" },
+      { "path": "/ivp/livedata/status", "purpose": "telemetry" }
+    ],
+    "provenance": "spec"
+  }
+}

@@ -17,9 +17,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use batsim_core::battery::{BatteryConfig, BatteryStepInput, BatteryUnit};
-use batsim_registry::types::{
-    BatteryModel, Chemistry, Coupling, EfficiencyCurve, EfficiencyPoint,
-};
+use batsim_registry::types::{BatteryModel, Chemistry, Coupling, EfficiencyCurve, EfficiencyPoint};
 use batsim_registry::Provenance as Prov;
 use proptest::prelude::*;
 
@@ -33,10 +31,22 @@ fn make_model(
 ) -> BatteryModel {
     let curve = |base: f64| EfficiencyCurve {
         points: vec![
-            EfficiencyPoint { x_kw: 0.05 * continuous_kw, efficiency: base - 0.04 },
-            EfficiencyPoint { x_kw: 0.25 * continuous_kw, efficiency: base },
-            EfficiencyPoint { x_kw: 0.5 * continuous_kw, efficiency: base + 0.01 },
-            EfficiencyPoint { x_kw: continuous_kw, efficiency: base - 0.005 },
+            EfficiencyPoint {
+                x_kw: 0.05 * continuous_kw,
+                efficiency: base - 0.04,
+            },
+            EfficiencyPoint {
+                x_kw: 0.25 * continuous_kw,
+                efficiency: base,
+            },
+            EfficiencyPoint {
+                x_kw: 0.5 * continuous_kw,
+                efficiency: base + 0.01,
+            },
+            EfficiencyPoint {
+                x_kw: continuous_kw,
+                efficiency: base - 0.005,
+            },
         ],
         provenance: Prov::Estimated,
     };
@@ -75,9 +85,9 @@ fn arb_params() -> impl Strategy<Value = (Chemistry, Coupling, f64, f64, f64)> {
             Coupling::DCCoupledHybrid,
             Coupling::MicroinverterBased,
         ]),
-        3.0f64..20.0,  // usable kWh
-        2.0f64..12.0,  // continuous kW
-        0.0f64..1.0,   // initial SOC
+        3.0f64..20.0, // usable kWh
+        2.0f64..12.0, // continuous kW
+        0.0f64..1.0,  // initial SOC
     )
 }
 

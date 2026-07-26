@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "sonnen.ecolinx",
+  "vendor": "sonnen",
+  "display_name": "sonnen ecoLinx (20 kWh configuration)",
+  "chemistry": "LFP",
+  "coupling": "ACCoupled",
+  "nameplate_energy_kwh": { "value": 20.0, "provenance": "estimated", "unit": "kWh", "note": "not separately published; LFP full window, usable ≈ nameplate" },
+  "usable_energy_kwh": { "value": 20.0, "provenance": "spec", "unit": "kWh", "note": "10–20 kWh usable in 2 kWh modular steps; 20 kWh configuration per Part A §5 default" },
+  "continuous_discharge_power_kw": { "value": 8.0, "provenance": "spec", "unit": "kW" },
+  "continuous_charge_power_kw": { "value": 8.0, "provenance": "spec", "unit": "kW" },
+  "soc_window": { "min_soc_frac": 0.0, "max_soc_frac": 1.0, "reserve_floor_frac": 0.2, "provenance": "estimated" },
+  "charge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.4, "efficiency": 0.87 },
+      { "x_kw": 1.5, "efficiency": 0.925 },
+      { "x_kw": 4.0, "efficiency": 0.948 },
+      { "x_kw": 6.0, "efficiency": 0.946 },
+      { "x_kw": 8.0, "efficiency": 0.9428 }
+    ],
+    "provenance": "estimated"
+  },
+  "discharge_efficiency_curve": {
+    "points": [
+      { "x_kw": 0.4, "efficiency": 0.87 },
+      { "x_kw": 1.5, "efficiency": 0.925 },
+      { "x_kw": 4.0, "efficiency": 0.948 },
+      { "x_kw": 6.0, "efficiency": 0.946 },
+      { "x_kw": 8.0, "efficiency": 0.9428 }
+    ],
+    "provenance": "estimated"
+  },
+  "rte_pv_coupled": { "value": 0.88, "provenance": "estimated", "unit": "frac", "note": "AC-coupled; PV-to-grid storage path identical to grid path; ~86–90% range, midpoint used" },
+  "rte_ac_coupled": { "value": 0.88, "provenance": "estimated", "unit": "frac", "note": "~86–90% range; midpoint used" },
+  "grid_forming_in_backup": true,
+  "integrated_inverter": true,
+  "warranty": {
+    "years": { "value": 10, "provenance": "spec", "unit": "yr" },
+    "cycles": { "value": 10000, "provenance": "spec", "unit": "cycles" }
+  },
+  "operating_temperature": { "min_c": 5, "max_c": 40, "provenance": "estimated", "derating_note": "indoor-oriented installation" },
+  "ramp_rate": { "max_kw_per_s": 8.0, "provenance": "estimated", "note": "full-swing in ~1 s assumed; not published" },
+  "self_discharge_frac_per_day": { "value": 0.002, "provenance": "estimated", "unit": "frac/day", "note": "includes idle/standby draw; not published" },
+  "vendor_api": {
+    "family": "sonnen_local_v2",
+    "auth_style": "token_header",
+    "base_path_hint": "/api/v2",
+    "endpoints": [
+      { "path": "/api/v2/status", "purpose": "telemetry" },
+      { "path": "/api/v2/configurations", "purpose": "mode_config" },
+      { "path": "/api/v2/setpoint/charge", "purpose": "setpoint_dispatch" },
+      { "path": "/api/v2/setpoint/discharge", "purpose": "setpoint_dispatch" }
+    ],
+    "provenance": "spec"
+  }
+}

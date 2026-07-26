@@ -4,6 +4,11 @@
 //! The free functions here are the explicit loss points of spec A.3.2/3.3
 //! (F16): every conversion stage in every topology routes through
 //! [`dc_to_ac`] / [`ac_to_dc`] so telemetry can attribute each loss.
+//!
+//! All powers are magnitudes (W, non-negative); direction is carried by
+//! which function is called. Efficiency curves are evaluated at
+//! `x_kw = power / 1000` against the registry `EfficiencyCurve` semantics
+//! (linear interpolation, endpoint clamping, spec B.3.1).
 
 use batsim_registry::{EfficiencyCurve, InverterModel};
 use serde::{Deserialize, Serialize};
@@ -19,13 +24,45 @@ pub struct Conversion {
     pub clipped_w: f64,
 }
 
+/// Efficiency floor: at/below this the stage is treated as total loss
+/// (guards the (0, 0) zero anchor of B.3.1 curves from NaN/Inf).
+const ETA_FLOOR: f64 = 1e-6;
+
 /// DC -> AC conversion (discharge path or PV inversion), B.3.1/B.3.3:
 /// `P_ac = P_dc * eta_inv(|P_dc|/P_rated)` hard-clamped to the AC rating;
 /// the clamp bounds the OUTPUT, so excess DC input is reported as clipped.
+///
+/// The clipped share of the DC input is the proportional overhang
+/// `p_dc - p_out/eta` (the slice of input power that could not leave the
+/// stage); it is counted as clipped, never as heat loss.
 #[must_use]
 pub fn dc_to_ac(curve: &EfficiencyCurve, rated_ac_w: f64, p_dc_w: f64) -> Conversion {
-    let _ = (curve, rated_ac_w, p_dc_w);
-    todo!("implemented by physics task")
+    let p_dc_w = p_dc_w.max(0.0);
+    let eta = curve.eval(p_dc_w / 1000.0);
+    if p_dc_w <= 0.0 || eta <= ETA_FLOOR {
+        // Zero input, or the (0,0) zero anchor: total loss, no output.
+        return Conversion {
+            p_out_w: 0.0,
+            loss_w: p_dc_w,
+            clipped_w: 0.0,
+        };
+    }
+    let p_ac_unclamped = p_dc_w * eta;
+    if p_ac_unclamped <= rated_ac_w {
+        Conversion {
+            p_out_w: p_ac_unclamped,
+            loss_w: p_dc_w - p_ac_unclamped,
+            clipped_w: 0.0,
+        }
+    } else {
+        let p_out_w = rated_ac_w;
+        let clipped_w = p_dc_w - p_out_w / eta;
+        Conversion {
+            p_out_w,
+            loss_w: p_out_w / eta * (1.0 - eta),
+            clipped_w,
+        }
+    }
 }
 
 /// AC -> DC conversion (charge path), B.3.1:
@@ -34,13 +71,28 @@ pub fn dc_to_ac(curve: &EfficiencyCurve, rated_ac_w: f64, p_dc_w: f64) -> Conver
 /// normal operating bound, not lost energy).
 #[must_use]
 pub fn ac_to_dc(curve: &EfficiencyCurve, rated_ac_w: f64, p_ac_req_w: f64) -> Conversion {
-    let _ = (curve, rated_ac_w, p_ac_req_w);
-    todo!("implemented by physics task")
+    let p_ac_req_w = p_ac_req_w.max(0.0).min(rated_ac_w);
+    let eta = curve.eval(p_ac_req_w / 1000.0);
+    if p_ac_req_w <= 0.0 || eta <= ETA_FLOOR {
+        return Conversion {
+            p_out_w: 0.0,
+            loss_w: p_ac_req_w,
+            clipped_w: 0.0,
+        };
+    }
+    let p_out_w = p_ac_req_w / eta;
+    Conversion {
+        p_out_w,
+        loss_w: p_out_w - p_ac_req_w,
+        clipped_w: 0.0,
+    }
 }
 
-/// Resolve competition for shared hybrid-inverter AC capacity between PV
-/// and battery discharge (B.3.3). `pv_priority` (default true) gives PV
-/// first claim and curtails the battery second, matching hybrid firmware.
+/// Resolve two candidate AC flows (PV output and battery discharge)
+/// sharing one inverter's AC rating (spec B.3.3): the combined flow is
+/// capped at `rated_ac_w`; with `pv_priority` PV is admitted first and
+/// the battery takes the remainder (the default, matching hybrid
+/// firmware); otherwise the battery is admitted first.
 /// Returns `(pv_ac_w, batt_ac_w)` admitted through the inverter.
 #[must_use]
 pub fn resolve_shared_ac_cap(
@@ -49,8 +101,16 @@ pub fn resolve_shared_ac_cap(
     batt_ac_candidate_w: f64,
     pv_priority: bool,
 ) -> (f64, f64) {
-    let _ = (rated_ac_w, pv_ac_candidate_w, batt_ac_candidate_w, pv_priority);
-    todo!("implemented by physics task")
+    let rated = rated_ac_w.max(0.0);
+    let pv = pv_ac_candidate_w.max(0.0);
+    let batt = batt_ac_candidate_w.max(0.0);
+    if pv_priority {
+        let pv_admitted = pv.min(rated);
+        (pv_admitted, batt.min(rated - pv_admitted))
+    } else {
+        let batt_admitted = batt.min(rated);
+        (pv.min(rated - batt_admitted), batt_admitted)
+    }
 }
 
 /// A live inverter instance: registry model plus standby state.
@@ -60,49 +120,188 @@ pub fn resolve_shared_ac_cap(
 /// `BatteryUnit` terminal semantics (see `battery` module docs).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InverterUnit {
-    // Implemented by the physics task: model, rated watts, standby watts.
+    /// The registry model driving this unit.
+    model: InverterModel,
+    /// Rated continuous AC output (W), SI-converted from the catalog kW.
+    rated_ac_w: f64,
+    /// Standby draw while energized (W), AC side (B.3.2).
+    standby_w: f64,
 }
 
 impl InverterUnit {
-    /// Build from a registry model. `standby_w` comes from the system
-    /// composition (B.3.2 defaults when the catalog has no explicit field:
-    /// folded into battery self-discharge per Part A §5, so explicit
-    /// inverter standby is usually 0 in M1).
+    /// Build a unit from its registry model. `standby_w` is the measured
+    /// or estimated AC-side standby draw (B.3.2); it is carried, never
+    /// invented from the model.
     #[must_use]
     pub fn new(model: &InverterModel, standby_w: f64) -> Self {
-        let _ = (model, standby_w);
-        todo!("implemented by physics task")
+        Self {
+            rated_ac_w: model.rated_ac_output_kw.value * 1000.0,
+            standby_w,
+            model: model.clone(),
+        }
     }
 
     /// Rated continuous AC output (W).
     #[must_use]
     pub fn rated_ac_w(&self) -> f64 {
-        todo!("implemented by physics task")
+        self.rated_ac_w
     }
 
     /// Standby draw while energized (W), AC side (B.3.2).
     #[must_use]
     pub fn standby_w(&self) -> f64 {
-        todo!("implemented by physics task")
+        self.standby_w
     }
 
     /// DC -> AC through this inverter.
     #[must_use]
     pub fn dc_to_ac(&self, p_dc_w: f64) -> Conversion {
-        let _ = p_dc_w;
-        todo!("implemented by physics task")
+        dc_to_ac(&self.model.efficiency_curve, self.rated_ac_w, p_dc_w)
     }
 
     /// AC -> DC through this inverter.
     #[must_use]
     pub fn ac_to_dc(&self, p_ac_req_w: f64) -> Conversion {
-        let _ = p_ac_req_w;
-        todo!("implemented by physics task")
+        ac_to_dc(&self.model.efficiency_curve, self.rated_ac_w, p_ac_req_w)
     }
 
     /// The registry model.
     #[must_use]
     pub fn model(&self) -> &InverterModel {
-        todo!("implemented by physics task")
+        &self.model
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use batsim_registry::{EfficiencyPoint, Provenance};
+
+    /// B.3.1-conforming curve: (0, 0) anchor, poor 5 % load efficiency,
+    /// 0.97 peak in the 0.2-0.5 band, slight rolloff at full load.
+    fn cec_curve(rated_kw: f64) -> EfficiencyCurve {
+        EfficiencyCurve {
+            points: vec![
+                EfficiencyPoint {
+                    x_kw: 0.0,
+                    efficiency: 0.0,
+                },
+                EfficiencyPoint {
+                    x_kw: 0.05 * rated_kw,
+                    efficiency: 0.90,
+                },
+                EfficiencyPoint {
+                    x_kw: 0.20 * rated_kw,
+                    efficiency: 0.97,
+                },
+                EfficiencyPoint {
+                    x_kw: 0.50 * rated_kw,
+                    efficiency: 0.97,
+                },
+                EfficiencyPoint {
+                    x_kw: rated_kw,
+                    efficiency: 0.955,
+                },
+            ],
+            provenance: Provenance::Estimated,
+        }
+    }
+
+    #[test]
+    fn dc_to_ac_efficiency_and_clipping() {
+        let curve = cec_curve(10.0);
+        // Mid-band: 5 kW DC at eta 0.97 -> 4850 W AC, 150 W heat, no clip.
+        let c = dc_to_ac(&curve, 10_000.0, 5_000.0);
+        assert!((c.p_out_w - 4_850.0).abs() < 1e-9);
+        assert!((c.loss_w - 150.0).abs() < 1e-9);
+        assert_eq!(c.clipped_w, 0.0);
+        // Overdrive: 15 kW DC -> output clamped to 10 kW AC, excess DC
+        // input counted as clipped (not heat).
+        let c = dc_to_ac(&curve, 10_000.0, 15_000.0);
+        assert_eq!(c.p_out_w, 10_000.0);
+        let eta = curve.eval(15.0);
+        assert!(c.clipped_w > 0.0);
+        assert!((c.p_out_w + c.loss_w + c.clipped_w - 15_000.0).abs() < 1e-6);
+        assert!((c.loss_w - 10_000.0 / eta * (1.0 - eta)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn dc_to_ac_low_power_efficiency_is_poor() {
+        let curve = cec_curve(10.0);
+        // 5 % load: eta 0.90 (B.3.1 MUST-show poor low-load efficiency).
+        let c = dc_to_ac(&curve, 10_000.0, 500.0);
+        assert!((c.p_out_w - 450.0).abs() < 1e-9);
+        // Below 5 % the linear-from-zero anchor drops eta proportionally:
+        // at 1 % load eta = 0.18, so 100 W DC yields only 18 W AC.
+        let c = dc_to_ac(&curve, 10_000.0, 100.0);
+        assert!((c.p_out_w - 18.0).abs() < 1e-9);
+        assert!((c.loss_w - 82.0).abs() < 1e-9);
+        assert_eq!(c.clipped_w, 0.0);
+        // Zero input is exact silence.
+        let c = dc_to_ac(&curve, 10_000.0, 0.0);
+        assert_eq!((c.p_out_w, c.loss_w, c.clipped_w), (0.0, 0.0, 0.0));
+        // A flat-zero curve start is the total-loss guard (no NaN/Inf).
+        let dead = EfficiencyCurve {
+            points: vec![
+                EfficiencyPoint {
+                    x_kw: 0.0,
+                    efficiency: 0.0,
+                },
+                EfficiencyPoint {
+                    x_kw: 1.0,
+                    efficiency: 0.0,
+                },
+            ],
+            provenance: Provenance::Estimated,
+        };
+        let c = dc_to_ac(&dead, 10_000.0, 500.0);
+        assert_eq!((c.p_out_w, c.loss_w, c.clipped_w), (0.0, 500.0, 0.0));
+    }
+
+    #[test]
+    fn ac_to_dc_divides_by_eta_and_clamps_request() {
+        let curve = cec_curve(10.0);
+        // 5 kW AC request at eta 0.97 -> 5154.6 W DC draw.
+        let c = ac_to_dc(&curve, 10_000.0, 5_000.0);
+        assert!((c.p_out_w - 5_000.0 / 0.97).abs() < 1e-6);
+        assert!((c.loss_w - (5_000.0 / 0.97 - 5_000.0)).abs() < 1e-6);
+        assert_eq!(c.clipped_w, 0.0);
+        // Request above the rating clamps to the rating (no clip counter).
+        let c = ac_to_dc(&curve, 10_000.0, 20_000.0);
+        let eta_at_rated = curve.eval(10.0);
+        assert!((c.p_out_w - 10_000.0 / eta_at_rated).abs() < 1e-6);
+        // Tiny request under the (0,0) anchor: eta collapses, so the DC
+        // draw is large relative to the request but finite (no NaN/Inf).
+        let c = ac_to_dc(&curve, 10_000.0, 1.0);
+        assert!(c.p_out_w.is_finite() && c.loss_w.is_finite());
+        assert!(c.p_out_w > 100.0, "vampire-region draw {}", c.p_out_w);
+        // Zero request is exact silence.
+        let c = ac_to_dc(&curve, 10_000.0, 0.0);
+        assert_eq!((c.p_out_w, c.loss_w, c.clipped_w), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn shared_ac_cap_pv_priority_default() {
+        // Under the cap: both pass.
+        assert_eq!(
+            resolve_shared_ac_cap(10_000.0, 3_000.0, 4_000.0, true),
+            (3_000.0, 4_000.0)
+        );
+        // Over the cap with PV priority: PV first, battery gets the rest.
+        assert_eq!(
+            resolve_shared_ac_cap(10_000.0, 8_000.0, 5_000.0, true),
+            (8_000.0, 2_000.0)
+        );
+        // PV alone saturates: battery fully blocked.
+        assert_eq!(
+            resolve_shared_ac_cap(10_000.0, 12_000.0, 5_000.0, true),
+            (10_000.0, 0.0)
+        );
+        // Battery priority flips the split.
+        assert_eq!(
+            resolve_shared_ac_cap(10_000.0, 8_000.0, 5_000.0, false),
+            (5_000.0, 5_000.0)
+        );
     }
 }

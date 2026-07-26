@@ -82,11 +82,7 @@ impl SimWorld {
     ///
     /// # Errors
     /// Propagates [`SimClock::new`] errors.
-    pub fn new(
-        clock: SimClock,
-        master_seed: u64,
-        ambient: AmbientFeed,
-    ) -> Result<Self, CoreError> {
+    pub fn new(clock: SimClock, master_seed: u64, ambient: AmbientFeed) -> Result<Self, CoreError> {
         Ok(Self {
             homes: Vec::new(),
             clock,
@@ -142,9 +138,10 @@ impl SimWorld {
     /// # Errors
     /// [`CoreError::Dispatch`] when `home_idx` is out of range.
     pub fn dispatch(&mut self, home_idx: usize, cmd: ScheduledDispatch) -> Result<(), CoreError> {
-        let home = self.homes.get_mut(home_idx).ok_or_else(|| {
-            CoreError::Dispatch(format!("no home at index {home_idx}"))
-        })?;
+        let home = self
+            .homes
+            .get_mut(home_idx)
+            .ok_or_else(|| CoreError::Dispatch(format!("no home at index {home_idx}")))?;
         home.schedule(cmd);
         Ok(())
     }
@@ -152,11 +149,7 @@ impl SimWorld {
     /// Advance one tick: step every home in arena order (B.1.5 pipeline
     /// per home). Single-threaded; the reference implementation.
     pub fn step(&mut self) {
-        let (tick, unix, dt) = (
-            self.clock.tick(),
-            self.clock.unix_time(),
-            self.clock.dt_s(),
-        );
+        let (tick, unix, dt) = (self.clock.tick(), self.clock.unix_time(), self.clock.dt_s());
         let t_amb = self.ambient.at(unix);
         for home in &mut self.homes {
             home.step(tick, unix, dt, t_amb);
@@ -170,23 +163,17 @@ impl SimWorld {
     /// and no cross-home reduction feeds back into state.
     pub fn step_parallel(&mut self) {
         use rayon::prelude::*;
-        let (tick, unix, dt) = (
-            self.clock.tick(),
-            self.clock.unix_time(),
-            self.clock.dt_s(),
-        );
+        let (tick, unix, dt) = (self.clock.tick(), self.clock.unix_time(), self.clock.dt_s());
         let t_amb = self.ambient.at(unix);
         // Fixed chunk size computed once (B.10.4) so partitioning is
         // deterministic regardless of thread scheduling.
         let n_threads = rayon::current_num_threads().max(1);
         let chunk = (self.homes.len() / (4 * n_threads)).max(1);
-        self.homes
-            .par_chunks_mut(chunk)
-            .for_each(|chunk_homes| {
-                for home in chunk_homes {
-                    home.step(tick, unix, dt, t_amb);
-                }
-            });
+        self.homes.par_chunks_mut(chunk).for_each(|chunk_homes| {
+            for home in chunk_homes {
+                home.step(tick, unix, dt, t_amb);
+            }
+        });
         self.clock.advance();
     }
 

@@ -50,13 +50,11 @@ impl SimClock {
     /// [`CoreError::InvalidConfig`] on unparsable input, plus the
     /// [`SimClock::new`] invariants.
     pub fn from_rfc3339(epoch: &str, dt_s: u32) -> Result<Self, CoreError> {
-        let parsed = OffsetDateTime::parse(epoch, &Rfc3339).map_err(|e| {
-            CoreError::InvalidConfig(format!("invalid epoch `{epoch}`: {e}"))
-        })?;
+        let parsed = OffsetDateTime::parse(epoch, &Rfc3339)
+            .map_err(|e| CoreError::InvalidConfig(format!("invalid epoch `{epoch}`: {e}")))?;
         let unix = parsed.unix_timestamp();
-        let epoch_s = u64::try_from(unix).map_err(|_| {
-            CoreError::InvalidConfig(format!("epoch `{epoch}` is before 1970"))
-        })?;
+        let epoch_s = u64::try_from(unix)
+            .map_err(|_| CoreError::InvalidConfig(format!("epoch `{epoch}` is before 1970")))?;
         Self::new(epoch_s, dt_s)
     }
 
@@ -103,7 +101,10 @@ impl SimClock {
         };
         OffsetDateTime::from_unix_timestamp(unix).map_or_else(
             |_| "<invalid>".to_owned(),
-            |dt| dt.format(&Rfc3339).unwrap_or_else(|_| "<invalid>".to_owned()),
+            |dt| {
+                dt.format(&Rfc3339)
+                    .unwrap_or_else(|_| "<invalid>".to_owned())
+            },
         )
     }
 }
