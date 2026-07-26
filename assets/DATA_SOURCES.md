@@ -52,7 +52,7 @@ all days.
 
 | Component | Model | Citation / provenance |
 | --- | --- | --- |
-| Solar position | NOAA solar calculator series (Meeus-based; geom. mean longitude/anomaly, equation of center, apparent longitude, obliquity correction, equation of time). Accuracy <= 0.05 deg for 1950-2050 (B.7.2 PSA/NREL SPA-lite class). Pure-function, std f64 only. | NOAA Solar Calculator (Reda & Andreas class), Meeus, *Astronomical Algorithms*. |
+| Solar position | NOAA solar calculator series (Meeus-based; geom. mean longitude/anomaly, equation of center, apparent longitude, obliquity correction, equation of time). Accuracy <= 0.05 deg for 1950-2050 (B.7.2 PSA/NREL SPA-lite class). Pure-function; transcendentals via the libm-backed `math` module (cross-platform bit-exact). | NOAA Solar Calculator (Reda & Andreas class), Meeus, *Astronomical Algorithms*. |
 | Extraterrestrial irradiance | G_sc = 1367 W/m^2 with eccentricity-correction day-angle series. | Spencer (1971); Iqbal (1983). |
 | Clear-sky irradiance | **Hottel (1976)** beam transmittance, model A (23 km visibility standard atmosphere) at fixed 0.2 km altitude; **Liu & Jordan (1960)** diffuse transmittance; **Kasten & Young (1989)** airmass. Documented estimated built-in feed. | Hottel, Solar Energy 18 (1976); Liu & Jordan, Solar Energy 4(3) (1960); Kasten & Young, Applied Optics 28 (1989). |
 | Operational irradiance feed | **NREL NSRDB PSM v3** (30-min/hourly GHI/DNI/DHI per site, TMY or scenario year), binary per-site series interpolated in true solar time. | M2+ scenario pipeline (B.7.1); the M1 clear-sky model stands in. |

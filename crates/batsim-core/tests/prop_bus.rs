@@ -131,13 +131,8 @@ fn arb_script() -> impl Strategy<Value = Vec<(u64, Cmd)>> {
         ControlMode::BackupReserveHold,
     ])
     .prop_map(Cmd::Mode);
-    let setpoint = prop_oneof![
-        Just(-1.2),
-        Just(1.2),
-        Just(0.0),
-        (-1.0..1.0f64),
-    ]
-    .prop_map(Cmd::Setpoint);
+    let setpoint =
+        prop_oneof![Just(-1.2), Just(1.2), Just(0.0), (-1.0..1.0f64),].prop_map(Cmd::Setpoint);
     let reserve = (0.0..0.8f64).prop_map(Cmd::Reserve);
     let events = prop::collection::vec((0..TICKS, prop_oneof![mode, setpoint, reserve]), 2..10);
     let block = (
@@ -179,11 +174,7 @@ fn arb_script() -> impl Strategy<Value = Vec<(u64, Cmd)>> {
 }
 
 /// Turn fractional setpoints into watts against the model's nameplates.
-fn materialize(
-    script: &[(u64, Cmd)],
-    max_dis_w: f64,
-    max_chg_w: f64,
-) -> Vec<ScheduledDispatch> {
+fn materialize(script: &[(u64, Cmd)], max_dis_w: f64, max_chg_w: f64) -> Vec<ScheduledDispatch> {
     script
         .iter()
         .map(|&(execute_at_tick, cmd)| {
@@ -235,10 +226,7 @@ fn assert_tick(
     // relative tolerance covers reorder rounding (a few ULPs of the
     // largest term) and nothing more.
     let feed = t.p_pv_ac_w + t.p_batt_ac_w.max(0.0) + t.p_grid_w.max(0.0);
-    let drain = t.p_load_w
-        + t.p_standby_w
-        + (-t.p_batt_ac_w).max(0.0)
-        + (-t.p_grid_w).max(0.0);
+    let drain = t.p_load_w + t.p_standby_w + (-t.p_batt_ac_w).max(0.0) + (-t.p_grid_w).max(0.0);
     let tol = tol_w(feed.max(drain));
     prop_assert!(
         (feed - drain).abs() <= tol,
@@ -246,7 +234,11 @@ fn assert_tick(
     );
 
     // Physical sign sanity on realized terms.
-    prop_assert!(t.p_load_w >= 0.0, "{ctx} tick {tick}: negative load {}", t.p_load_w);
+    prop_assert!(
+        t.p_load_w >= 0.0,
+        "{ctx} tick {tick}: negative load {}",
+        t.p_load_w
+    );
     prop_assert!(
         t.p_standby_w >= 0.0,
         "{ctx} tick {tick}: negative standby {}",

@@ -540,9 +540,9 @@ impl HomeSystem {
                 .filter_map(|(_, m)| *m)
                 .collect();
             let self_forming_fleet = !present_batteries.is_empty()
-                && present_batteries.iter().all(|m| {
-                    m.grid_forming_in_backup && m.integrated_inverter == Some(true)
-                });
+                && present_batteries
+                    .iter()
+                    .all(|m| m.grid_forming_in_backup && m.integrated_inverter == Some(true));
             if grid_forming > 1 || !self_forming_fleet {
                 violations.push(violation(
                     "controllers",
@@ -1717,5 +1717,22 @@ mod tests {
 
         let violations = violations_of(sys.validate(&registry));
         assert_field(&violations, "controllers");
+    }
+
+    #[test]
+    fn embedded_ecolinx_backup_system_validates_without_controller() {
+        // The reported composition, against the shipped catalog: a
+        // backup-capable ecoLinx fleet forms its own island through its
+        // integrated inverter, so it must validate with no controller.
+        let registry = Registry::embedded().expect("embedded registry");
+        let mut sys = base_system();
+        sys.batteries = vec![battery_ref(ECOLINX, 2)];
+        sys.backup_capable = true;
+
+        let spec = sys
+            .validate(&registry)
+            .expect("embedded ecoLinx backup system must pass");
+        assert!(spec.resolved_controller_model_id.is_none());
+        assert_close(spec.backup_path_power_kw.expect("backup-capable"), 16.0);
     }
 }

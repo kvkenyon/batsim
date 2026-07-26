@@ -58,9 +58,10 @@ use crate::math;
 use crate::rng::{self, RngPurpose};
 
 /// Standard-normal variate from two uniform (0, 1) draws via Box-Muller.
-/// Deterministic, `std`-only transcendentals (B.10.1); the workspace has
-/// no `rand_distr` dependency and none may be added, so Gaussian draws
-/// for the AR(1) layers are transformed in-module.
+/// Deterministic; transcendentals route through the libm-backed
+/// [`crate::math`] module. The workspace has no `rand_distr` dependency
+/// and none may be added, so Gaussian draws for the AR(1) layers are
+/// transformed in-module.
 pub(crate) fn normal_from_uniforms(u1: f64, u2: f64) -> f64 {
     // Map u1 into (0, 1] so the log never sees 0.
     let r = (-2.0 * math::ln(1.0 - u1)).sqrt();
@@ -192,8 +193,8 @@ const G_SC: f64 = 1367.0;
 const DEG: f64 = std::f64::consts::PI / 180.0;
 
 /// Pure-function solar position (NOAA/PSA-lite; spec B.7.2, accuracy
-/// <= 0.05 deg for 1950-2050). Deterministic: only `std` `f64`
-/// transcendentals, no iteration (B.10.1).
+/// <= 0.05 deg for 1950-2050). Deterministic, no iteration;
+/// transcendentals route through the libm-backed [`crate::math`] module.
 #[must_use]
 pub fn solar_position(unix_time_s: u64, latitude_deg: f64, longitude_deg: f64) -> SolarPosition {
     let julian_day = unix_time_s as f64 / 86_400.0 + 2_440_587.5;
@@ -317,8 +318,7 @@ pub fn poa_irradiance(
         0.0
     };
     let rb = (cos_aoi / sin_el).max(0.0);
-    let diffuse =
-        irr.dhi_w_m2 * ((1.0 - aniso) * 0.5 * (1.0 + math::cos(tilt_rad)) + aniso * rb);
+    let diffuse = irr.dhi_w_m2 * ((1.0 - aniso) * 0.5 * (1.0 + math::cos(tilt_rad)) + aniso * rb);
     let ground = 0.2 * irr.ghi_w_m2 * 0.5 * (1.0 - math::cos(tilt_rad));
     (beam + diffuse + ground).max(0.0)
 }
