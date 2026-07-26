@@ -504,7 +504,7 @@ impl HomeSystem {
             .collect()
     }
 
-    /// Backup composition (spec §3.1 rule 1, §4.6): a backup-capable
+    /// Backup composition: a backup-capable
     /// system forms its island in one of two ways — either exactly one
     /// present controller entry with `provides_grid_forming = true`, or,
     /// when no such controller is present, a battery fleet that forms the
