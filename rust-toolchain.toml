@@ -1,0 +1,5 @@
+[toolchain]
+channel = "1.83.0"          # pinned exact (spec C.2.3); bump deliberately, record in CHANGELOG
+components = ["clippy", "rustfmt"]
+# Spec C.2.3 also lists rust-src + linux targets; omitted for local macOS dev
+# (rustup component conflict on existing installs). CI/docker pin their own.
