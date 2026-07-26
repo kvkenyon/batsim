@@ -190,9 +190,8 @@ pub fn build_devices(
     let controller_standby_w = sys
         .controllers
         .iter()
-        .filter_map(|c| registry.controller(&c.model_id))
-        .filter_map(|m| m.standby_power_w.as_ref())
-        .map(|s| s.value)
+        .filter_map(|c| registry.controller(&c.model_id).map(|m| (m, c.quantity)))
+        .filter_map(|(m, q)| m.standby_power_w.as_ref().map(|s| s.value * f64::from(q)))
         .sum();
 
     let load = LoadModel::new(

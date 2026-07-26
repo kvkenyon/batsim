@@ -579,6 +579,21 @@ impl Registry {
                 violations: ext_violations,
             });
         }
+        // §4.6 whole-manifest integrity on the shadow tree, matching
+        // `from_dir`/`embedded` (per-file hashes were already checked in
+        // `load_entries`).
+        if ext_tree.verify_catalog_hash {
+            let mut records: Vec<&CatalogEntry> =
+                ext_tree.files.iter().map(|f| &f.record).collect();
+            records.sort_by(|a, b| a.path.cmp(&b.path));
+            let computed = catalog_sha256(&records);
+            if computed != ext_tree.manifest.catalog_sha256 {
+                return Err(RegistryError::Integrity(format!(
+                    "catalog_sha256 mismatch: catalog.json {}, computed {computed}",
+                    ext_tree.manifest.catalog_sha256
+                )));
+            }
+        }
 
         // Layer external entries over the embedded catalog, entry-by-entry
         // on (kind, model_id) (spec §1.1).

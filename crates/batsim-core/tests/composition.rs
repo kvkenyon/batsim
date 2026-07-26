@@ -306,6 +306,9 @@ fn dispatch_scheduled_out_of_order_still_fires_on_time() {
     let spec = pw3_only_system(&registry, &serde_json::json!([]));
     let devices = build_devices(&spec, &registry, &build_config(), 42, 0).unwrap();
     let mut home = Home::new(devices, true);
+    // Idle until the manual command lands, so "not yet fired" is exactly
+    // zero battery power rather than the self-consumption baseline.
+    home.set_mode(ControlMode::Idle);
 
     // Submitted late-tick-first: the tick-2 command must still land at 2.
     home.schedule(ScheduledDispatch {
@@ -324,10 +327,21 @@ fn dispatch_scheduled_out_of_order_still_fires_on_time() {
     for tick in 0..4 {
         home.step(tick, 1_750_000_000 + tick * 60, 60, 25.0);
     }
-    let at_tick_3 = home.truth().last().unwrap().p_batt_ac_w;
+    let truth = home.truth();
     assert!(
-        at_tick_3 > 0.0,
-        "the tick-2 manual discharge must be active by tick 3, got {at_tick_3}"
+        truth[1].p_batt_ac_w.abs() < 1e-9,
+        "the tick-2 command must not leak into tick 1, got {}",
+        truth[1].p_batt_ac_w
+    );
+    assert!(
+        (truth[2].p_batt_ac_w - 2_500.0).abs() <= 125.0,
+        "the 2.5 kW manual discharge must be realized at tick 2, got {}",
+        truth[2].p_batt_ac_w
+    );
+    assert!(
+        truth[3].p_batt_ac_w > 0.0,
+        "the manual discharge must hold past its arrival tick, got {}",
+        truth[3].p_batt_ac_w
     );
 }
 
@@ -394,5 +408,52 @@ fn mixed_string_pv_and_hybrid_never_converts_the_array_twice() {
     assert!(
         pv_wh > 1_000.0,
         "PV should deliver real energy, got {pv_wh} Wh"
+    );
+}
+
+/// Mixed coupling: a PW2 (AC-terminal) plus a PW3 (DC-terminal hybrid) in
+/// one home must split the AC-boundary setpoint ONCE across all units
+/// (B.3.4): the fleet never realizes more than the setpoint (review
+/// finding mixed-coupling-double-dispatch, where each terminal class
+/// received the full setpoint and the pair exported past an 8 kW target).
+#[test]
+fn mixed_coupling_home_splits_the_setpoint_once() {
+    let registry = Registry::embedded().unwrap();
+    let doc = serde_json::json!({
+        "schema_version": "1.0.0",
+        "system_id": "00000000-0000-0000-0000-00000000000d",
+        "batteries": [
+            {"model_id": "tesla.powerwall_2", "quantity": 1,
+             "initial_soc_frac": 0.8, "reserve_frac": 0.2},
+            {"model_id": "tesla.powerwall_3", "quantity": 1,
+             "initial_soc_frac": 0.8, "reserve_frac": 0.2}
+        ],
+        "inverters": [],
+        "controllers": [{"model_id": "tesla.gateway_2", "quantity": 1}],
+        "main_panel": {"service_rating_a": 200.0},
+        "backup_capable": false,
+        "grid_meter": {"esiid": "1008900000000000000001"}
+    });
+    let system = HomeSystem::from_json(&serde_json::to_string(&doc).unwrap()).unwrap();
+    let spec = system.validate(&registry).expect("system validates");
+    let devices = build_devices(&spec, &registry, &build_config(), 42, 0).unwrap();
+    let mut home = Home::new(devices, true);
+    home.set_mode(ControlMode::Manual);
+    home.set_manual_setpoint_w(8_000.0);
+
+    for tick in 0..6 {
+        home.step(tick, NOON_UNIX_S + tick * 60, 60, 25.0);
+        let realized = home.truth().last().unwrap().p_batt_ac_w;
+        assert!(
+            (7_000.0..=8_100.0).contains(&realized),
+            "8 kW setpoint must realize ~8 kW across both couplings, got {realized}"
+        );
+    }
+    // Both terminal classes carry a share (no class is starved either).
+    let last = home.truth().last().unwrap();
+    assert!(
+        last.units.iter().all(|u| u.p_term_w > 500.0),
+        "both units should discharge a share: {:?}",
+        last.units.iter().map(|u| u.p_term_w).collect::<Vec<_>>()
     );
 }

@@ -426,29 +426,32 @@ impl BatteryUnit {
         // power whose energy this tick fits the remaining headroom.
         let pre_window_w = p_w;
         if p_w > 0.0 {
-            p_w = self.energy_window_limit(p_w, true, dt_s, input.grid_present);
+            p_w = self.energy_window_limit(p_w, true, dt_s, input.grid_present, input.t_amb_c);
             if p_w < pre_window_w {
                 flags.at_soc_min = true;
             }
         } else if p_w < 0.0 {
-            p_w = 0.0 - self.energy_window_limit(-p_w, false, dt_s, input.grid_present);
+            p_w =
+                0.0 - self.energy_window_limit(-p_w, false, dt_s, input.grid_present, input.t_amb_c);
             if p_w > pre_window_w {
                 flags.at_soc_max = true;
             }
         }
 
         // 5. Integrate the SOC ODE (module-doc energy path), sub-stepped.
-        let heat_w = self.integrate_soc(p_w, dt_s, dt_sub_s, n_sub);
+        let heat_w = self.integrate_soc(p_w, dt_s, dt_sub_s, n_sub, input.t_amb_c);
 
         // 6. Peak-budget accumulator (B.2.6 exact update rule): throughput
         // above the (derated) continuous rating discharges the budget;
-        // anything at/below recharges it at the continuous rate.
+        // anything at/below recharges it at a quarter of the
+        // peak-continuous margin per second.
         if p_w > limits.continuous_derated_w {
             self.peak_budget_ws =
                 (self.peak_budget_ws - (p_w - limits.continuous_derated_w) * dt_s).max(0.0);
         } else {
-            self.peak_budget_ws = (self.peak_budget_ws + limits.continuous_derated_w * dt_s)
-                .min(self.peak_budget_cap_ws);
+            let recovery_w = (self.peak_discharge_w - self.continuous_discharge_w).max(0.0);
+            self.peak_budget_ws =
+                (self.peak_budget_ws + recovery_w * dt_s * 0.25).min(self.peak_budget_cap_ws);
         }
 
         // 7. Bookkeeping: ramp integrator, activity state, integer timers.
@@ -484,17 +487,32 @@ impl BatteryUnit {
         }
     }
 
+    /// Conversion efficiency at terminal power `p_w` (W) and cell
+    /// temperature: the registry curve value with the B.2.3 cold derate
+    /// (`1 - k_T * max(0, T_ref - T_cell)`) applied.
+    fn conv_eta(&self, discharge: bool, p_w: f64, t_cell_c: f64) -> f64 {
+        let curve = if discharge {
+            &self.model.discharge_efficiency_curve
+        } else {
+            &self.model.charge_efficiency_curve
+        };
+        curve.eval(p_w.abs() / 1000.0) * chemistry::cold_eta_factor(t_cell_c)
+    }
+
     /// Stage 5 of [`Self::step`]: integrate the SOC ODE with separated
     /// charge/discharge efficiencies (module-doc energy path) over
     /// `n_sub` sub-steps (B.1.6), update throughput counters, and return
     /// the conversion-heat power for the tick (W).
-    fn integrate_soc(&mut self, p_w: f64, dt_s: f64, dt_sub_s: f64, n_sub: u32) -> f64 {
+    fn integrate_soc(
+        &mut self,
+        p_w: f64,
+        dt_s: f64,
+        dt_sub_s: f64,
+        n_sub: u32,
+        t_cell_c: f64,
+    ) -> f64 {
         if p_w > 0.0 {
-            let eta = self
-                .model
-                .discharge_efficiency_curve
-                .eval(p_w / 1000.0)
-                .max(1e-9);
+            let eta = self.conv_eta(true, p_w, t_cell_c).max(1e-9);
             for _ in 0..n_sub {
                 let drain_wh = p_w * dt_sub_s / eta / 3600.0;
                 self.e_stored_wh = (self.e_stored_wh - drain_wh).max(0.0);
@@ -503,7 +521,7 @@ impl BatteryUnit {
             p_w * (1.0 / eta - 1.0)
         } else if p_w < 0.0 {
             let q_w = -p_w;
-            let eta = self.model.charge_efficiency_curve.eval(q_w / 1000.0);
+            let eta = self.conv_eta(false, q_w, t_cell_c);
             for _ in 0..n_sub {
                 let gain_wh = q_w * eta * self.eta_coul * dt_sub_s / 3600.0;
                 self.e_stored_wh = (self.e_stored_wh + gain_wh).min(self.e_window_wh);
@@ -536,11 +554,22 @@ impl BatteryUnit {
             let v = chemistry::v_oc(self.model.chemistry, soc);
             discharge_w = discharge_w.min(chemistry::thevenin_max_discharge_w(v, r, self.v_min_v));
         }
-        // B.2.5: cold charge-acceptance factor on the charge rating.
+        // B.2.5: cold charge-acceptance limit. LFP: fraction of the
+        // charge rating (prohibited below 0 degC, linear recovery to
+        // full at 10 degC). NMC/NCA: the C-RATE ceiling scales linearly
+        // from 0.1 C at -10 degC to full at 10 degC (1 C in W is
+        // numerically `q_avail_wh` over one hour), never above the
+        // nameplate charge rating.
         let cold = chemistry::cold_charge_factor(self.model.chemistry, t_cell_c);
+        let charge_w = match self.model.chemistry {
+            Chemistry::LFP => self.continuous_charge_w * cold,
+            Chemistry::NMC | Chemistry::NCA => {
+                (self.q_avail_wh * cold).min(self.continuous_charge_w)
+            }
+        } * derate;
         DynamicLimits {
             discharge_w,
-            charge_w: self.continuous_charge_w * derate * cold,
+            charge_w,
             derate,
             cold,
             continuous_derated_w,
@@ -552,7 +581,14 @@ impl BatteryUnit {
     /// effective floor; charge: remaining window). Solved by bisection on
     /// the exact per-tick energy expression, so the clamp is
     /// energy-exact, never an f64 drift source.
-    fn energy_window_limit(&self, p_w: f64, discharge: bool, dt_s: f64, grid_present: bool) -> f64 {
+    fn energy_window_limit(
+        &self,
+        p_w: f64,
+        discharge: bool,
+        dt_s: f64,
+        grid_present: bool,
+        t_cell_c: f64,
+    ) -> f64 {
         if p_w <= 0.0 {
             return 0.0;
         }
@@ -564,14 +600,10 @@ impl BatteryUnit {
         };
         let energy_at = |p: f64| -> f64 {
             if discharge {
-                let eta = self
-                    .model
-                    .discharge_efficiency_curve
-                    .eval(p / 1000.0)
-                    .max(1e-9);
+                let eta = self.conv_eta(true, p, t_cell_c).max(1e-9);
                 p * dt_s / eta / 3600.0
             } else {
-                let eta = self.model.charge_efficiency_curve.eval(p / 1000.0);
+                let eta = self.conv_eta(false, p, t_cell_c);
                 p * eta * self.eta_coul * dt_s / 3600.0
             }
         };
@@ -610,11 +642,7 @@ impl BatteryUnit {
         let soc = self.soc();
         let v_oc = chemistry::v_oc(self.model.chemistry, soc);
         if p_w > 0.0 {
-            let eta = self
-                .model
-                .discharge_efficiency_curve
-                .eval(p_w / 1000.0)
-                .max(1e-9);
+            let eta = self.conv_eta(true, p_w, t_cell_c).max(1e-9);
             let p_pack_w = p_w / eta;
             if self.config.thevenin_enabled {
                 let r = chemistry::r_int(self.r_base_ohm, soc, 0.0, t_cell_c);
@@ -624,7 +652,7 @@ impl BatteryUnit {
                 (0.0, p_pack_w / v_oc.max(1.0))
             }
         } else if p_w < 0.0 {
-            let eta = self.model.charge_efficiency_curve.eval(-p_w / 1000.0);
+            let eta = self.conv_eta(false, -p_w, t_cell_c);
             let p_pack_w = -p_w * eta;
             let i_chg = p_pack_w / v_oc.max(1.0);
             if self.config.thevenin_enabled {
@@ -668,7 +696,7 @@ impl BatteryUnit {
     #[must_use]
     pub fn max_discharge_w(&self) -> f64 {
         let limits = self.dynamic_limits(25.0, 1.0);
-        self.energy_window_limit(limits.discharge_w, true, 1.0, true)
+        self.energy_window_limit(limits.discharge_w, true, 1.0, true, 25.0)
     }
 
     /// Dynamic charge limit at the terminal boundary (W), including
@@ -678,7 +706,7 @@ impl BatteryUnit {
     #[must_use]
     pub fn max_charge_w(&self) -> f64 {
         let limits = self.dynamic_limits(25.0, 1.0);
-        self.energy_window_limit(limits.charge_w, false, 1.0, true)
+        self.energy_window_limit(limits.charge_w, false, 1.0, true, 25.0)
     }
 
     /// Standby/self-consumption draw (W) while energized, taken from the AC
@@ -897,10 +925,12 @@ mod tests {
         let out = nunit.step(&input(-11_500.0, -5.0));
         let cold = chemistry::cold_charge_factor(Chemistry::NMC, -5.0);
         assert!(cold > 0.0 && cold < 1.0);
-        // Charge limit = rating x thermal derate (B.4.4) x cold factor.
+        // Charge limit = min(rating, 1 C x cold factor) x thermal derate
+        // (B.4.4): the cold rule scales the C-RATE, not the rating
+        // (B.2.5). 13.5 kWh usable -> 1 C = 13.5 kW.
         approx(
             -out.p_term_w,
-            11_500.0 * chemistry::thermal_derate(-5.0) * cold,
+            11_500.0_f64.min(13_500.0 * cold) * chemistry::thermal_derate(-5.0),
             1e-6,
         );
         // ... and a hard discharge cutoff below -20 degC.
@@ -1035,8 +1065,8 @@ mod tests {
     #[test]
     fn peak_budget_window_and_recovery() {
         // 10 kW continuous, 15 kW peak for 10 s: 10 s at peak, then the
-        // clamp falls to continuous; the budget recovers at the
-        // continuous rate (B.2.6).
+        // clamp falls to continuous; the budget recovers at a quarter of
+        // the peak-continuous margin per second (B.2.6).
         let model = model_json(
             "test.peak",
             Chemistry::LFP,
@@ -1060,8 +1090,19 @@ mod tests {
         let out = unit.step(&input(15_000.0, 25.0));
         approx(out.p_term_w, 10_000.0, 1e-6);
         assert!(out.flags.power_limited);
-        // 5 s at zero setpoint recovers 5 * 10 kW*s = full budget.
+        // Recovery rate is 0.25 x (15 - 10) kW = 1.25 kW*s per second:
+        // the clamped tick plus 5 s at zero setpoint leaves 7.5 kW*s, so
+        // one further tick at peak drains 5 and the next is limited to
+        // 12.5 kW.
         for _ in 0..5 {
+            unit.step(&input(0.0, 25.0));
+        }
+        let out = unit.step(&input(15_000.0, 25.0));
+        approx(out.p_term_w, 15_000.0, 1e-6);
+        let out = unit.step(&input(15_000.0, 25.0));
+        approx(out.p_term_w, 12_500.0, 1e-6);
+        // 40 s at zero setpoint refills the full 50 kW*s budget.
+        for _ in 0..40 {
             unit.step(&input(0.0, 25.0));
         }
         let out = unit.step(&input(15_000.0, 25.0));

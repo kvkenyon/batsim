@@ -209,8 +209,18 @@ impl SimWorld {
     ///
     /// Returns the number of pacing overruns (compute longer than the
     /// slice allows).
-    #[must_use]
-    pub fn run_paced(&mut self, ticks: u64, speed: Speed) -> u64 {
+    ///
+    /// # Errors
+    /// [`CoreError::InvalidConfig`] when a `FastForward` multiplier is not
+    /// finite and positive.
+    pub fn run_paced(&mut self, ticks: u64, speed: Speed) -> Result<u64, CoreError> {
+        if let Speed::FastForward(n) = speed {
+            if !n.is_finite() || n <= 0.0 {
+                return Err(CoreError::InvalidConfig(format!(
+                    "FastForward multiplier must be finite and > 0, got {n}"
+                )));
+            }
+        }
         let mut overruns = 0u64;
         let dt = self.clock.dt_s();
         for _ in 0..ticks {
@@ -220,7 +230,7 @@ impl SimWorld {
                 Speed::Unbounded => continue,
                 Speed::Realtime => std::time::Duration::from_secs_f64(f64::from(dt)),
                 Speed::FastForward(n) => {
-                    std::time::Duration::from_secs_f64(f64::from(dt) / n.max(1e-9))
+                    std::time::Duration::from_secs_f64(f64::from(dt) / n)
                 }
             };
             let elapsed = start.elapsed();
@@ -230,6 +240,6 @@ impl SimWorld {
                 overruns += 1;
             }
         }
-        overruns
+        Ok(overruns)
     }
 }

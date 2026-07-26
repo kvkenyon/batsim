@@ -48,6 +48,26 @@ fn check_schema_version(path: &str, actual: &str, out: &mut Vec<Violation>) {
     }
 }
 
+/// `entry_version` must match the §4.2 schema pattern `^\d+\.\d+\.\d+$`
+/// (semver triple; the run manifest records it, spec §1.2).
+fn check_entry_version(path: &str, version: &str, out: &mut Vec<Violation>) {
+    let mut parts = version.split('.');
+    let numeric = |s: Option<&str>| {
+        s.is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+    };
+    let well_formed = numeric(parts.next())
+        && numeric(parts.next())
+        && numeric(parts.next())
+        && parts.next().is_none();
+    if !well_formed {
+        out.push(violation(
+            path,
+            "entry_version",
+            format!("`{version}` does not match `^\\d+\\.\\d+\\.\\d+$`"),
+        ));
+    }
+}
+
 /// `model_id` (or `preset_id`) must match `^[a-z0-9_]+\.[a-z0-9_]+$`
 /// (exactly one dot; lowercase alphanumerics and underscores). When the
 /// entry carries a `vendor` field, the prefix before the dot must match it
@@ -352,6 +372,7 @@ fn check_battery_warranty(path: &str, model: &BatteryModel, out: &mut Vec<Violat
 pub fn check_battery(path: &str, model: &BatteryModel) -> Vec<Violation> {
     let mut out = Vec::new();
     check_schema_version(path, &model.schema_version, &mut out);
+    check_entry_version(path, &model.entry_version, &mut out);
     check_identifier(
         path,
         "model_id",
@@ -417,6 +438,7 @@ pub fn check_battery(path: &str, model: &BatteryModel) -> Vec<Violation> {
 pub fn check_inverter(path: &str, model: &InverterModel) -> Vec<Violation> {
     let mut out = Vec::new();
     check_schema_version(path, &model.schema_version, &mut out);
+    check_entry_version(path, &model.entry_version, &mut out);
     check_identifier(
         path,
         "model_id",
@@ -487,6 +509,7 @@ pub fn check_inverter(path: &str, model: &InverterModel) -> Vec<Violation> {
 pub fn check_controller(path: &str, model: &ControllerModel) -> Vec<Violation> {
     let mut out = Vec::new();
     check_schema_version(path, &model.schema_version, &mut out);
+    check_entry_version(path, &model.entry_version, &mut out);
     check_identifier(
         path,
         "model_id",
@@ -530,6 +553,7 @@ pub fn check_controller(path: &str, model: &ControllerModel) -> Vec<Violation> {
 pub fn check_pv_preset(path: &str, preset: &PvPreset) -> Vec<Violation> {
     let mut out = Vec::new();
     check_schema_version(path, &preset.schema_version, &mut out);
+    check_entry_version(path, &preset.entry_version, &mut out);
     check_identifier(path, "preset_id", &preset.preset_id, None, &mut out);
 
     check_positive(path, "kw_dc", &preset.kw_dc, &mut out);

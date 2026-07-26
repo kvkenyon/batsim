@@ -261,6 +261,19 @@ pub fn thevenin_max_discharge_w(v_oc: f64, r_int: f64, v_min: f64) -> f64 {
     i_max * v_min
 }
 
+/// Cold conversion-efficiency derate factor (spec B.2.3): multiply the
+/// interpolated curve eta by `1 - k_T * max(0, T_ref - T_cell)`,
+/// k_T = 0.002 /degC, T_ref = 25 degC. Hot-side efficiency change is
+/// neglected (resistance growth handles it via B.2.4).
+#[must_use]
+pub fn cold_eta_factor(cell_c: f64) -> f64 {
+    /// Cold efficiency-derate coefficient per degC (spec B.2.3).
+    const K_T: f64 = 0.002;
+    /// Reference temperature (degC, spec B.2.3).
+    const T_REF: f64 = 25.0;
+    (1.0 - K_T * (T_REF - cell_c).max(0.0)).max(0.0)
+}
+
 /// Charge-acceptance limit factor vs cell temperature (spec B.2.5).
 ///
 /// LFP: charge is prohibited below 0 degC, ramping linearly 0 -> full

@@ -755,7 +755,7 @@ impl LoadModel {
         if charge_w <= 0.0 {
             return 0.0;
         }
-        let energy_wh = ev.daily_miles * EV_WH_PER_MILE;
+        let energy_wh = (ev.daily_miles * EV_WH_PER_MILE).min(ev.battery_kwh * 1000.0);
         let dur_s = energy_wh / charge_w * 3600.0;
         let sec_of_day = civil.sec_of_day as f64;
         let mut p = 0.0;

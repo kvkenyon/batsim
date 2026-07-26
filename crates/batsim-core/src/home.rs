@@ -232,11 +232,13 @@ impl Home {
         }
     }
 
-    /// Stage 5: split the setpoint across units (pro-rata by headroom,
-    /// B.3.4) and step each unit. Hybrid units get DC-bus setpoints:
-    /// PV-surplus charging routes DC->DC (single inversion, A.3.3); AC-side
-    /// setpoints translate through the hybrid curve (grid charge remains a
-    /// double conversion).
+    /// Stage 5: split the setpoint across ALL units in one AC-boundary
+    /// pro-rata pass (B.3.4) and step each unit. Every unit's weight is
+    /// its dynamic headroom expressed at the AC boundary, so mixed
+    /// couplings never realize more than the setpoint. Hybrid shares are
+    /// then translated to DC-bus setpoints: PV-surplus charging routes
+    /// DC->DC (single inversion, A.3.3); AC-side shares translate through
+    /// the hybrid curve (grid charge remains a double conversion).
     fn stage_battery(
         &mut self,
         p_batt_ac_set: f64,
@@ -252,26 +254,56 @@ impl Home {
                 curtailed_ac_w: 0.0,
             };
         }
-        // Separate terminal classes.
-        let ac_idx: Vec<usize> = (0..n)
-            .filter(|&i| is_ac_terminal(self.devices.batteries[i].model().coupling))
-            .collect();
-        let dc_idx: Vec<usize> = (0..n).filter(|&i| !ac_idx.contains(&i)).collect();
-
-        // AC-terminal units split the AC setpoint pro-rata by headroom.
-        Self::split_and_step(
-            &mut self.devices.batteries,
-            &ac_idx,
-            p_batt_ac_set,
-            dt_s,
-            t_amb_c,
-            &mut realized,
-        );
-
-        // Hybrid (DC-bus) units.
+        let discharge = p_batt_ac_set > 0.0;
+        let mut ac_idx: Vec<usize> = Vec::new();
+        let mut dc_idx: Vec<usize> = Vec::new();
+        let mut weights: Vec<f64> = Vec::with_capacity(n);
+        for (i, unit) in self.devices.batteries.iter().enumerate() {
+            let base = if discharge {
+                unit.max_discharge_w()
+            } else {
+                unit.max_charge_w()
+            };
+            if is_ac_terminal(unit.model().coupling) {
+                ac_idx.push(i);
+                weights.push(base);
+            } else {
+                dc_idx.push(i);
+                // DC-terminal headroom at the AC boundary: discharge is
+                // the AC the shared inverter would deliver from it;
+                // charge is the AC draw needed to push it through.
+                let w = self.devices.hybrid_inverter.as_ref().map_or(base, |inv| {
+                    if discharge {
+                        base * inv.eta_at_w(base)
+                    } else {
+                        inv.ac_required_for_dc(base)
+                    }
+                });
+                weights.push(w);
+            }
+        }
+        let total: f64 = weights.iter().sum();
         let mut curtailed_ac_w = 0.0;
+        if total <= 0.0 {
+            for (i, slot) in realized.iter_mut().enumerate() {
+                *slot = step_one(&mut self.devices.batteries[i], 0.0, dt_s, t_amb_c);
+            }
+            return BatteryStage {
+                units: realized,
+                curtailed_ac_w,
+            };
+        }
+        // AC-terminal units take their AC-boundary shares directly.
+        for &i in &ac_idx {
+            let share = p_batt_ac_set * weights[i] / total;
+            realized[i] = step_one(&mut self.devices.batteries[i], share, dt_s, t_amb_c);
+        }
+        // Hybrid (DC-bus) units: translate only their combined share,
+        // then split it pro-rata by DC headroom.
         if !dc_idx.is_empty() {
-            let (p_dc_set, curtailed) = self.hybrid_dc_setpoint(p_batt_ac_set, exo);
+            let dc_weight: f64 = dc_idx.iter().map(|&i| weights[i]).sum();
+            let hybrid_share = p_batt_ac_set * dc_weight / total;
+            let (p_dc_set, curtailed) = self.hybrid_dc_setpoint(hybrid_share, exo);
             curtailed_ac_w = curtailed;
             Self::split_and_step(
                 &mut self.devices.batteries,
@@ -288,8 +320,8 @@ impl Home {
         }
     }
 
-    /// The DC-bus setpoint for the hybrid units, translated from the
-    /// AC-boundary setpoint through the shared inverter (A.3.3). Every
+    /// The DC-bus setpoint for the hybrid units, translated from their
+    /// AC-boundary share through the shared inverter (A.3.3). Every
     /// AC<->DC translation routes through the `inverter` helpers so the D1
     /// charge-path rule has a single owner.
     ///
@@ -316,7 +348,16 @@ impl Home {
             0.0
         };
         if pv_surplus_dc > 0.0 && p_batt_ac_set <= 0.0 {
-            (-pv_surplus_dc, 0.0)
+            // Mixed coupling: AC-terminal units serve their own share of
+            // the surplus through the AC path, so the hybrid soaks only
+            // the DC behind its share. A pure-hybrid home has no other
+            // sink: soak the exact surplus DC (export avoidance).
+            let soak = if self.has_ac_terminal_units() {
+                pv_surplus_dc.min(inv.dc_required_for_ac(-p_batt_ac_set))
+            } else {
+                pv_surplus_dc
+            };
+            (-soak, 0.0)
         } else if p_batt_ac_set >= 0.0 {
             // Discharge: DC required from the battery for the AC target it
             // is actually allowed to reach through the shared inverter.
@@ -327,6 +368,14 @@ impl Home {
             // (conservation-true: DC = AC x eta, D1 decision).
             (-inv.ac_to_dc(-p_batt_ac_set).p_out_w, 0.0)
         }
+    }
+
+    /// Whether any battery unit is AC-terminal (mixed coupling).
+    fn has_ac_terminal_units(&self) -> bool {
+        self.devices
+            .batteries
+            .iter()
+            .any(|u| is_ac_terminal(u.model().coupling))
     }
 
     /// AC output the shared hybrid inverter can still pass to the battery
@@ -401,13 +450,6 @@ impl Home {
         let Some(inv) = &self.devices.hybrid_inverter else {
             return (p_pv_ac, p_batt_ac);
         };
-        // Command curtailment from stage 5 (B.3.3), converted to the DC
-        // side so this counter is homogeneous with the residual clip
-        // below and with `pv_clipped` (both DC-side).
-        self.meters.batt_clipped.accumulate(
-            batt.curtailed_ac_w / inv.eta_at_w(batt.curtailed_ac_w.max(1.0)),
-            dt_s,
-        );
         let hyb_batt_dc: f64 = unit_realized
             .iter()
             .zip(&self.devices.batteries)
@@ -424,6 +466,14 @@ impl Home {
             exo.pv_dc
         };
         let p_bus = pv_bus_dc + hyb_batt_dc;
+        // Command curtailment from stage 5 (B.3.3), converted to the DC
+        // side at the realized bus operating point (the marginal DC the
+        // shared inverter would have drawn for the curtailed AC slice),
+        // so this counter is homogeneous with the residual clip below and
+        // with `pv_clipped` (both DC-side).
+        self.meters
+            .batt_clipped
+            .accumulate(batt.curtailed_ac_w / inv.eta_at_w(p_bus.max(1.0)), dt_s);
         if p_bus > 0.0 {
             // One conversion of the summed DC (the physics), then attribute
             // the shared AC rating between the two sources that actually put

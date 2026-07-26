@@ -2,4 +2,4 @@
 source: crates/batsim-core/tests/golden.rs
 expression: hash
 ---
-f1622c42e1421847e761872973b88b6ec5161baa0166a54fd6b346e1c46cbd5f
+5e30cd83a90ce2b5b2da760d5c3f8c157463d0d369a607ea0cd121359bf2375c

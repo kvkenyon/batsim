@@ -283,18 +283,14 @@ pub struct SystemSpec {
     pub total_discharge_power_kw: f64,
     /// Total continuous charge power, kW.
     pub total_charge_power_kw: f64,
-    /// Computed backup-path continuous power:
-    /// `min(total battery continuous, backup-path rating)` (spec §3.1).
-    /// `None` when not backup-capable.
-    ///
-    /// Backup-path rating resolution order (first present wins):
-    /// 1. Σ `max_backup_power_kw` over present controllers that declare it
-    ///    (gateway/transfer-device throughput cap);
-    /// 2. else Σ (`max_ac_output_kw_backup` else `rated_ac_output_kw`) over
-    ///    present explicit inverters (hybrid backup rating);
-    /// 3. else the batteries' own continuous discharge sum (covers
-    ///    integrated-inverter batteries such as PW3 with no explicit
-    ///    InverterModel entry), which makes the `min` an identity.
+    /// Computed backup-path continuous power: the minimum of every
+    /// series stage (spec §3.1): total battery continuous discharge, the
+    /// sum of (`max_ac_output_kw_backup` else `rated_ac_output_kw`) over
+    /// present explicit inverters (when any are present), and Σ
+    /// `max_backup_power_kw` over present controllers that declare it.
+    /// With no explicit inverter and no controller cap the battery sum
+    /// stands alone (integrated-inverter batteries such as PW3), making
+    /// the `min` an identity. `None` when not backup-capable.
     pub backup_path_power_kw: Option<f64>,
     /// `model_id` of the single grid-forming controller resolved during
     /// validation (spec §3.1 backup rule). `None` when not backup-capable.
@@ -555,8 +551,12 @@ impl HomeSystem {
     }
 
     /// DC-coupled batteries need a compatible hybrid inverter (spec §3.1
-    /// rule 2). Batteries with an integrated inverter (PW3) ARE their own
-    /// hybrid inverter, so the explicit-inverter intersection is skipped.
+    /// rule 2), and every hybrid inverter must name at least one system
+    /// battery in `compatible_battery_ids` (spec §4.6 rule 3). Batteries
+    /// with an integrated inverter (PW3) ARE their own hybrid inverter,
+    /// so the explicit-inverter intersection is skipped for them. A
+    /// hybrid in `inverters[]` is always a battery hybrid: PV string-
+    /// inverter use is rejected by `pv_inverter_unit_count`.
     fn check_dc_coupling(
         &self,
         battery_models: &[Option<&BatteryModel>],
@@ -583,6 +583,27 @@ impl HomeSystem {
                     format!(
                         "DC-coupled battery `{id}` requires a present hybrid inverter listing it \
                          in compatible_battery_ids"
+                    ),
+                ));
+            }
+        }
+        for (inv, _) in present_inverters {
+            if inv.topology != InverterTopology::HybridDCCoupled {
+                continue;
+            }
+            let intersects = inv.compatible_battery_ids.iter().any(|id| {
+                self.batteries
+                    .iter()
+                    .zip(battery_models)
+                    .any(|(r, m)| r.quantity > 0 && m.is_some_and(|m| &m.model_id == id))
+            });
+            if !intersects {
+                let id = &inv.model_id;
+                violations.push(violation(
+                    "inverters",
+                    format!(
+                        "hybrid inverter `{id}` lists no system battery in \
+                         compatible_battery_ids"
                     ),
                 ));
             }
@@ -774,8 +795,11 @@ impl HomeSystem {
         violations: &mut Vec<Violation>,
     ) {
         let Some(g) = &self.generator else { return };
-        if g.rated_kw <= 0.0 {
-            violations.push(violation("generator.rated_kw", "rated power must be > 0"));
+        if !g.rated_kw.is_finite() || g.rated_kw <= 0.0 {
+            violations.push(violation(
+                "generator.rated_kw",
+                "rated power must be finite and > 0",
+            ));
         }
         let supported = present_controllers
             .iter()
@@ -799,14 +823,20 @@ impl HomeSystem {
         violations: &mut Vec<Violation>,
     ) {
         let Some(pv) = &self.pv else { return };
-        if pv.kw_dc <= 0.0 {
-            violations.push(violation("pv.kw_dc", "array nameplate must be > 0"));
+        if !pv.kw_dc.is_finite() || pv.kw_dc <= 0.0 {
+            violations.push(violation(
+                "pv.kw_dc",
+                "array nameplate must be finite and > 0",
+            ));
         }
         if !(0.0..=90.0).contains(&pv.tilt_deg) {
             violations.push(violation("pv.tilt_deg", "tilt must lie in [0, 90] degrees"));
         }
-        if pv.dc_ac_ratio <= 0.0 {
-            violations.push(violation("pv.dc_ac_ratio", "DC/AC ratio must be > 0"));
+        if !pv.dc_ac_ratio.is_finite() || pv.dc_ac_ratio <= 0.0 {
+            violations.push(violation(
+                "pv.dc_ac_ratio",
+                "DC/AC ratio must be finite and > 0",
+            ));
         }
         if let Orientation::Azimuth(a) = pv.orientation {
             if a > 359 {
@@ -846,33 +876,34 @@ impl HomeSystem {
 
     /// Free-parameter numerics (main panel, backup panel, EV chargers).
     fn check_free_parameters(&self, violations: &mut Vec<Violation>) {
-        if self.main_panel.service_rating_a <= 0.0 {
+        if !self.main_panel.service_rating_a.is_finite() || self.main_panel.service_rating_a <= 0.0
+        {
             violations.push(violation(
                 "main_panel.service_rating_a",
-                "service rating must be > 0",
+                "service rating must be finite and > 0",
             ));
         }
         if let Some(limit) = self.main_panel.interconnection_limit_kw {
-            if limit < 0.0 {
+            if !limit.is_finite() || limit < 0.0 {
                 violations.push(violation(
                     "main_panel.interconnection_limit_kw",
-                    "interconnection limit must be >= 0",
+                    "interconnection limit must be finite and >= 0",
                 ));
             }
         }
         if let Some(bp) = &self.backup_panel {
-            if bp.critical_loads_peak_kw < 0.0 {
+            if !bp.critical_loads_peak_kw.is_finite() || bp.critical_loads_peak_kw < 0.0 {
                 violations.push(violation(
                     "backup_panel.critical_loads_peak_kw",
-                    "critical-loads peak must be >= 0",
+                    "critical-loads peak must be finite and >= 0",
                 ));
             }
         }
         for (i, ev) in self.ev_chargers.iter().enumerate() {
-            if ev.rated_kw <= 0.0 {
+            if !ev.rated_kw.is_finite() || ev.rated_kw <= 0.0 {
                 violations.push(violation(
                     &format!("ev_chargers[{i}].rated_kw"),
-                    "rated power must be > 0",
+                    "rated power must be finite and > 0",
                 ));
             }
         }
@@ -910,9 +941,9 @@ impl HomeSystem {
             total_charge_power_kw += q * m.continuous_charge_power_kw.value;
         }
 
-        // Backup-path rating resolution order (see SystemSpec field docs):
-        // controller throughput cap > explicit inverter backup rating >
-        // the batteries' own integrated rating.
+        // Backup-path rating: the minimum of every series stage (spec
+        // §3.1): battery continuous sum, inverter backup-rating sum, and
+        // the controller throughput cap when declared.
         let backup_path_power_kw = if self.backup_capable {
             let mut controller_sum = 0.0;
             let mut any_controller_rating = false;
@@ -932,14 +963,14 @@ impl HomeSystem {
                         * f64::from(*q)
                 })
                 .sum();
-            let path_rating = if any_controller_rating {
-                controller_sum
-            } else if inverter_sum > 0.0 {
-                inverter_sum
-            } else {
-                total_discharge_power_kw
-            };
-            Some(total_discharge_power_kw.min(path_rating))
+            let mut path_rating = total_discharge_power_kw;
+            if inverter_sum > 0.0 {
+                path_rating = path_rating.min(inverter_sum);
+            }
+            if any_controller_rating {
+                path_rating = path_rating.min(controller_sum);
+            }
+            Some(path_rating)
         } else {
             None
         };

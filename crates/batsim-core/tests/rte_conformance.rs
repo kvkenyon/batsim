@@ -111,6 +111,10 @@ fn rte_conformance() {
             continue; // expansion pack: not a standalone system
         }
         let Some(target) = &model.rte_ac_coupled else {
+            failures.push(format!(
+                "{}: standalone entry missing rte_ac_coupled (B.11 gate)",
+                model.model_id
+            ));
             continue;
         };
         let measured = measure_rte(&registry, model);
