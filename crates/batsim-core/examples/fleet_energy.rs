@@ -4,8 +4,10 @@
 //!
 //! Each home pairs one battery with an 8 kW PV array and the vendor-
 //! required controller/inverter, all at the same Austin site on the same
-//! summer day, so the numbers are directly comparable across topologies
-//! (AC-coupled, microinverter-based, and DC-coupled hybrid).
+//! summer day. The PV column is energy that crossed an inverter to AC;
+//! on DC-coupled hybrid homes, PV energy that charges the battery
+//! DC-to-DC never crosses an AC meter by design, so hybrid homes show a
+//! lower PV figure for the identical array.
 //!
 //! Run: `cargo run -p batsim-core --example fleet_energy`
 

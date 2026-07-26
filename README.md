@@ -26,7 +26,8 @@ batsim is currently a Rust library (two crates) with no network surface:
 
 Everything is deterministic: one master seed reproduces a run bit-for
 bit, including under rayon parallelism. Conformance tests hold every
-catalog battery's measured round-trip efficiency within 0.5 percentage
+standalone catalog battery's measured round-trip efficiency within 0.5
+percentage
 points of its datasheet figure.
 
 ## Coming next
