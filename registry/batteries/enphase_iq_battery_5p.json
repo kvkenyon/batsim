@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "entry_version": "1.0.0",
+  "entry_version": "1.1.0",
   "model_id": "enphase.iq_battery_5p",
   "vendor": "Enphase",
   "display_name": "Enphase IQ Battery 5P",
@@ -15,24 +15,24 @@
   "soc_window": { "min_soc_frac": 0.0, "max_soc_frac": 1.0, "reserve_floor_frac": 0.1, "provenance": "spec" },
   "charge_efficiency_curve": {
     "points": [
-      { "x_kw": 0.3, "efficiency": 0.88 },
-      { "x_kw": 1.0, "efficiency": 0.92 },
-      { "x_kw": 1.92, "efficiency": 0.93 },
-      { "x_kw": 3.84, "efficiency": 0.915 }
+      { "x_kw": 0.3, "efficiency": 0.90 },
+      { "x_kw": 1.0, "efficiency": 0.945 },
+      { "x_kw": 1.92, "efficiency": 0.957 },
+      { "x_kw": 3.84, "efficiency": 0.945 }
     ],
     "provenance": "estimated"
   },
   "discharge_efficiency_curve": {
     "points": [
-      { "x_kw": 0.3, "efficiency": 0.88 },
-      { "x_kw": 1.0, "efficiency": 0.92 },
-      { "x_kw": 1.92, "efficiency": 0.93 },
-      { "x_kw": 3.84, "efficiency": 0.915 }
+      { "x_kw": 0.3, "efficiency": 0.90 },
+      { "x_kw": 1.0, "efficiency": 0.945 },
+      { "x_kw": 1.92, "efficiency": 0.957 },
+      { "x_kw": 3.84, "efficiency": 0.945 }
     ],
     "provenance": "estimated"
   },
-  "rte_pv_coupled": { "value": 0.90, "provenance": "spec", "unit": "frac", "note": "AC-coupled round trip, Enphase-published ~90%" },
-  "rte_ac_coupled": { "value": 0.90, "provenance": "spec", "unit": "frac" },
+  "rte_pv_coupled": { "value": 0.90, "provenance": "spec", "unit": "frac", "note": "AC-coupled round trip, Enphase-published ~90%; curves renormalized per Part A §5 so eta_chg x eta_coul x eta_dis lands here at 0.5C" },
+  "rte_ac_coupled": { "value": 0.90, "provenance": "spec", "unit": "frac", "note": "curves renormalized per Part A §5 so the 0.5C product lands here" },
   "grid_forming_in_backup": true,
   "requires_controller_id": "enphase.iq_system_controller_2",
   "integrated_inverter": true,

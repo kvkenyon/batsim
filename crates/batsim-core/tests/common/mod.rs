@@ -61,10 +61,7 @@ pub fn one_battery_system(registry: &Registry, model_id: &str, with_pv: bool) ->
     let pv = with_pv.then(|| {
         // DC-coupled systems land PV on the hybrid inverter's MPPTs
         // (null); AC-coupled systems need a dedicated string inverter.
-        let inv_id = if matches!(
-            model.coupling,
-            batsim_registry::Coupling::DCCoupledHybrid
-        ) {
+        let inv_id = if matches!(model.coupling, batsim_registry::Coupling::DCCoupledHybrid) {
             serde_json::Value::Null
         } else {
             serde_json::json!("generic.string_pv_8kw")

@@ -736,7 +736,7 @@ impl Registry {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
 mod tests {
     use super::*;
-    use crate::types::{Chemistry, Provenance};
+    use crate::types::{Chemistry, Coupling, InverterTopology, Provenance};
     use std::path::PathBuf;
 
     /// RAII tempdir for on-disk catalog copies (no `tempfile` dependency in
@@ -778,12 +778,12 @@ mod tests {
     fn embedded_catalog_loads_and_counts() {
         let registry = Registry::embedded().expect("embedded catalog must load");
         assert_eq!(registry.batteries().count(), 11);
-        assert_eq!(registry.inverters().count(), 4);
+        assert_eq!(registry.inverters().count(), 5);
         assert_eq!(registry.controllers().count(), 4);
         assert_eq!(registry.pv_presets().count(), 1);
         assert_eq!(registry.manifest().registry_version, "1.0.0");
         assert_eq!(registry.manifest().schema_version, "1.0.0");
-        assert_eq!(registry.manifest().entries.len(), 20);
+        assert_eq!(registry.manifest().entries.len(), 21);
         assert_eq!(registry.manifest().catalog_sha256.len(), 64);
         assert_eq!(registry.source(), &RegistrySource::Embedded);
     }
@@ -889,22 +889,16 @@ mod tests {
         }
     }
 
-    /// Normative calibration (F14 tasking): for every synthesized curve,
-    /// the AC-path round trip at the 0.5C power point lands within ±0.5 pp
-    /// of `rte_ac_coupled`. The verbatim §4.7/§4.8 curves (and the PW3
-    /// expansion pack inheriting §4.7) are exempt by construction.
+    /// Normative calibration (F14 tasking + binding decision D2): the
+    /// AC-path round trip at the 0.5C power point lands within ±0.5 pp of
+    /// `rte_ac_coupled` for every battery. AC-coupled entries:
+    /// `eta_chg x eta_coul x eta_dis`. DC-coupled hybrids: same product
+    /// times `eta_hyb^2` from the claiming hybrid inverter (grid charge on
+    /// hybrids is a double conversion, spec §3.3).
     #[test]
     fn ac_path_rte_calibration_holds() {
-        const EXEMPT: [&str; 3] = [
-            "tesla.powerwall_3",
-            "tesla.pw3_expansion_pack",
-            "enphase.iq_battery_5p",
-        ];
         let r = Registry::embedded().unwrap();
         for battery in r.batteries() {
-            if EXEMPT.contains(&battery.model_id.as_str()) {
-                continue;
-            }
             let rte_ac = battery.rte_ac_coupled.as_ref().unwrap().value;
             let eta_coul = match battery.chemistry {
                 Chemistry::LFP => 0.99,
@@ -913,7 +907,20 @@ mod tests {
             let p_star = 0.5 * battery.usable_energy_kwh.value;
             let eta_chg = battery.charge_efficiency_curve.eval(p_star);
             let eta_dis = battery.discharge_efficiency_curve.eval(p_star);
-            let rte = eta_chg * eta_coul * eta_dis;
+            let battery_product = eta_chg * eta_coul * eta_dis;
+            let rte = if battery.coupling == Coupling::DCCoupledHybrid {
+                let inverter = r
+                    .inverters()
+                    .find(|inv| {
+                        inv.topology == InverterTopology::HybridDCCoupled
+                            && inv.compatible_battery_ids.contains(&battery.model_id)
+                    })
+                    .unwrap_or_else(|| panic!("{}: no claiming hybrid inverter", battery.model_id));
+                let eta_hyb = inverter.efficiency_curve.eval(p_star);
+                battery_product * eta_hyb * eta_hyb
+            } else {
+                battery_product
+            };
             assert!(
                 (rte - rte_ac).abs() <= 0.005,
                 "{}: AC-path RTE {rte:.4} not within ±0.5pp of rte_ac_coupled {rte_ac}",

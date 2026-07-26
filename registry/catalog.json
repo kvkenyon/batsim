@@ -20,15 +20,15 @@
       "path": "batteries/enphase_iq_battery_5p.json",
       "kind": "battery",
       "model_id": "enphase.iq_battery_5p",
-      "entry_version": "1.0.0",
-      "sha256": "e67e1459033db7d5979ea63e2941c8ead1e77aed35ee7c1c8151aca9ce1b8cb6"
+      "entry_version": "1.1.0",
+      "sha256": "fda05a4320d6b3359c46f5bab2b011bb18fddc38a4eaa788994e0af598c19971"
     },
     {
       "path": "batteries/solaredge_home_battery_400v.json",
       "kind": "battery",
       "model_id": "solaredge.home_battery_400v",
-      "entry_version": "1.0.0",
-      "sha256": "dd0d1bf3e9b1fbc4f8ddc512d9d4fa65f0070edea5ed98ed8f8a7dd9fd7fa487"
+      "entry_version": "1.1.0",
+      "sha256": "630518c937b92388948304b898b5d5720a4711421afa6e15c7d32b152e40e2fe"
     },
     {
       "path": "batteries/sonnen_ecolinx.json",
@@ -48,8 +48,8 @@
       "path": "batteries/sonnen_sonnenbatterie_10_hybrid.json",
       "kind": "battery",
       "model_id": "sonnen.sonnenbatterie_10_hybrid",
-      "entry_version": "1.0.0",
-      "sha256": "e9921f5eaf98940bbc05e62ac87ccf3456d8d16e5bf483fd9beb3ff77109cdd6"
+      "entry_version": "1.1.0",
+      "sha256": "53cc71445ba64eae6162e15f591e5664b0f71f54083ec4a5951b9f7d0ddd3953"
     },
     {
       "path": "batteries/sonnen_sonnencore_plus.json",
@@ -69,15 +69,15 @@
       "path": "batteries/tesla_powerwall_3.json",
       "kind": "battery",
       "model_id": "tesla.powerwall_3",
-      "entry_version": "1.0.0",
-      "sha256": "7d07f7f78067329920ed29f975fcd6a7bd2484ea09cbd316a6e66012508a90fd"
+      "entry_version": "1.1.0",
+      "sha256": "670936d16ad17bb336ed8de3337f4bfd5bc089df9f4e8de1c66cab8b6b6b59eb"
     },
     {
       "path": "batteries/tesla_pw3_expansion_pack.json",
       "kind": "battery",
       "model_id": "tesla.pw3_expansion_pack",
-      "entry_version": "1.0.0",
-      "sha256": "3e3ade52a567e2098f573382f9c7e0fc33daeef7f5908ec948a9d960fbba6f60"
+      "entry_version": "1.1.0",
+      "sha256": "84f44aaed4341c827d46ab9e3e6db1caa1b362be8f30c3fb05c6136019367727"
     },
     {
       "path": "controllers/enphase_iq_system_controller_2.json",
@@ -129,6 +129,13 @@
       "sha256": "92ec603994e8349e82ac915ee1d34b9145f9d4c472c42a8891c9163e5b1c3f52"
     },
     {
+      "path": "inverters/sonnen_hybrid_inverter_8kw.json",
+      "kind": "inverter",
+      "model_id": "sonnen.hybrid_inverter_8kw",
+      "entry_version": "1.0.0",
+      "sha256": "b319e0b9fe44e70c70d3a36e7d12034b8d79868c387d141f338d1f45098aded9"
+    },
+    {
       "path": "inverters/tesla_pw3_integrated_hybrid.json",
       "kind": "inverter",
       "model_id": "tesla.pw3_integrated_hybrid",
@@ -143,5 +150,5 @@
       "sha256": "1ace56bbb1e11f27ade26afcbdfe16ff667362d28f6a6e25198385444e06e268"
     }
   ],
-  "catalog_sha256": "634db479b5f85e908736fb8351556aced812294919e53237f03dd97e6f9e932e"
+  "catalog_sha256": "b2196d617b1524ba6f0ca4f625837cfbd4b279f3362c2f989d8912d36d8f5842"
 }

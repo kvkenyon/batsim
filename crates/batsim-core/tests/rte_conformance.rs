@@ -46,10 +46,12 @@ fn measure_rte(registry: &Registry, model: &BatteryModel) -> f64 {
         // Hybrid-path efficiency at a power level: curve x-axis is AC kW;
         // one fixed-point step from the DC side is ample (D1 decision).
         let hyb_eta = |p_w: f64| -> f64 {
-            hybrid.as_ref().map_or(1.0, |inv| {
-                inv.model().efficiency_curve.eval(p_w.abs() / 1000.0)
-            })
-            .max(1e-6)
+            hybrid
+                .as_ref()
+                .map_or(1.0, |inv| {
+                    inv.model().efficiency_curve.eval(p_w.abs() / 1000.0)
+                })
+                .max(1e-6)
         };
         for _ in 0..seconds {
             // Translate the AC-side request to the unit's terminal
@@ -97,7 +99,6 @@ fn measure_rte(registry: &Registry, model: &BatteryModel) -> f64 {
     drop(drive);
     e_dis_ac / e_chg_ac
 }
-
 
 #[test]
 fn rte_conformance() {

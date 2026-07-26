@@ -222,9 +222,8 @@ pub fn solar_position(unix_time_s: u64, latitude_deg: f64, longitude_deg: f64) -
     let tst_min = (utc_min + eq_time_min + 4.0 * longitude_deg).rem_euclid(1440.0);
     let ha_rad = (tst_min / 4.0 - 180.0) * DEG;
     let lat_rad = latitude_deg * DEG;
-    let cos_zen =
-        (lat_rad.sin() * decl_rad.sin() + lat_rad.cos() * decl_rad.cos() * ha_rad.cos())
-            .clamp(-1.0, 1.0);
+    let cos_zen = (lat_rad.sin() * decl_rad.sin() + lat_rad.cos() * decl_rad.cos() * ha_rad.cos())
+        .clamp(-1.0, 1.0);
     let elevation_deg = 90.0 - cos_zen.acos() / DEG;
     let az_deg = ((ha_rad
         .sin()
@@ -372,30 +371,6 @@ impl SkyState {
         }
     }
 
-    /// Stationary distribution of the chain for a season (dwell shares).
-    fn stationary(season: Season) -> [f64; 3] {
-        let d = [
-            Self::Clear.dwell_s(season),
-            Self::Partly.dwell_s(season),
-            Self::Broken.dwell_s(season),
-        ];
-        let sum = d[0] + d[1] + d[2];
-        [d[0] / sum, d[1] / sum, d[2] / sum]
-    }
-
-    /// Expected mean multiplier over the next `t_rem_s` seconds given the
-    /// current state: a fitted-order mixing blend of the current state's
-    /// mean and the stationary mean, with persistence weight
-    /// `dwell / (dwell + t_rem)` (the current regime decays over its own
-    /// dwell time into the stationary mix). Used only by the servo.
-    fn expected_mean(self, season: Season, t_rem_s: f64) -> f64 {
-        let pi = Self::stationary(season);
-        let mu_stat = pi[0] * Self::Clear.mean()
-            + pi[1] * Self::Partly.mean()
-            + pi[2] * Self::Broken.mean();
-        let persistence = self.dwell_s(season) / (self.dwell_s(season) + t_rem_s.max(0.0));
-        mu_stat + (self.mean() - mu_stat) * persistence
-    }
 }
 
 /// Texas season of the cooling calendar (Jun-Sep cooling, Dec-Feb
@@ -584,8 +559,11 @@ impl PvArray {
     /// per tick.
     #[must_use]
     pub fn dc_power_w(&mut self, unix_time_s: u64, tick: u64, dt_s: u32, t_amb_c: f64) -> f64 {
-        let position =
-            solar_position(unix_time_s, self.config.latitude_deg, self.config.longitude_deg);
+        let position = solar_position(
+            unix_time_s,
+            self.config.latitude_deg,
+            self.config.longitude_deg,
+        );
         let smooth = clear_sky(&position);
         let dt = f64::from(dt_s.max(1));
         let civil = civil_local(unix_time_s);
@@ -605,8 +583,7 @@ impl PvArray {
                 // accumulated in the last minutes of an hour, because the
                 // recovery ceiling is the 1.05 multiplier clamp).
                 if self.hour_id != u64::MAX && self.hour_target_j > 1.0 {
-                    let residual = ((self.hour_target_j - self.hour_noisy_j)
-                        / self.hour_target_j)
+                    let residual = ((self.hour_target_j - self.hour_noisy_j) / self.hour_target_j)
                         .clamp(-0.25, 0.25);
                     self.pending_fold = (self.pending_fold + residual).clamp(-0.3, 0.3);
                 }
@@ -627,22 +604,32 @@ impl PvArray {
                 }
             }
             if smooth_basis >= threshold {
-                let mut stream =
-                    rng::substream(self.master_seed, self.home_entity, RngPurpose::PvCloud, tick);
+                let mut stream = rng::substream(
+                    self.master_seed,
+                    self.home_entity,
+                    RngPurpose::PvCloud,
+                    tick,
+                );
                 let u_exit: f64 = stream.gen();
                 let u_target: f64 = stream.gen();
                 let bm1: f64 = stream.gen();
                 let bm2: f64 = stream.gen();
-                self.advance_sky(u_exit, u_target, normal_from_uniforms(bm1, bm2), dt, civil.month);
-                // Causal servo toward the (fold-adjusted) hour target,
-                // with state-aware anticipation: the denominator is the
-                // EXPECTED raw delivery over the hour's remainder given
-                // the current sky state, so a low state starts recovering
-                // at spell start instead of after the deficit accrues.
-                let season = Season::of_month(civil.month);
-                let t_rem_s = (hour_id + 1) * 3600 + CST_OFFSET_S - unix_time_s;
-                let mu_eff = self.sky.expected_mean(season, t_rem_s as f64);
-                let remaining = (self.hour_target_j - self.hour_smooth_j).max(1.0) * mu_eff;
+                self.advance_sky(
+                    u_exit,
+                    u_target,
+                    normal_from_uniforms(bm1, bm2),
+                    dt,
+                    civil.month,
+                );
+                // Causal servo toward the (fold-adjusted) hour target:
+                // ratio of energy still needed vs energy remaining. No
+                // anticipation term — with the hard 1.05 multiplier clamp,
+                // requesting more than the clamp during clear spells
+                // rectifies into a systematic fold oscillation (measured:
+                // alternating +/-5 % hours). In a persistent low state the
+                // ratio settles at 1/mu_state, pinning delivery at the
+                // smooth rate; during recovery it bang-bangs at 1.05.
+                let remaining = (self.hour_target_j - self.hour_smooth_j).max(1.0);
                 let needed = (self.hour_target_j - self.hour_noisy_j).max(0.0);
                 let servo = (needed / remaining).clamp(SERVO_MIN, SERVO_MAX);
                 (servo * (self.sky.mean() + self.flicker)).clamp(M_MIN, M_MAX)
@@ -1000,8 +987,7 @@ mod tests {
         let mut n2 = PvArray::new(&austin_config(true), 5, 0x4000);
         let any_diff = (0..1440u64).any(|tick| {
             let t = JUL1 + (400 + tick) * 60;
-            s2.dc_power_w(t, tick, 60, 33.0).to_bits()
-                != n2.dc_power_w(t, tick, 60, 33.0).to_bits()
+            s2.dc_power_w(t, tick, 60, 33.0).to_bits() != n2.dc_power_w(t, tick, 60, 33.0).to_bits()
         });
         assert!(any_diff, "cloud overlay had no tick-level effect");
     }
@@ -1032,9 +1018,14 @@ mod tests {
         let mut abs: Vec<f64> = errs.iter().map(|e| e.1.abs()).collect();
         abs.sort_by(f64::total_cmp);
         let n = abs.len();
-        eprintln!("hours={n} mean={:.4} p50={:.4} p90={:.4} p99={:.4} max={:.4}",
+        eprintln!(
+            "hours={n} mean={:.4} p50={:.4} p90={:.4} p99={:.4} max={:.4}",
             abs.iter().sum::<f64>() / n as f64,
-            abs[n / 2], abs[n * 9 / 10], abs[n * 99 / 100], abs[n - 1]);
+            abs[n / 2],
+            abs[n * 9 / 10],
+            abs[n * 99 / 100],
+            abs[n - 1]
+        );
         for (h, e) in errs.iter().filter(|e| e.1.abs() > 0.03) {
             eprintln!("  hour {h} (local {:02}:00): {e:+.4}", (h + 18) % 24);
         }

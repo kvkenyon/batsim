@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "entry_version": "1.0.0",
+  "entry_version": "1.1.0",
   "model_id": "tesla.pw3_expansion_pack",
   "vendor": "Tesla",
   "display_name": "Tesla Powerwall 3 Expansion Pack",
@@ -14,18 +14,18 @@
   "charge_efficiency_curve": {
     "points": [
       { "x_kw": 0.5, "efficiency": 0.90 },
-      { "x_kw": 2.0, "efficiency": 0.945 },
-      { "x_kw": 5.0, "efficiency": 0.95 },
-      { "x_kw": 11.5, "efficiency": 0.93 }
+      { "x_kw": 2.0, "efficiency": 0.96 },
+      { "x_kw": 5.0, "efficiency": 0.976 },
+      { "x_kw": 11.5, "efficiency": 0.966 }
     ],
     "provenance": "estimated"
   },
   "discharge_efficiency_curve": {
     "points": [
       { "x_kw": 0.5, "efficiency": 0.90 },
-      { "x_kw": 2.0, "efficiency": 0.945 },
-      { "x_kw": 5.0, "efficiency": 0.95 },
-      { "x_kw": 11.5, "efficiency": 0.93 }
+      { "x_kw": 2.0, "efficiency": 0.96 },
+      { "x_kw": 5.0, "efficiency": 0.976 },
+      { "x_kw": 11.5, "efficiency": 0.966 }
     ],
     "provenance": "estimated"
   },

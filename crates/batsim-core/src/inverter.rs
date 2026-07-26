@@ -176,7 +176,7 @@ impl InverterUnit {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
 mod tests {
     use super::*;
     use batsim_registry::{EfficiencyPoint, Provenance};
@@ -263,22 +263,22 @@ mod tests {
     }
 
     #[test]
-    fn ac_to_dc_divides_by_eta_and_clamps_request() {
+    fn ac_to_dc_multiplies_by_eta_and_clamps_request() {
         let curve = cec_curve(10.0);
-        // 5 kW AC request at eta 0.97 -> 5154.6 W DC draw.
+        // 5 kW AC request at eta 0.97 -> 4850 W DC delivered, 150 W heat.
         let c = ac_to_dc(&curve, 10_000.0, 5_000.0);
-        assert!((c.p_out_w - 5_000.0 / 0.97).abs() < 1e-6);
-        assert!((c.loss_w - (5_000.0 / 0.97 - 5_000.0)).abs() < 1e-6);
+        assert!((c.p_out_w - 4_850.0).abs() < 1e-9);
+        assert!((c.loss_w - 150.0).abs() < 1e-9);
         assert_eq!(c.clipped_w, 0.0);
         // Request above the rating clamps to the rating (no clip counter).
         let c = ac_to_dc(&curve, 10_000.0, 20_000.0);
         let eta_at_rated = curve.eval(10.0);
-        assert!((c.p_out_w - 10_000.0 / eta_at_rated).abs() < 1e-6);
-        // Tiny request under the (0,0) anchor: eta collapses, so the DC
-        // draw is large relative to the request but finite (no NaN/Inf).
+        assert!((c.p_out_w - 10_000.0 * eta_at_rated).abs() < 1e-6);
+        // Tiny request under the (0,0) anchor: near-total loss, finite.
         let c = ac_to_dc(&curve, 10_000.0, 1.0);
         assert!(c.p_out_w.is_finite() && c.loss_w.is_finite());
-        assert!(c.p_out_w > 100.0, "vampire-region draw {}", c.p_out_w);
+        assert!(c.p_out_w < 1.0, "zero-anchor region loses almost all");
+        assert!((c.p_out_w + c.loss_w - 1.0).abs() < 1e-12);
         // Zero request is exact silence.
         let c = ac_to_dc(&curve, 10_000.0, 0.0);
         assert_eq!((c.p_out_w, c.loss_w, c.clipped_w), (0.0, 0.0, 0.0));

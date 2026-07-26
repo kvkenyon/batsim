@@ -256,10 +256,13 @@ impl Home {
             // Efficiency of the shared hybrid at an AC power (curve x-axis
             // is AC kW); one fixed-point step from the DC side is ample.
             let hyb_eta = |p_w: f64| -> f64 {
-                self.devices.hybrid_inverter.as_ref().map_or(0.97, |inv| {
-                    inv.model().efficiency_curve.eval(p_w.abs() / 1000.0)
-                })
-                .max(1e-6)
+                self.devices
+                    .hybrid_inverter
+                    .as_ref()
+                    .map_or(0.97, |inv| {
+                        inv.model().efficiency_curve.eval(p_w.abs() / 1000.0)
+                    })
+                    .max(1e-6)
             };
             let pv_surplus_dc = if matches!(self.mode, ControlMode::SelfConsumption)
                 && self.devices.pv_inverter.is_none()
@@ -371,11 +374,7 @@ impl Home {
                 // (grid charge double conversion, A.3.3). The battery
                 // already absorbed its DC; AC = DC / eta, one fixed-point
                 // step (conservation-true, D1 decision).
-                let eta = inv
-                    .model()
-                    .efficiency_curve
-                    .eval(-p_bus / 1000.0)
-                    .max(1e-6);
+                let eta = inv.model().efficiency_curve.eval(-p_bus / 1000.0).max(1e-6);
                 let p_ac_draw = -p_bus / eta;
                 p_batt_ac -= p_ac_draw;
             }

@@ -220,6 +220,47 @@ struct DynamicLimits {
     continuous_derated_w: f64,
 }
 
+/// Validate an expansion-pack combination against the head model's
+/// `expansion` declaration and return the added usable energy (Wh).
+/// Packs add energy only (spec A.3.1); power limits stay the head's.
+fn expansion_energy_wh(
+    model: &BatteryModel,
+    expansion_pack: Option<(&BatteryModel, u32)>,
+) -> Result<f64, CoreError> {
+    let Some((pack, count)) = expansion_pack else {
+        return Ok(0.0);
+    };
+    let expansion = model.expansion.as_ref().ok_or_else(|| {
+        CoreError::InvalidConfig(format!("{}: accepts no expansion packs", model.model_id))
+    })?;
+    if expansion.expansion_pack_model_id.as_deref() != Some(pack.model_id.as_str()) {
+        return Err(CoreError::InvalidConfig(format!(
+            "{}: expansion pack `{}` does not match declared `{}`",
+            model.model_id,
+            pack.model_id,
+            expansion
+                .expansion_pack_model_id
+                .as_deref()
+                .unwrap_or("<none>")
+        )));
+    }
+    if expansion.packs_add_power == Some(true) {
+        return Err(CoreError::InvalidConfig(format!(
+            "{}: power-adding expansion packs are not supported (B.2.1)",
+            model.model_id
+        )));
+    }
+    if let Some(max_units) = expansion.max_units_per_inverter {
+        if count + 1 > max_units {
+            return Err(CoreError::InvalidConfig(format!(
+                "{}: {count} packs + head exceeds max_units_per_inverter {max_units}",
+                model.model_id
+            )));
+        }
+    }
+    Ok(pack.usable_energy_kwh.value * 1000.0 * f64::from(count))
+}
+
 impl BatteryUnit {
     /// Construct one unit from a registry model.
     ///
@@ -264,37 +305,7 @@ impl BatteryUnit {
                 model.model_id
             )));
         }
-        if let Some((pack, count)) = expansion_pack {
-            let expansion = model.expansion.as_ref().ok_or_else(|| {
-                CoreError::InvalidConfig(format!("{}: accepts no expansion packs", model.model_id))
-            })?;
-            if expansion.expansion_pack_model_id.as_deref() != Some(pack.model_id.as_str()) {
-                return Err(CoreError::InvalidConfig(format!(
-                    "{}: expansion pack `{}` does not match declared `{}`",
-                    model.model_id,
-                    pack.model_id,
-                    expansion
-                        .expansion_pack_model_id
-                        .as_deref()
-                        .unwrap_or("<none>")
-                )));
-            }
-            if expansion.packs_add_power == Some(true) {
-                return Err(CoreError::InvalidConfig(format!(
-                    "{}: power-adding expansion packs are not supported (B.2.1)",
-                    model.model_id
-                )));
-            }
-            if let Some(max_units) = expansion.max_units_per_inverter {
-                if count + 1 > max_units {
-                    return Err(CoreError::InvalidConfig(format!(
-                        "{}: {count} packs + head exceeds max_units_per_inverter {max_units}",
-                        model.model_id
-                    )));
-                }
-            }
-            q_avail_wh += pack.usable_energy_kwh.value * 1000.0 * f64::from(count);
-        }
+        q_avail_wh += expansion_energy_wh(model, expansion_pack)?;
         let continuous_discharge_w = model.continuous_discharge_power_kw.value * 1000.0;
         let peak_discharge_w = model
             .peak_discharge_power_kw
@@ -427,29 +438,7 @@ impl BatteryUnit {
         }
 
         // 5. Integrate the SOC ODE (module-doc energy path), sub-stepped.
-        let mut heat_w = 0.0;
-        if p_w > 0.0 {
-            let eta = self
-                .model
-                .discharge_efficiency_curve
-                .eval(p_w / 1000.0)
-                .max(1e-9);
-            for _ in 0..n_sub {
-                let drain_wh = p_w * dt_sub_s / eta / 3600.0;
-                self.e_stored_wh = (self.e_stored_wh - drain_wh).max(0.0);
-            }
-            heat_w = p_w * (1.0 / eta - 1.0);
-            self.cum_discharge_wh += p_w * dt_s / 3600.0;
-        } else if p_w < 0.0 {
-            let q_w = -p_w;
-            let eta = self.model.charge_efficiency_curve.eval(q_w / 1000.0);
-            for _ in 0..n_sub {
-                let gain_wh = q_w * eta * self.eta_coul * dt_sub_s / 3600.0;
-                self.e_stored_wh = (self.e_stored_wh + gain_wh).min(self.e_window_wh);
-            }
-            heat_w = q_w * (1.0 - eta * self.eta_coul);
-            self.cum_charge_wh += q_w * dt_s / 3600.0;
-        }
+        let heat_w = self.integrate_soc(p_w, dt_s, dt_sub_s, n_sub);
 
         // 6. Peak-budget accumulator (B.2.6 exact update rule): throughput
         // above the (derated) continuous rating discharges the budget;
@@ -492,6 +481,37 @@ impl BatteryUnit {
             v_term_v,
             current_a,
             flags,
+        }
+    }
+
+    /// Stage 5 of [`Self::step`]: integrate the SOC ODE with separated
+    /// charge/discharge efficiencies (module-doc energy path) over
+    /// `n_sub` sub-steps (B.1.6), update throughput counters, and return
+    /// the conversion-heat power for the tick (W).
+    fn integrate_soc(&mut self, p_w: f64, dt_s: f64, dt_sub_s: f64, n_sub: u32) -> f64 {
+        if p_w > 0.0 {
+            let eta = self
+                .model
+                .discharge_efficiency_curve
+                .eval(p_w / 1000.0)
+                .max(1e-9);
+            for _ in 0..n_sub {
+                let drain_wh = p_w * dt_sub_s / eta / 3600.0;
+                self.e_stored_wh = (self.e_stored_wh - drain_wh).max(0.0);
+            }
+            self.cum_discharge_wh += p_w * dt_s / 3600.0;
+            p_w * (1.0 / eta - 1.0)
+        } else if p_w < 0.0 {
+            let q_w = -p_w;
+            let eta = self.model.charge_efficiency_curve.eval(q_w / 1000.0);
+            for _ in 0..n_sub {
+                let gain_wh = q_w * eta * self.eta_coul * dt_sub_s / 3600.0;
+                self.e_stored_wh = (self.e_stored_wh + gain_wh).min(self.e_window_wh);
+            }
+            self.cum_charge_wh += q_w * dt_s / 3600.0;
+            q_w * (1.0 - eta * self.eta_coul)
+        } else {
+            0.0
         }
     }
 
@@ -735,8 +755,8 @@ mod tests {
         peak_kw: Option<f64>,
         peak_s: Option<f64>,
         ramp_kw_s: f64,
-        curve: serde_json::Value,
-        extra: serde_json::Value,
+        curve: &serde_json::Value,
+        extra: &serde_json::Value,
     ) -> BatteryModel {
         let mut doc = serde_json::json!({
             "schema_version": "1.0.0",
@@ -796,7 +816,7 @@ mod tests {
             None,
             None,
             11.5,
-            serde_json::json!({
+            &serde_json::json!({
                 "points": [
                     {"x_kw": 0.575, "efficiency": 0.90},
                     {"x_kw": 2.875, "efficiency": 0.955},
@@ -805,7 +825,7 @@ mod tests {
                 ],
                 "provenance": "estimated"
             }),
-            serde_json::json!({}),
+            &serde_json::json!({}),
         )
     }
 
@@ -865,15 +885,19 @@ mod tests {
             None,
             None,
             11.5,
-            flat_curve(11.5),
-            serde_json::json!({}),
+            &flat_curve(11.5),
+            &serde_json::json!({}),
         );
         let mut nunit = BatteryUnit::new(&nmc, None, 0.5, 0.0, BatteryConfig::default()).unwrap();
         let out = nunit.step(&input(-11_500.0, -5.0));
         let cold = chemistry::cold_charge_factor(Chemistry::NMC, -5.0);
         assert!(cold > 0.0 && cold < 1.0);
         // Charge limit = rating x thermal derate (B.4.4) x cold factor.
-        approx(-out.p_term_w, 11_500.0 * chemistry::thermal_derate(-5.0) * cold, 1e-6);
+        approx(
+            -out.p_term_w,
+            11_500.0 * chemistry::thermal_derate(-5.0) * cold,
+            1e-6,
+        );
         // ... and a hard discharge cutoff below -20 degC.
         let out = nunit.step(&input(11_500.0, -21.0));
         assert_eq!(out.p_term_w, 0.0);
@@ -892,8 +916,8 @@ mod tests {
             None,
             None,
             11.5,
-            flat_curve(11.5),
-            serde_json::json!({}),
+            &flat_curve(11.5),
+            &serde_json::json!({}),
         );
         let mut unit = BatteryUnit::new(
             &model,
@@ -940,8 +964,8 @@ mod tests {
             None,
             None,
             11.5,
-            flat_curve(11.5),
-            serde_json::json!({}),
+            &flat_curve(11.5),
+            &serde_json::json!({}),
         );
         // Charge while full: realized collapses, SOC pinned at max.
         let mut full = BatteryUnit::new(&model, None, 1.0, 0.0, BatteryConfig::default()).unwrap();
@@ -975,7 +999,7 @@ mod tests {
             Some(7.5),
             Some(10.0),
             5.0,
-            serde_json::json!({
+            &serde_json::json!({
                 "points": [
                     {"x_kw": 0.25, "efficiency": 0.90},
                     {"x_kw": 1.25, "efficiency": 0.94},
@@ -984,7 +1008,7 @@ mod tests {
                 ],
                 "provenance": "estimated"
             }),
-            serde_json::json!({}),
+            &serde_json::json!({}),
         );
         let mut unit = BatteryUnit::new(&model, None, 0.5, 0.0, BatteryConfig::default()).unwrap();
         let eta_coul = chemistry::eta_coul(Chemistry::NMC);
@@ -1018,8 +1042,8 @@ mod tests {
             Some(15.0),
             Some(10.0),
             15.0,
-            flat_curve(10.0),
-            serde_json::json!({}),
+            &flat_curve(10.0),
+            &serde_json::json!({}),
         );
         let mut unit = BatteryUnit::new(&model, None, 0.9, 0.0, BatteryConfig::default()).unwrap();
         for i in 0..10 {
@@ -1053,8 +1077,8 @@ mod tests {
             None,
             None,
             2.0,
-            flat_curve(10.0),
-            serde_json::json!({}),
+            &flat_curve(10.0),
+            &serde_json::json!({}),
         );
         let mut unit = BatteryUnit::new(&model, None, 0.5, 0.0, BatteryConfig::default()).unwrap();
         let out = unit.step(&input(10_000.0, 25.0));
@@ -1076,8 +1100,8 @@ mod tests {
             None,
             None,
             5.0,
-            flat_curve(5.0),
-            serde_json::json!({}),
+            &flat_curve(5.0),
+            &serde_json::json!({}),
         );
         let step10 = |unit: &mut BatteryUnit, p: f64| -> BatteryStepOutput {
             unit.step(&BatteryStepInput {
@@ -1125,8 +1149,8 @@ mod tests {
             None,
             None,
             10.0,
-            flat_curve(10.0),
-            serde_json::json!({}),
+            &flat_curve(10.0),
+            &serde_json::json!({}),
         );
         // Grid present: discharge stops at the 20 % reserve floor.
         let mut unit = BatteryUnit::new(&model, None, 0.9, 0.2, BatteryConfig::default()).unwrap();
@@ -1178,8 +1202,8 @@ mod tests {
             None,
             None,
             11.5,
-            flat_curve(11.5),
-            serde_json::json!({
+            &flat_curve(11.5),
+            &serde_json::json!({
                 "self_discharge_frac_per_day": {"value": 0.002, "provenance": "estimated", "unit": "frac/day"}
             }),
         );
@@ -1204,8 +1228,8 @@ mod tests {
             None,
             None,
             11.5,
-            flat_curve(11.5),
-            serde_json::json!({
+            &flat_curve(11.5),
+            &serde_json::json!({
                 "expansion": {
                     "max_units_per_inverter": 4,
                     "expansion_pack_model_id": "test.pack",
@@ -1223,8 +1247,8 @@ mod tests {
             None,
             None,
             1.0,
-            flat_curve(1.0),
-            serde_json::json!({}),
+            &flat_curve(1.0),
+            &serde_json::json!({}),
         );
         let unit =
             BatteryUnit::new(&head, Some((&pack, 2)), 0.5, 0.0, BatteryConfig::default()).unwrap();
@@ -1242,8 +1266,8 @@ mod tests {
             None,
             None,
             1.0,
-            flat_curve(1.0),
-            serde_json::json!({}),
+            &flat_curve(1.0),
+            &serde_json::json!({}),
         );
         assert!(
             BatteryUnit::new(&head, Some((&wrong, 1)), 0.5, 0.0, BatteryConfig::default()).is_err()
@@ -1281,8 +1305,8 @@ mod tests {
             None,
             None,
             100.0, // fast ramp: slew never binds at these setpoints
-            flat_curve(11.5),
-            serde_json::json!({}),
+            &flat_curve(11.5),
+            &serde_json::json!({}),
         );
         let mut big = BatteryUnit::new(&model, None, 0.5, 0.0, BatteryConfig::default()).unwrap();
         big.step(&BatteryStepInput {

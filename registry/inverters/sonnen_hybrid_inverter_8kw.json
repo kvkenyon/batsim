@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "entry_version": "1.0.0",
+  "model_id": "sonnen.hybrid_inverter_8kw",
+  "vendor": "sonnen",
+  "display_name": "sonnen 8 kW hybrid inverter (sonnenBatterie 10 hybrid)",
+  "topology": "HybridDCCoupled",
+  "rated_ac_output_kw": { "value": 8.0, "provenance": "estimated", "unit": "kW", "note": "matches the sonnenBatterie 10 hybrid continuous rating; not separately published" },
+  "efficiency_curve": {
+    "points": [
+      { "x_kw": 0.4, "efficiency": 0.90 },
+      { "x_kw": 1.5, "efficiency": 0.955 },
+      { "x_kw": 4.0, "efficiency": 0.97 },
+      { "x_kw": 6.0, "efficiency": 0.968 },
+      { "x_kw": 8.0, "efficiency": 0.956 }
+    ],
+    "provenance": "estimated"
+  },
+  "grid_following_on_grid": true,
+  "grid_forming_in_backup": true,
+  "compatible_battery_ids": ["sonnen.sonnenbatterie_10_hybrid"],
+  "vendor_api": {
+    "family": "sonnen_local_v2",
+    "auth_style": "token_header",
+    "base_path_hint": "/api/v2",
+    "endpoints": [
+      { "path": "/api/v2/status", "purpose": "telemetry" },
+      { "path": "/api/v2/configurations", "purpose": "mode_config" },
+      { "path": "/api/v2/setpoint/charge", "purpose": "setpoint_dispatch" },
+      { "path": "/api/v2/setpoint/discharge", "purpose": "setpoint_dispatch" }
+    ],
+    "provenance": "spec"
+  }
+}
