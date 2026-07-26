@@ -66,24 +66,27 @@ pub fn dc_to_ac(curve: &EfficiencyCurve, rated_ac_w: f64, p_dc_w: f64) -> Conver
 }
 
 /// AC -> DC conversion (charge path), B.3.1:
-/// `P_dc_draw = |P_ac_req| / eta_inv(|P_ac_req|/P_rated)`. The request is
+/// `P_dc = |P_ac_req| * eta_inv(|P_ac_req|/P_rated)`. The request is
 /// clamped to the AC rating first (no clipping counter: the limit is a
 /// normal operating bound, not lost energy).
+///
+/// # Deviation from the B.3.1 formula text
+///
+/// Spec B.3.1 literally writes `P_dc_draw = |P_ac_req| / eta_inv` for the
+/// charge path. That reading violates energy conservation (the DC side
+/// would receive MORE power than the AC side draws), so this function
+/// implements the conservation-true charge-forward conversion instead:
+/// DC delivered = AC requested x eta. The inverse question "AC draw
+/// required for a DC target" is the caller's job (`p_ac = p_dc / eta`,
+/// one fixed-point step when eta is power-dependent).
 #[must_use]
 pub fn ac_to_dc(curve: &EfficiencyCurve, rated_ac_w: f64, p_ac_req_w: f64) -> Conversion {
     let p_ac_req_w = p_ac_req_w.max(0.0).min(rated_ac_w);
-    let eta = curve.eval(p_ac_req_w / 1000.0);
-    if p_ac_req_w <= 0.0 || eta <= ETA_FLOOR {
-        return Conversion {
-            p_out_w: 0.0,
-            loss_w: p_ac_req_w,
-            clipped_w: 0.0,
-        };
-    }
-    let p_out_w = p_ac_req_w / eta;
+    let eta = curve.eval(p_ac_req_w / 1000.0).max(0.0);
+    let p_out_w = p_ac_req_w * eta;
     Conversion {
         p_out_w,
-        loss_w: p_out_w - p_ac_req_w,
+        loss_w: p_ac_req_w - p_out_w,
         clipped_w: 0.0,
     }
 }

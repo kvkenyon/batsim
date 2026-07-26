@@ -21,6 +21,9 @@
 //! vendor's usable window is a firmware floor, not absolute empty. This
 //! keeps the Thevenin voltage-cutoff model from stranding usable energy
 //! near SOC 0 (the steep LFP knee discharges the last percent quickly).
+//! NMC's floor sits higher still (366 V): its shallow slope would
+//! otherwise leave the cutoff regime spanning the last ~15 % of usable
+//! energy even at room temperature.
 
 use batsim_registry::Chemistry;
 
@@ -44,10 +47,13 @@ pub const LFP_OCV_V: [f64; OCV_SOC_POINTS] = [
 /// NMC pack OCV table (V) at the 17 SOC abscissa points, 400 V pack scale.
 ///
 /// Shape requirement (spec B.2.4): near-linear with a 15-20 % swing
-/// across the window (realized as ~17.6 %).
+/// across the window (realized as ~16.9 %). The 0 % point sits at 366 V
+/// (3.29 V/cell): NMC vendors float the usable floor well above the pack
+/// cutoff, which keeps the Thevenin model from throttling the last
+/// ~10 % of usable energy at 25 degC (B.11 rte_conformance).
 pub const NMC_OCV_V: [f64; OCV_SOC_POINTS] = [
-    345.00, 348.94, 352.88, 356.81, 360.75, 364.69, 368.63, 372.56, 376.50, 380.44, 384.38, 388.31,
-    392.25, 396.19, 400.13, 404.06, 408.00,
+    366.00, 369.70, 373.50, 377.20, 380.90, 384.50, 388.00, 391.40, 394.80, 398.10, 401.30, 404.60,
+    407.90, 411.30, 415.00, 421.00, 428.00,
 ];
 
 /// The 17 SOC abscissa points (fractions in `[0, 1]`).
@@ -72,49 +78,49 @@ pub const fn ocv_table(chemistry: Chemistry) -> &'static [f64; OCV_SOC_POINTS] {
 /// basis per interval. Monotonic input data yield a monotone interpolant;
 /// the zero-tangent rule prevents the overshoot linear interpolation
 /// would hide at LFP's knees.
-fn fritsch_carlson_eval(x: &[f64], y: &[f64], x_eval: f64) -> f64 {
-    let n = x.len();
-    debug_assert!(n >= 2 && y.len() == n);
+fn fritsch_carlson_eval(xs: &[f64], ys: &[f64], x_eval: f64) -> f64 {
+    let n_pts = xs.len();
+    debug_assert!(n_pts >= 2 && ys.len() == n_pts);
     // Clamp outside the sampled range.
-    if x_eval <= x[0] {
-        return y[0];
+    if x_eval <= xs[0] {
+        return ys[0];
     }
-    if x_eval >= x[n - 1] {
-        return y[n - 1];
+    if x_eval >= xs[n_pts - 1] {
+        return ys[n_pts - 1];
     }
     // Secant slopes.
-    let mut d = [0.0_f64; OCV_SOC_POINTS - 1];
-    for i in 0..n - 1 {
-        d[i] = (y[i + 1] - y[i]) / (x[i + 1] - x[i]);
+    let mut secant = [0.0_f64; OCV_SOC_POINTS - 1];
+    for idx in 0..n_pts - 1 {
+        secant[idx] = (ys[idx + 1] - ys[idx]) / (xs[idx + 1] - xs[idx]);
     }
     // Tangents (Fritsch-Carlson / PCHIP limiting).
-    let mut m = [0.0_f64; OCV_SOC_POINTS];
-    m[0] = d[0];
-    m[n - 1] = d[n - 2];
-    for i in 1..n - 1 {
-        if d[i - 1] * d[i] <= 0.0 {
-            m[i] = 0.0;
+    let mut tangent = [0.0_f64; OCV_SOC_POINTS];
+    tangent[0] = secant[0];
+    tangent[n_pts - 1] = secant[n_pts - 2];
+    for idx in 1..n_pts - 1 {
+        if secant[idx - 1] * secant[idx] <= 0.0 {
+            tangent[idx] = 0.0;
         } else {
-            let w1 = 2.0 * (x[i + 1] - x[i]) + (x[i] - x[i - 1]);
-            let w2 = (x[i + 1] - x[i]) + 2.0 * (x[i] - x[i - 1]);
-            m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
+            let w1 = 2.0 * (xs[idx + 1] - xs[idx]) + (xs[idx] - xs[idx - 1]);
+            let w2 = (xs[idx + 1] - xs[idx]) + 2.0 * (xs[idx] - xs[idx - 1]);
+            tangent[idx] = (w1 + w2) / (w1 / secant[idx - 1] + w2 / secant[idx]);
         }
     }
     // Locate interval.
-    let mut i = 0;
-    while i < n - 2 && x_eval > x[i + 1] {
-        i += 1;
+    let mut idx = 0;
+    while idx < n_pts - 2 && x_eval > xs[idx + 1] {
+        idx += 1;
     }
     // Cubic Hermite basis.
-    let h = x[i + 1] - x[i];
-    let t = (x_eval - x[i]) / h;
-    let t2 = t * t;
-    let t3 = t2 * t;
+    let width = xs[idx + 1] - xs[idx];
+    let frac = (x_eval - xs[idx]) / width;
+    let t2 = frac * frac;
+    let t3 = t2 * frac;
     let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
-    let h10 = t3 - 2.0 * t2 + t;
+    let h10 = t3 - 2.0 * t2 + frac;
     let h01 = -2.0 * t3 + 3.0 * t2;
     let h11 = t3 - t2;
-    h00 * y[i] + h10 * h * m[i] + h01 * y[i + 1] + h11 * h * m[i + 1]
+    h00 * ys[idx] + h10 * width * tangent[idx] + h01 * ys[idx + 1] + h11 * width * tangent[idx + 1]
 }
 
 /// Coulombic (charge) efficiency by chemistry (spec B.2.2 defaults:

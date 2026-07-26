@@ -303,10 +303,10 @@ impl BatteryUnit {
         let peak_duration_s = model.peak_duration_s.as_ref().map_or(0.0, |d| d.value);
         let peak_budget_cap_ws =
             ((peak_discharge_w - continuous_discharge_w) * peak_duration_s).max(0.0);
-        let ramp_kw_per_s = model.ramp_rate.max_kw_per_s;
+        let ramp_rate_kw_s = model.ramp_rate.max_kw_per_s;
         // A nonpositive registry ramp rate means "no slew limit declared".
-        let ramp_w_per_s = if ramp_kw_per_s > 0.0 {
-            ramp_kw_per_s * 1000.0
+        let ramp_w_per_s = if ramp_rate_kw_s > 0.0 {
+            ramp_rate_kw_s * 1000.0
         } else {
             f64::INFINITY
         };

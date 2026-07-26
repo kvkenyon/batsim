@@ -43,14 +43,21 @@ fn measure_rte(registry: &Registry, model: &BatteryModel) -> f64 {
     let mut e_dis_ac = 0.0f64;
 
     let mut drive = |unit: &mut BatteryUnit, p_ac_kw: f64, seconds: u64, charge: bool| {
+        // Hybrid-path efficiency at a power level: curve x-axis is AC kW;
+        // one fixed-point step from the DC side is ample (D1 decision).
+        let hyb_eta = |p_w: f64| -> f64 {
+            hybrid.as_ref().map_or(1.0, |inv| {
+                inv.model().efficiency_curve.eval(p_w.abs() / 1000.0)
+            })
+            .max(1e-6)
+        };
         for _ in 0..seconds {
-            // Translate the AC-side request to the unit's terminal.
+            // Translate the AC-side request to the unit's terminal
+            // (conservation-true: charge DC = AC x eta; discharge
+            // DC = AC / eta).
             let p_term_req = match (&hybrid, charge) {
-                (Some(inv), true) => -inv.ac_to_dc(p_ac_kw * 1000.0).p_out_w,
-                (Some(inv), false) => {
-                    let eta = inv.dc_to_ac(1000.0).p_out_w / 1000.0;
-                    p_ac_kw * 1000.0 / eta.max(1e-6)
-                }
+                (Some(_), true) => -p_ac_kw * 1000.0 * hyb_eta(p_ac_kw * 1000.0),
+                (Some(_), false) => p_ac_kw * 1000.0 / hyb_eta(p_ac_kw * 1000.0),
                 (None, true) => -p_ac_kw * 1000.0,
                 (None, false) => p_ac_kw * 1000.0,
             };
@@ -60,13 +67,11 @@ fn measure_rte(registry: &Registry, model: &BatteryModel) -> f64 {
                 t_amb_c: 25.0,
                 grid_present: true,
             });
-            // Meter the AC side of the path.
+            // Meter the AC side of the path from the REALIZED terminal
+            // power (discharge: AC = DC x eta; charge: AC = DC / eta).
             let p_ac_realized = match &hybrid {
-                Some(inv) if out.p_term_w >= 0.0 => inv.dc_to_ac(out.p_term_w).p_out_w,
-                Some(_) => {
-                    let eta = inv_eta_for_charge(&hybrid);
-                    out.p_term_w / eta
-                }
+                Some(_) if out.p_term_w >= 0.0 => out.p_term_w * hyb_eta(out.p_term_w),
+                Some(_) => out.p_term_w / hyb_eta(out.p_term_w),
                 None => out.p_term_w,
             };
             if p_ac_realized >= 0.0 {
@@ -93,12 +98,6 @@ fn measure_rte(registry: &Registry, model: &BatteryModel) -> f64 {
     e_dis_ac / e_chg_ac
 }
 
-fn inv_eta_for_charge(hybrid: &Option<batsim_core::inverter::InverterUnit>) -> f64 {
-    hybrid
-        .as_ref()
-        .map_or(1.0, |inv| inv.ac_to_dc(1000.0).p_out_w / 1000.0)
-        .max(1e-6)
-}
 
 #[test]
 fn rte_conformance() {

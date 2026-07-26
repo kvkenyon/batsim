@@ -253,35 +253,32 @@ impl Home {
 
         // Hybrid (DC-bus) units.
         if !dc_idx.is_empty() {
+            // Efficiency of the shared hybrid at an AC power (curve x-axis
+            // is AC kW); one fixed-point step from the DC side is ample.
+            let hyb_eta = |p_w: f64| -> f64 {
+                self.devices.hybrid_inverter.as_ref().map_or(0.97, |inv| {
+                    inv.model().efficiency_curve.eval(p_w.abs() / 1000.0)
+                })
+                .max(1e-6)
+            };
             let pv_surplus_dc = if matches!(self.mode, ControlMode::SelfConsumption)
                 && self.devices.pv_inverter.is_none()
             {
                 // DC left on the bus after covering the load (single-
                 // inversion PV->battery path, A.3.3).
-                let eta = self
-                    .devices
-                    .hybrid_inverter
-                    .as_ref()
-                    .map_or(0.97, |inv| inv.dc_to_ac(1000.0).p_out_w / 1000.0);
-                (exo.pv_dc - exo.load / eta.max(1e-6)).max(0.0)
+                (exo.pv_dc - exo.load / hyb_eta(exo.load)).max(0.0)
             } else {
                 0.0
             };
             let p_dc_set = if pv_surplus_dc > 0.0 && p_batt_ac_set <= 0.0 {
                 -pv_surplus_dc
+            } else if p_batt_ac_set >= 0.0 {
+                // Discharge: DC required from the battery for an AC target.
+                p_batt_ac_set / hyb_eta(p_batt_ac_set)
             } else {
-                // Translate the AC setpoint through the hybrid curve.
-                let eta = self
-                    .devices
-                    .hybrid_inverter
-                    .as_ref()
-                    .map_or(0.97, |inv| inv.dc_to_ac(1000.0).p_out_w / 1000.0)
-                    .max(1e-6);
-                if p_batt_ac_set >= 0.0 {
-                    p_batt_ac_set / eta
-                } else {
-                    p_batt_ac_set * eta
-                }
+                // Charge: DC delivered to the bus from an AC draw
+                // (conservation-true: DC = AC x eta, D1 decision).
+                p_batt_ac_set * hyb_eta(-p_batt_ac_set)
             };
             Self::split_and_step(
                 &mut self.devices.batteries,
@@ -372,9 +369,13 @@ impl Home {
             } else {
                 // Net bus deficit: drawn from AC through the hybrid
                 // (grid charge double conversion, A.3.3). The battery
-                // already absorbed its DC; the AC draw is the deficit
-                // divided by charge-path efficiency.
-                let eta = (inv.ac_to_dc(1000.0).p_out_w / 1000.0).max(1e-6);
+                // already absorbed its DC; AC = DC / eta, one fixed-point
+                // step (conservation-true, D1 decision).
+                let eta = inv
+                    .model()
+                    .efficiency_curve
+                    .eval(-p_bus / 1000.0)
+                    .max(1e-6);
                 let p_ac_draw = -p_bus / eta;
                 p_batt_ac -= p_ac_draw;
             }
