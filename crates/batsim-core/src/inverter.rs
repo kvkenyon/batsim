@@ -91,6 +91,28 @@ pub fn ac_to_dc(curve: &EfficiencyCurve, rated_ac_w: f64, p_ac_req_w: f64) -> Co
     }
 }
 
+/// DC power the source must deliver for an AC output target (the inverse
+/// of [`dc_to_ac`]): `P_dc = P_ac_target / eta(P_ac_target)`. The target is
+/// clamped to the AC rating first, so a caller never asks its DC source for
+/// power the stage could not pass.
+#[must_use]
+pub fn dc_required_for_ac(curve: &EfficiencyCurve, rated_ac_w: f64, p_ac_target_w: f64) -> f64 {
+    let p_ac = p_ac_target_w.max(0.0).min(rated_ac_w.max(0.0));
+    let eta = curve.eval(p_ac / 1000.0).max(ETA_FLOOR);
+    p_ac / eta
+}
+
+/// AC draw required to cover a DC-bus deficit (the inverse of [`ac_to_dc`]
+/// evaluated from the DC side): `P_ac = P_dc / eta(P_dc)`, one fixed-point
+/// step. Unclamped: the DC has already been absorbed downstream, so the
+/// draw must be metered in full (conservation-true, D1 decision).
+#[must_use]
+pub fn ac_required_for_dc(curve: &EfficiencyCurve, p_dc_target_w: f64) -> f64 {
+    let p_dc = p_dc_target_w.max(0.0);
+    let eta = curve.eval(p_dc / 1000.0).max(ETA_FLOOR);
+    p_dc / eta
+}
+
 /// Resolve two candidate AC flows (PV output and battery discharge)
 /// sharing one inverter's AC rating (spec B.3.3): the combined flow is
 /// capped at `rated_ac_w`; with `pv_priority` PV is admitted first and
@@ -125,29 +147,59 @@ pub fn resolve_shared_ac_cap(
 pub struct InverterUnit {
     /// The registry model driving this unit.
     model: InverterModel,
-    /// Rated continuous AC output (W), SI-converted from the catalog kW.
+    /// Number of identical physical units aggregated into this instance.
+    quantity: u32,
+    /// Aggregate rated continuous AC output (W): catalog kW x quantity.
     rated_ac_w: f64,
+    /// Aggregate efficiency curve: the model curve with its x-axis scaled
+    /// by `quantity`, so evaluating at fleet power yields the per-unit
+    /// efficiency at the equally-shared per-unit power.
+    curve: EfficiencyCurve,
     /// Standby draw while energized (W), AC side (B.3.2).
     standby_w: f64,
 }
 
 impl InverterUnit {
-    /// Build a unit from its registry model. `standby_w` is the measured
-    /// or estimated AC-side standby draw (B.3.2); it is carried, never
-    /// invented from the model.
+    /// Build a single-unit instance from its registry model. `standby_w`
+    /// is the measured or estimated AC-side standby draw (B.3.2); it is
+    /// carried, never invented from the model.
     #[must_use]
     pub fn new(model: &InverterModel, standby_w: f64) -> Self {
+        Self::with_quantity(model, 1, standby_w)
+    }
+
+    /// Build an instance aggregating `quantity` identical units of the
+    /// model: the AC rating and the efficiency-curve x-axis both scale
+    /// linearly, so N units share the flow equally (spec A.4.4).
+    ///
+    /// `quantity` is treated as at least 1.
+    #[must_use]
+    pub fn with_quantity(model: &InverterModel, quantity: u32, standby_w: f64) -> Self {
+        let quantity = quantity.max(1);
+        let n = f64::from(quantity);
+        let mut curve = model.efficiency_curve.clone();
+        for point in &mut curve.points {
+            point.x_kw *= n;
+        }
         Self {
-            rated_ac_w: model.rated_ac_output_kw.value * 1000.0,
+            rated_ac_w: model.rated_ac_output_kw.value * 1000.0 * n,
+            curve,
+            quantity,
             standby_w,
             model: model.clone(),
         }
     }
 
-    /// Rated continuous AC output (W).
+    /// Aggregate rated continuous AC output (W) across all units.
     #[must_use]
     pub fn rated_ac_w(&self) -> f64 {
         self.rated_ac_w
+    }
+
+    /// Number of identical physical units this instance aggregates.
+    #[must_use]
+    pub fn quantity(&self) -> u32 {
+        self.quantity
     }
 
     /// Standby draw while energized (W), AC side (B.3.2).
@@ -156,19 +208,45 @@ impl InverterUnit {
         self.standby_w
     }
 
+    /// Conversion efficiency at an AC-side power magnitude, floored away
+    /// from zero so callers can divide by it safely.
+    #[must_use]
+    pub fn eta_at_w(&self, p_w: f64) -> f64 {
+        self.curve.eval(p_w.abs() / 1000.0).max(ETA_FLOOR)
+    }
+
     /// DC -> AC through this inverter.
     #[must_use]
     pub fn dc_to_ac(&self, p_dc_w: f64) -> Conversion {
-        dc_to_ac(&self.model.efficiency_curve, self.rated_ac_w, p_dc_w)
+        dc_to_ac(&self.curve, self.rated_ac_w, p_dc_w)
+    }
+
+    /// DC -> AC through this inverter against a tighter AC cap than the
+    /// nameplate rating (e.g. the array's declared DC/AC ratio, B.7.4).
+    #[must_use]
+    pub fn dc_to_ac_capped(&self, p_dc_w: f64, cap_ac_w: f64) -> Conversion {
+        dc_to_ac(&self.curve, self.rated_ac_w.min(cap_ac_w.max(0.0)), p_dc_w)
     }
 
     /// AC -> DC through this inverter.
     #[must_use]
     pub fn ac_to_dc(&self, p_ac_req_w: f64) -> Conversion {
-        ac_to_dc(&self.model.efficiency_curve, self.rated_ac_w, p_ac_req_w)
+        ac_to_dc(&self.curve, self.rated_ac_w, p_ac_req_w)
     }
 
-    /// The registry model.
+    /// DC power required from the source for an AC output target.
+    #[must_use]
+    pub fn dc_required_for_ac(&self, p_ac_target_w: f64) -> f64 {
+        dc_required_for_ac(&self.curve, self.rated_ac_w, p_ac_target_w)
+    }
+
+    /// AC draw required to cover a DC-bus deficit.
+    #[must_use]
+    pub fn ac_required_for_dc(&self, p_dc_target_w: f64) -> f64 {
+        ac_required_for_dc(&self.curve, p_dc_target_w)
+    }
+
+    /// The registry model (unscaled; see [`Self::quantity`]).
     #[must_use]
     pub fn model(&self) -> &InverterModel {
         &self.model
@@ -282,6 +360,32 @@ mod tests {
         // Zero request is exact silence.
         let c = ac_to_dc(&curve, 10_000.0, 0.0);
         assert_eq!((c.p_out_w, c.loss_w, c.clipped_w), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn dc_required_for_ac_inverts_dc_to_ac() {
+        let curve = cec_curve(10.0);
+        // Asking for 4850 W AC needs 5 kW DC back through the same curve.
+        let p_dc = dc_required_for_ac(&curve, 10_000.0, 4_850.0);
+        let back = dc_to_ac(&curve, 10_000.0, p_dc);
+        assert!((back.p_out_w - 4_850.0).abs() < 5.0);
+        // Targets above the rating clamp: never ask the pack for power the
+        // stage could not pass.
+        let capped = dc_required_for_ac(&curve, 10_000.0, 50_000.0);
+        assert!(capped.is_finite() && capped < 11_000.0);
+        assert_eq!(dc_required_for_ac(&curve, 10_000.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn ac_required_for_dc_covers_the_bus_deficit_unclamped() {
+        let curve = cec_curve(10.0);
+        // 4850 W of DC deficit at eta(4.85 kW) = 0.97 costs 5 kW AC.
+        let p_ac = ac_required_for_dc(&curve, 4_850.0);
+        assert!(p_ac > 4_850.0);
+        assert!((p_ac - 4_850.0 / curve.eval(4.85)).abs() < 1e-9);
+        // Unclamped: an over-rating deficit is still metered in full.
+        assert!(ac_required_for_dc(&curve, 20_000.0) > 20_000.0);
+        assert_eq!(ac_required_for_dc(&curve, 0.0), 0.0);
     }
 
     #[test]

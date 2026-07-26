@@ -3,13 +3,13 @@ source: crates/batsim-core/tests/golden.rs
 expression: summary
 ---
 {
-  "batt_export_kwh": 11.669636,
+  "batt_export_kwh": 11.573987,
   "batt_import_kwh": 0.0,
   "final_soc": 0.2,
   "main_export_kwh": 49.465731,
   "main_import_kwh": 58.70262,
   "model_id": "sonnen.sonnenbatterie_10_hybrid",
-  "pv_kwh": 79.631066,
+  "pv_kwh": 79.726715,
   "soc_samples_per_min": [
     0.495921,
     0.491792,

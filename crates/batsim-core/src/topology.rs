@@ -76,6 +76,9 @@ pub struct HomeDevices {
     pub controller_standby_w: f64,
     /// PV-priority at the shared inverter.
     pub pv_priority: bool,
+    /// AC-side cap on the PV path from the array's declared DC/AC ratio
+    /// (`kw_dc / dc_ac_ratio`, W); `None` when the system has no PV.
+    pub pv_ac_cap_w: Option<f64>,
 }
 
 /// Build the device set for one home from a validated system spec.
@@ -102,20 +105,32 @@ pub fn build_devices(
         let model = registry.inverter(&inv_ref.model_id).ok_or_else(|| {
             CoreError::InvalidSystem(format!("unknown inverter `{}`", inv_ref.model_id))
         })?;
-        match model.topology {
-            batsim_registry::types::InverterTopology::HybridDCCoupled => {
-                hybrid_inverter = Some(InverterUnit::new(model, 0.0));
-            }
+        // Multiple entries of one topology would silently overwrite each
+        // other and understate the composed AC capacity; multiplicity
+        // within one entry is expressed by `quantity`.
+        let slot = match model.topology {
+            batsim_registry::types::InverterTopology::HybridDCCoupled => &mut hybrid_inverter,
             batsim_registry::types::InverterTopology::StringPVOnly
-            | batsim_registry::types::InverterTopology::MicroinverterPV => {
-                pv_inverter = Some(InverterUnit::new(model, 0.0));
-            }
+            | batsim_registry::types::InverterTopology::MicroinverterPV => &mut pv_inverter,
             batsim_registry::types::InverterTopology::BatteryIntegrated => {
                 // Folded into BatteryUnit terminal semantics (A.3.1).
+                continue;
             }
+        };
+        if slot.is_some() {
+            return Err(CoreError::InvalidSystem(format!(
+                "multiple inverter entries of the same topology (`{}`); \
+                 use one entry with `quantity`",
+                inv_ref.model_id
+            )));
         }
+        *slot = Some(InverterUnit::with_quantity(model, inv_ref.quantity, 0.0));
+    }
+    if hybrid_inverter.is_none() {
+        hybrid_inverter = synthesize_integrated_hybrid(sys, registry)?;
     }
 
+    let mut pv_ac_cap_w = None;
     let pv = match &sys.pv {
         Some(pv_cfg) => {
             let site = config.pv_site.ok_or_else(|| {
@@ -137,10 +152,17 @@ pub fn build_devices(
                 master_seed,
                 rng::entity_device(home_idx, SLOT_PV),
             );
+            // The array's declared DC/AC ratio caps the PV path's AC
+            // output independently of the inverter nameplate (B.7.4).
+            pv_ac_cap_w = Some(pv_cfg.kw_dc / pv_cfg.dc_ac_ratio * 1000.0);
             // PV lands on the hybrid inverter's MPPTs when no explicit PV
-            // inverter is named (A.4.4); a named PV inverter must exist.
+            // inverter is named (A.4.4); a named PV inverter must exist and
+            // wins over an `inverters[]`-declared PV-topology entry.
             if let Some(inv_id) = &pv_cfg.pv_inverter_model_id {
-                if pv_inverter.is_none() {
+                let named_already_built = pv_inverter
+                    .as_ref()
+                    .is_some_and(|inv| inv.model().model_id == *inv_id);
+                if !named_already_built {
                     let model = registry.inverter(inv_id).ok_or_else(|| {
                         CoreError::InvalidSystem(format!("unknown PV inverter `{inv_id}`"))
                     })?;
@@ -174,7 +196,51 @@ pub fn build_devices(
         load,
         controller_standby_w,
         pv_priority: config.pv_priority,
+        pv_ac_cap_w,
     })
+}
+
+/// Find the catalog hybrid inverter that is physically integrated into a
+/// declared DC-coupled battery, for systems whose `inverters[]` names none
+/// (validation exempts integrated-inverter batteries; the DC power still
+/// needs an AC path, otherwise stage 6 would silently drop it).
+///
+/// Returns `None` when no declared battery is a DC-coupled integrated
+/// unit; errors when one is but the catalog has no compatible hybrid.
+fn synthesize_integrated_hybrid(
+    sys: &batsim_registry::system::HomeSystem,
+    registry: &Registry,
+) -> Result<Option<InverterUnit>, CoreError> {
+    for bat_ref in &sys.batteries {
+        let Some(model) = registry.battery(&bat_ref.model_id) else {
+            continue;
+        };
+        if model.coupling != Coupling::DCCoupledHybrid || model.integrated_inverter != Some(true) {
+            continue;
+        }
+        // Registry iteration is sorted by `model_id`, so the pick is stable.
+        let inv = registry
+            .inverters()
+            .find(|i| {
+                matches!(
+                    i.topology,
+                    batsim_registry::types::InverterTopology::HybridDCCoupled
+                ) && i.compatible_battery_ids.contains(&bat_ref.model_id)
+            })
+            .ok_or_else(|| {
+                CoreError::InvalidSystem(format!(
+                    "`{}` has an integrated hybrid inverter but the catalog \
+                     has no compatible hybrid inverter entry",
+                    bat_ref.model_id
+                ))
+            })?;
+        return Ok(Some(InverterUnit::with_quantity(
+            inv,
+            bat_ref.quantity,
+            0.0,
+        )));
+    }
+    Ok(None)
 }
 
 /// Build all battery units declared by the system document.

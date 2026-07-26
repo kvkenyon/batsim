@@ -13,8 +13,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::battery::BatteryStepInput;
+use crate::battery::{BatteryStepInput, BatteryStepOutput};
 use crate::dispatch::{ControlMode, DispatchAction, ScheduledDispatch};
+use crate::inverter::resolve_shared_ac_cap;
 use crate::telemetry::{HomeMeters, HomeTruth, UnitTruth};
 use crate::topology::{is_ac_terminal, HomeDevices};
 
@@ -56,9 +57,14 @@ impl Home {
     }
 
     /// Queue a dispatch action (applied at the top of its tick, B.1.5
-    /// stage 4). Queue order is preserved for equal ticks.
+    /// stage 4). Commands may be submitted in any tick order; the queue is
+    /// kept sorted by `execute_at_tick`, and submission order is preserved
+    /// for equal ticks.
     pub fn schedule(&mut self, cmd: ScheduledDispatch) {
-        self.dispatch_queue.push(cmd);
+        let at = self
+            .dispatch_queue
+            .partition_point(|c| c.execute_at_tick <= cmd.execute_at_tick);
+        self.dispatch_queue.insert(at, cmd);
     }
 
     /// Set the control mode immediately (synchronous API path for tests).
@@ -162,7 +168,7 @@ impl Home {
         // and converts in stage 6.
         let (pv_ac_conv, pv_clipped_conv) = match (&self.devices.pv_inverter, p_pv_dc > 0.0) {
             (Some(inv), true) => {
-                let conv = inv.dc_to_ac(p_pv_dc);
+                let conv = inv.dc_to_ac_capped(p_pv_dc, self.pv_ac_cap_w());
                 (conv.p_out_w, conv.clipped_w)
             }
             _ => (0.0, 0.0),
@@ -189,8 +195,7 @@ impl Home {
                     // Hybrid: PV converts at the shared inverter in stage 6;
                     // estimate its AC value for the setpoint.
                     self.devices.hybrid_inverter.as_ref().map_or(0.0, |inv| {
-                        let conv = inv.dc_to_ac(exo.pv_dc);
-                        conv.p_out_w
+                        inv.dc_to_ac_capped(exo.pv_dc, self.pv_ac_cap_w()).p_out_w
                     })
                 };
                 exo.load - p_pv_ac_est
@@ -229,9 +234,9 @@ impl Home {
         exo: &Exogenous,
         dt_s: u32,
         t_amb_c: f64,
-    ) -> Vec<f64> {
+    ) -> Vec<BatteryStepOutput> {
         let n = self.devices.batteries.len();
-        let mut realized = vec![0.0; n];
+        let mut realized = vec![BatteryStepOutput::default(); n];
         if n == 0 {
             return realized;
         }
@@ -253,36 +258,7 @@ impl Home {
 
         // Hybrid (DC-bus) units.
         if !dc_idx.is_empty() {
-            // Efficiency of the shared hybrid at an AC power (curve x-axis
-            // is AC kW); one fixed-point step from the DC side is ample.
-            let hyb_eta = |p_w: f64| -> f64 {
-                self.devices
-                    .hybrid_inverter
-                    .as_ref()
-                    .map_or(0.97, |inv| {
-                        inv.model().efficiency_curve.eval(p_w.abs() / 1000.0)
-                    })
-                    .max(1e-6)
-            };
-            let pv_surplus_dc = if matches!(self.mode, ControlMode::SelfConsumption)
-                && self.devices.pv_inverter.is_none()
-            {
-                // DC left on the bus after covering the load (single-
-                // inversion PV->battery path, A.3.3).
-                (exo.pv_dc - exo.load / hyb_eta(exo.load)).max(0.0)
-            } else {
-                0.0
-            };
-            let p_dc_set = if pv_surplus_dc > 0.0 && p_batt_ac_set <= 0.0 {
-                -pv_surplus_dc
-            } else if p_batt_ac_set >= 0.0 {
-                // Discharge: DC required from the battery for an AC target.
-                p_batt_ac_set / hyb_eta(p_batt_ac_set)
-            } else {
-                // Charge: DC delivered to the bus from an AC draw
-                // (conservation-true: DC = AC x eta, D1 decision).
-                p_batt_ac_set * hyb_eta(-p_batt_ac_set)
-            };
+            let p_dc_set = self.hybrid_dc_setpoint(p_batt_ac_set, exo);
             Self::split_and_step(
                 &mut self.devices.batteries,
                 &dc_idx,
@@ -295,6 +271,44 @@ impl Home {
         realized
     }
 
+    /// The DC-bus setpoint for the hybrid units, translated from the
+    /// AC-boundary setpoint through the shared inverter (A.3.3). Every
+    /// AC<->DC translation routes through the `inverter` helpers so the D1
+    /// charge-path rule has a single owner.
+    ///
+    /// Zero when no hybrid inverter exists: `build_devices` guarantees one
+    /// for any DC-coupled battery, so this is an unreachable safety floor
+    /// rather than a silent energy drop.
+    fn hybrid_dc_setpoint(&self, p_batt_ac_set: f64, exo: &Exogenous) -> f64 {
+        let Some(inv) = self.devices.hybrid_inverter.as_ref() else {
+            return 0.0;
+        };
+        let pv_surplus_dc = if matches!(self.mode, ControlMode::SelfConsumption)
+            && self.devices.pv_inverter.is_none()
+        {
+            // DC left on the bus after covering the load (single-
+            // inversion PV->battery path, A.3.3).
+            (exo.pv_dc - inv.dc_required_for_ac(exo.load)).max(0.0)
+        } else {
+            0.0
+        };
+        if pv_surplus_dc > 0.0 && p_batt_ac_set <= 0.0 {
+            -pv_surplus_dc
+        } else if p_batt_ac_set >= 0.0 {
+            // Discharge: DC required from the battery for an AC target.
+            inv.dc_required_for_ac(p_batt_ac_set)
+        } else {
+            // Charge: DC delivered to the bus from an AC draw
+            // (conservation-true: DC = AC x eta, D1 decision).
+            -inv.ac_to_dc(-p_batt_ac_set).p_out_w
+        }
+    }
+
+    /// AC-side cap on the PV path from the array's DC/AC ratio (B.7.4).
+    fn pv_ac_cap_w(&self) -> f64 {
+        self.devices.pv_ac_cap_w.unwrap_or(f64::INFINITY)
+    }
+
     /// Split a setpoint across the given unit indices pro-rata by dynamic
     /// headroom and step each (B.3.4).
     fn split_and_step(
@@ -303,7 +317,7 @@ impl Home {
         p_set: f64,
         dt_s: u32,
         t_amb_c: f64,
-        realized: &mut [f64],
+        realized: &mut [BatteryStepOutput],
     ) {
         if indices.is_empty() || p_set == 0.0 {
             for &i in indices {
@@ -334,50 +348,65 @@ impl Home {
 
     /// Stage 6: resolve the hybrid inverter's shared AC cap (PV priority,
     /// B.3.3) and return (pv_ac_w, batt_ac_w) at the panel.
-    fn stage_inverter(&mut self, exo: &Exogenous, unit_realized: &[f64], dt_s: u32) -> (f64, f64) {
+    fn stage_inverter(
+        &mut self,
+        exo: &Exogenous,
+        unit_realized: &[BatteryStepOutput],
+        dt_s: u32,
+    ) -> (f64, f64) {
         let mut p_batt_ac: f64 = unit_realized
             .iter()
             .zip(&self.devices.batteries)
             .filter(|(_, u)| is_ac_terminal(u.model().coupling))
-            .map(|(p, _)| *p)
+            .map(|(o, _)| o.p_term_w)
             .sum();
         let mut p_pv_ac = exo.pv_ac;
 
-        if let Some(inv) = &self.devices.hybrid_inverter {
-            let hyb_batt_dc: f64 = unit_realized
-                .iter()
-                .zip(&self.devices.batteries)
-                .filter(|(_, u)| !is_ac_terminal(u.model().coupling))
-                .map(|(p, _)| *p)
-                .sum();
-            let p_bus = exo.pv_dc + hyb_batt_dc;
-            if p_bus >= 0.0 {
-                let conv = inv.dc_to_ac(p_bus);
-                // Attribute AC output to PV first (metering only; the
-                // physics is one conversion of the summed DC).
-                let pv_share = if p_bus > 0.0 {
-                    conv.p_out_w * (exo.pv_dc / p_bus).min(1.0)
-                } else {
-                    0.0
-                };
-                p_pv_ac += pv_share;
-                p_batt_ac += conv.p_out_w - pv_share;
-                // Clipped energy: PV priority curtails the battery second
-                // (B.3.3), so the clip lands on the battery counter.
-                if self.devices.pv_priority {
-                    self.meters.batt_clipped.accumulate(conv.clipped_w, dt_s);
-                } else {
-                    self.meters.pv_clipped.accumulate(conv.clipped_w, dt_s);
-                }
-            } else {
-                // Net bus deficit: drawn from AC through the hybrid
-                // (grid charge double conversion, A.3.3). The battery
-                // already absorbed its DC; AC = DC / eta, one fixed-point
-                // step (conservation-true, D1 decision).
-                let eta = inv.model().efficiency_curve.eval(-p_bus / 1000.0).max(1e-6);
-                let p_ac_draw = -p_bus / eta;
-                p_batt_ac -= p_ac_draw;
-            }
+        let Some(inv) = &self.devices.hybrid_inverter else {
+            return (p_pv_ac, p_batt_ac);
+        };
+        let hyb_batt_dc: f64 = unit_realized
+            .iter()
+            .zip(&self.devices.batteries)
+            .filter(|(_, u)| !is_ac_terminal(u.model().coupling))
+            .map(|(o, _)| o.p_term_w)
+            .sum();
+        let p_bus = exo.pv_dc + hyb_batt_dc;
+        if p_bus > 0.0 {
+            // One conversion of the summed DC (the physics), then attribute
+            // the shared AC rating between the two sources that actually
+            // put power on the bus. PV occupies the bus first; a charging
+            // battery contributes no AC candidate (its share is negative
+            // and already netted into `p_bus`).
+            let eta = inv.eta_at_w(p_bus);
+            let pv_dc_share = exo.pv_dc.max(0.0).min(p_bus);
+            let batt_dc_share = p_bus - pv_dc_share;
+            // The array's DC/AC ratio caps the PV path before the shared
+            // rating does (B.7.4); the overhang is PV curtailment.
+            let pv_ac_uncapped = pv_dc_share * eta;
+            let pv_ac_candidate = pv_ac_uncapped.min(self.pv_ac_cap_w());
+            let batt_ac_candidate = batt_dc_share * eta;
+            let (pv_admitted, batt_admitted) = resolve_shared_ac_cap(
+                inv.rated_ac_w(),
+                pv_ac_candidate,
+                batt_ac_candidate,
+                self.devices.pv_priority,
+            );
+            p_pv_ac += pv_admitted;
+            p_batt_ac += batt_admitted;
+            // Clipping is attributed to whichever source actually
+            // overflowed, measured back on the DC side (B.3.3).
+            self.meters
+                .pv_clipped
+                .accumulate((pv_ac_uncapped - pv_admitted) / eta, dt_s);
+            self.meters
+                .batt_clipped
+                .accumulate((batt_ac_candidate - batt_admitted) / eta, dt_s);
+        } else if p_bus < 0.0 {
+            // Net bus deficit: drawn from AC through the hybrid (grid
+            // charge double conversion, A.3.3). The battery already
+            // absorbed its DC, so the AC draw is metered in full.
+            p_batt_ac -= inv.ac_required_for_dc(-p_bus);
         }
         (p_pv_ac, p_batt_ac)
     }
@@ -414,7 +443,7 @@ impl Home {
         exo: &Exogenous,
         p_pv_ac: f64,
         p_batt_ac: f64,
-        unit_realized: &[f64],
+        unit_realized: &[BatteryStepOutput],
     ) {
         if !self.record_truth {
             return;
@@ -424,11 +453,11 @@ impl Home {
             .batteries
             .iter()
             .zip(unit_realized)
-            .map(|(u, &p)| UnitTruth {
+            .map(|(u, o)| UnitTruth {
                 soc: u.soc(),
-                p_term_w: p,
-                v_term_v: 0.0,
-                heat_w: 0.0,
+                p_term_w: o.p_term_w,
+                v_term_v: o.v_term_v,
+                heat_w: o.heat_w,
             })
             .collect();
         let soc_mean = self.soc_mean();
@@ -449,13 +478,17 @@ impl Home {
     }
 }
 
-/// Step one unit with a setpoint and return realized terminal power.
-fn step_one(unit: &mut crate::battery::BatteryUnit, p_set: f64, dt_s: u32, t_amb_c: f64) -> f64 {
+/// Step one unit with a setpoint and return its full realized output.
+fn step_one(
+    unit: &mut crate::battery::BatteryUnit,
+    p_set: f64,
+    dt_s: u32,
+    t_amb_c: f64,
+) -> BatteryStepOutput {
     unit.step(&BatteryStepInput {
         dt_s,
         p_term_setpoint_w: p_set,
         t_amb_c,
         grid_present: true,
     })
-    .p_term_w
 }
