@@ -52,9 +52,8 @@ fn check_schema_version(path: &str, actual: &str, out: &mut Vec<Violation>) {
 /// (semver triple; the run manifest records it, spec §1.2).
 fn check_entry_version(path: &str, version: &str, out: &mut Vec<Violation>) {
     let mut parts = version.split('.');
-    let numeric = |s: Option<&str>| {
-        s.is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
-    };
+    let numeric =
+        |s: Option<&str>| s.is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
     let well_formed = numeric(parts.next())
         && numeric(parts.next())
         && numeric(parts.next())

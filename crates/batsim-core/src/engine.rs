@@ -229,9 +229,7 @@ impl SimWorld {
             let budget = match speed {
                 Speed::Unbounded => continue,
                 Speed::Realtime => std::time::Duration::from_secs_f64(f64::from(dt)),
-                Speed::FastForward(n) => {
-                    std::time::Duration::from_secs_f64(f64::from(dt) / n)
-                }
+                Speed::FastForward(n) => std::time::Duration::from_secs_f64(f64::from(dt) / n),
             };
             let elapsed = start.elapsed();
             if elapsed < budget {

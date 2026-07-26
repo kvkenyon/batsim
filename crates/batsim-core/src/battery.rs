@@ -431,8 +431,8 @@ impl BatteryUnit {
                 flags.at_soc_min = true;
             }
         } else if p_w < 0.0 {
-            p_w =
-                0.0 - self.energy_window_limit(-p_w, false, dt_s, input.grid_present, input.t_amb_c);
+            p_w = 0.0
+                - self.energy_window_limit(-p_w, false, dt_s, input.grid_present, input.t_amb_c);
             if p_w > pre_window_w {
                 flags.at_soc_max = true;
             }
