@@ -52,6 +52,7 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+use crate::math;
 use crate::pv::{civil_local, normal_from_uniforms, Season};
 use crate::rng::{self, RngPurpose};
 
@@ -508,8 +509,8 @@ impl LoadModel {
             * hvac_type_factor(config.hvac);
         let water_scale =
             f64::from(config.occupancy.max(1)) / REF_OCC * water_factor(config.water_heat);
-        let plug_scale = (f64::from(config.sqft.max(1)) / REF_SQFT).powf(0.7)
-            * (f64::from(config.occupancy.max(1)) / REF_OCC).powf(0.5);
+        let plug_scale = math::powf(f64::from(config.sqft.max(1)) / REF_SQFT, 0.7)
+            * math::powf(f64::from(config.occupancy.max(1)) / REF_OCC, 0.5);
         let events = Vec::with_capacity(MAX_EVENTS);
         Self {
             config: config.clone(),
@@ -720,7 +721,7 @@ impl LoadModel {
         let app_w: f64 = self.events.iter().map(|e| e.power_w).sum();
 
         // AR(1) base residual, sigma 60 W, 5-min correlation.
-        let phi = (-f64::from(dt_s) / BASE_TAU_S).exp();
+        let phi = math::exp(-f64::from(dt_s) / BASE_TAU_S);
         let eps = normal_from_uniforms(bm1, bm2);
         self.ar1_base_w = phi * self.ar1_base_w + BASE_SIGMA_W * (1.0 - phi * phi).sqrt() * eps;
 
@@ -832,7 +833,7 @@ mod tests {
     fn summer_t_amb(unix_time_s: u64) -> f64 {
         let c = civil_local(unix_time_s);
         let h = c.sec_of_day as f64 / 3600.0;
-        32.0 + 6.0 * ((h - 15.0) / 24.0 * 2.0 * std::f64::consts::PI).cos()
+        32.0 + 6.0 * crate::math::cos((h - 15.0) / 24.0 * 2.0 * std::f64::consts::PI)
     }
 
     #[test]

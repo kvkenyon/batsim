@@ -19,6 +19,7 @@ pub mod error;
 pub mod home;
 pub mod inverter;
 pub mod load;
+mod math;
 pub mod pv;
 pub mod rng;
 pub mod telemetry;
