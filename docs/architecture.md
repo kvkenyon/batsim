@@ -47,11 +47,13 @@ startup and the result is immutable. Three entry points:
   legacy `BATSIM_REGISTRY_DIR`); shadowing is entry-by-entry on
   `(kind, model_id)` and every shadow is logged via `tracing`.
 
-Loading runs four phases: per-file SHA-256 verification against
+Loading runs, in order: per-file SHA-256 verification against
 `catalog.json`, JSON parse into the typed targets, semantic validation
 (bounds, monotonic efficiency curves, cross-references - every violation
 enumerated, never fail-fast), and a whole-catalog `catalog_sha256`
-integrity hash over the per-file digests in lexicographic path order.
+integrity hash over the per-file digests in lexicographic path order
+(the full phase list is in
+[device-registry.md](device-registry.md#loading-pipeline)).
 Lookup maps are `BTreeMap`s keyed by `model_id`, so iteration
 (`Registry::batteries()`, `inverters()`, `controllers()`, `pv_presets()`)
 is in sorted order.
@@ -310,7 +312,7 @@ flowchart LR
 1. **Document.** A `HomeSystem` JSON document declares line items:
    `batteries[]`, `inverters[]`, `controllers[]` (each a `model_id` +
    `quantity` plus per-battery SOC/reserve settings), optional `pv`,
-   `main_panel`, `backup_panel`, `generator`, `ev_charger`, `grid_meter`.
+   `main_panel`, `backup_panel`, `generator`, `ev_chargers`, `grid_meter`.
    `HomeSystem::from_json` parses it (`RegistryError::Parse` on malformed
    input).
 2. **Validate.** `HomeSystem::validate(&registry)` resolves every

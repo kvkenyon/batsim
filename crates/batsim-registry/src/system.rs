@@ -1353,7 +1353,10 @@ mod tests {
         assert_close(resolved.total_charge_power_kw, 11.5);
         // No controller rating, no explicit inverter: battery rating rules.
         assert_close(resolved.backup_path_power_kw.expect("backup-capable"), 11.5);
-        assert_eq!(resolved.resolved_controller_model_id.as_deref(), Some(GATEWAY));
+        assert_eq!(
+            resolved.resolved_controller_model_id.as_deref(),
+            Some(GATEWAY)
+        );
         assert!(resolved.has_dc_coupled_storage);
     }
 

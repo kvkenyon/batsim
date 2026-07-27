@@ -26,7 +26,11 @@ const SEED: u64 = 0xBA75_1DE5;
 /// Three homes across device families, six hours at 60 s ticks.
 fn run(parallel: bool) -> String {
     let registry = Registry::embedded().expect("embedded registry");
-    let models = ["tesla.powerwall_3", "enphase.iq_battery_5p", "sonnen.ecolinx"];
+    let models = [
+        "tesla.powerwall_3",
+        "enphase.iq_battery_5p",
+        "sonnen.ecolinx",
+    ];
     let mut world = SimWorld::new(
         SimClock::from_rfc3339(support::GOLDEN_EPOCH, 60).expect("valid clock"),
         SEED,

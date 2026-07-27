@@ -278,7 +278,8 @@ AC-coupled and microinverter devices, DC-bus-side for DC-coupled hybrids.
 The system controller / gateway / transfer device owns islanding
 mechanics: `provides_grid_forming`, `transfer_time_s` (estimated
 defaults: Tesla Gateway 0.1 s, IQ System Controller 1.0 s, SolarEdge
-0.5 s, sonnenprotect 1.5 s), optional `reconnect_s` (default 300 s),
+0.5 s, sonnenprotect 1.5 s), optional `reconnect_s` (every catalog controller declares an
+estimated 300 s),
 `supports_generator_input`, optional `frequency_shift_curtailment`
 (`CurtailmentCurve { start_hz, full_curtail_hz, provenance }` for
 Watt-Hz PV droop while islanded), optional `max_backup_power_kw`,

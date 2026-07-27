@@ -327,12 +327,14 @@ pub fn poa_irradiance(
 /// Markov sky states for the cloud overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum SkyState {
-    /// Clear-sky regime: multiplier mean 1.00, flicker sigma 0.02.
+    /// Clear-sky regime: multiplier mean 1.03-1.05 by season, flicker
+    /// sigma 0.015.
     Clear,
-    /// Partly cloudy: multiplier mean 0.85, flicker sigma 0.12.
+    /// Partly cloudy: multiplier mean 0.97-0.98 by season, flicker
+    /// sigma 0.15.
     Partly,
-    /// Broken/overcast: multiplier mean 0.55, flicker sigma 0.30 (up to
-    /// 30 % of GHI).
+    /// Broken/overcast: multiplier mean 0.93-0.94 by season, flicker
+    /// sigma 0.30 (up to 30 % of GHI).
     Broken,
 }
 
@@ -1016,7 +1018,7 @@ mod tests {
         // +/-2 % (a long broken spell overlapping an hour close is
         // unrecoverable through the 1.05 multiplier clamp), so the test
         // pins the achieved distribution with margin: (i) mean |hour
-        // error| <= 2 % (measured ~1.1 %), (ii) cumulative drift ~ 0
+        // error| <= 2 % (measured ~0.62 %), (ii) cumulative drift ~ 0
         // (the cross-hour gain loop's job, measured ~0.26 %), (iii)
         // every daylight hour bounded at +/-12 % (measured worst ~6 %).
         let mut smooth_pv = PvArray::new(&austin_config(false), 5, 0x4000);

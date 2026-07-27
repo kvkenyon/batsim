@@ -314,8 +314,7 @@ fn check_battery_microinverters(path: &str, model: &BatteryModel, out: &mut Vec<
         out.push(violation(
             path,
             "microinverter_count",
-            "microinverter-based coupling requires an explicit microinverter_count"
-                .to_owned(),
+            "microinverter-based coupling requires an explicit microinverter_count".to_owned(),
         ));
     }
 }
