@@ -1996,7 +1996,7 @@
           {
             "name": "fleet_id",
             "in": "query",
-            "description": "Restrict to a fleet.",
+            "description": "Restrict to a fleet. Mutually exclusive with `home_ids`.",
             "required": false,
             "schema": {
               "type": "string"
@@ -2005,7 +2005,7 @@
           {
             "name": "home_ids",
             "in": "query",
-            "description": "Restrict to specific homes (comma-separated; at most 500; raw\nstreams only).",
+            "description": "Restrict to specific homes (comma-separated; at most 500; raw\nstreams only). Mutually exclusive with `fleet_id`.",
             "required": false,
             "schema": {
               "type": "string"
@@ -2080,7 +2080,7 @@
           {
             "name": "fleet_id",
             "in": "query",
-            "description": "Restrict to a fleet.",
+            "description": "Restrict to a fleet. Mutually exclusive with `home_ids`.",
             "required": false,
             "schema": {
               "type": "string"
@@ -2089,7 +2089,7 @@
           {
             "name": "home_ids",
             "in": "query",
-            "description": "Restrict to specific homes (comma-separated; at most 500; raw\nstreams only).",
+            "description": "Restrict to specific homes (comma-separated; at most 500; raw\nstreams only). Mutually exclusive with `fleet_id`.",
             "required": false,
             "schema": {
               "type": "string"

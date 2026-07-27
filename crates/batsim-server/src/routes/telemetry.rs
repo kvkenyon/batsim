@@ -362,7 +362,7 @@ impl StreamFilter {
         if ev.tick % self.downsample != 0 {
             return None;
         }
-        let mut fleets: Vec<_> = ev
+        let fleets: Vec<_> = ev
             .fleets
             .iter()
             .filter(|f| {
@@ -371,9 +371,6 @@ impl StreamFilter {
                     .is_none_or(|want| &f.fleet_id == want)
             })
             .collect();
-        if self.fleet_id.is_some() && fleets.is_empty() {
-            fleets = Vec::new();
-        }
         let mut out = serde_json::json!({
             "sim_time": ev.sim_time,
             "tick": ev.tick,
