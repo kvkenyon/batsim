@@ -918,7 +918,10 @@ pub struct StreamParams {
     /// Restrict to specific homes (comma-separated; at most 500; raw
     /// streams only). Mutually exclusive with `fleet_id`.
     pub home_ids: Option<String>,
-    /// `aggregate` for fleet rollups, `raw` for per-home vectors.
+    /// `aggregate` for fleet rollups, `raw` for per-home vectors. Raw
+    /// rows stop flowing if the world grows past the raw-stream home
+    /// limit mid-stream: tick events then omit `homes` and a one-time
+    /// `gap` notice explains why.
     pub fields: Option<String>,
     /// Stream at most one event per N ticks (default 1).
     pub downsample: Option<u64>,

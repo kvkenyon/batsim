@@ -2014,7 +2014,7 @@
           {
             "name": "fields",
             "in": "query",
-            "description": "`aggregate` for fleet rollups, `raw` for per-home vectors.",
+            "description": "`aggregate` for fleet rollups, `raw` for per-home vectors. Raw\nrows stop flowing if the world grows past the raw-stream home\nlimit mid-stream: tick events then omit `homes` and a one-time\n`gap` notice explains why.",
             "required": false,
             "schema": {
               "type": "string"
@@ -2098,7 +2098,7 @@
           {
             "name": "fields",
             "in": "query",
-            "description": "`aggregate` for fleet rollups, `raw` for per-home vectors.",
+            "description": "`aggregate` for fleet rollups, `raw` for per-home vectors. Raw\nrows stop flowing if the world grows past the raw-stream home\nlimit mid-stream: tick events then omit `homes` and a one-time\n`gap` notice explains why.",
             "required": false,
             "schema": {
               "type": "string"

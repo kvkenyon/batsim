@@ -22,7 +22,12 @@ use serde_json::{json, Value};
 use tower::ServiceExt as _;
 
 fn test_state() -> AppState {
-    let config = Config::default();
+    test_state_with_raw_cap(500)
+}
+
+fn test_state_with_raw_cap(raw_stream_max_homes: usize) -> AppState {
+    let mut config = Config::default();
+    config.engine.raw_stream_max_homes = raw_stream_max_homes;
     let registry = Registry::embedded().expect("embedded catalog");
     let world = SimWorld::new(
         SimClock::from_rfc3339("2025-01-01T00:00:00Z", 1).unwrap(),
@@ -37,7 +42,7 @@ fn test_state() -> AppState {
         PriceSource::default_feed(),
         3600,
         1440,
-        500,
+        raw_stream_max_homes,
         128,
         audit.clone(),
     )
@@ -69,6 +74,12 @@ impl App {
         }
     }
 
+    fn with_state(state: AppState) -> Self {
+        Self {
+            router: batsim_server::build_router(state),
+        }
+    }
+
     async fn call(&self, req: Request<Body>) -> (StatusCode, Value) {
         let resp = self.router.clone().oneshot(req).await.unwrap();
         let status = resp.status();
@@ -84,6 +95,17 @@ impl App {
     async fn get(&self, path: &str) -> (StatusCode, Value) {
         self.call(Request::get(path).body(Body::empty()).unwrap())
             .await
+    }
+
+    /// GET without consuming the body (for infinite SSE responses).
+    async fn get_status(&self, path: &str) -> StatusCode {
+        let resp = self
+            .router
+            .clone()
+            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        resp.status()
     }
 
     async fn post(&self, path: &str, body: &Value) -> (StatusCode, Value) {
@@ -665,4 +687,117 @@ async fn telemetry_stream_validation() {
     let (s, b) = app.get("/v1/telemetry/stream?fields=bogus").await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert_eq!(b["code"], "VALIDATION_ERROR");
+    // home_ids requires fields=raw.
+    let (s, b) = app.get("/v1/telemetry/stream?home_ids=h1").await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(b["code"], "VALIDATION_ERROR");
+    // fleet_id and home_ids are mutually exclusive.
+    let (s, b) = app
+        .get("/v1/telemetry/stream?fields=raw&fleet_id=flt_x&home_ids=h1")
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(b["code"], "VALIDATION_ERROR");
+    // Comma-separated home_ids over the 500-entry cap -> 400.
+    let too_many = (0..=500)
+        .map(|i| format!("h{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let (s, b) = app
+        .get(&format!("/v1/telemetry/stream?fields=raw&home_ids={too_many}"))
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(b["code"], "VALIDATION_ERROR");
+    // Unknown home id -> 404.
+    let (s, _) = app
+        .get("/v1/telemetry/stream?fields=raw&home_ids=home_nope")
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    // A world larger than the raw-stream cap -> 422.
+    let small = App::with_state(test_state_with_raw_cap(1));
+    let (s, b) = small.post("/v1/homes", &home_body()).await;
+    assert_eq!(s, StatusCode::CREATED, "{b}");
+    let home_a = b["id"].as_str().unwrap().to_owned();
+    let (s, b) = small.post("/v1/homes", &home_body()).await;
+    assert_eq!(s, StatusCode::CREATED, "{b}");
+    let (s, b) = small.get("/v1/telemetry/stream?fields=raw").await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(b["code"], "UNPROCESSABLE");
+    // Comma-separated home_ids parse: a known home subscribes fine.
+    let s = small
+        .get_status(&format!("/v1/telemetry/stream?fields=raw&home_ids={home_a}"))
+        .await;
+    // Two homes exceed the cap of 1, so even a filtered raw subscribe
+    // is refused; the parse itself succeeded (not a 400).
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+/// Once the world grows past the raw-stream cap mid-subscription, tick
+/// events keep flowing without `homes` and a one-time gap notice names
+/// the suspension; the stream never goes silent.
+#[tokio::test]
+async fn telemetry_stream_raw_mid_stream_growth() {
+    let app = App::with_state(test_state_with_raw_cap(1));
+    let (s, b) = app.post("/v1/homes", &home_body()).await;
+    assert_eq!(s, StatusCode::CREATED, "{b}");
+
+    let resp = app
+        .router
+        .clone()
+        .oneshot(
+            Request::get("/v1/telemetry/stream?fields=raw")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let mut body = resp.into_body();
+
+    start_paused(&app).await;
+    let (s, _) = app.post("/v1/sim:step", &json!({"ticks": 2})).await;
+    assert_eq!(s, StatusCode::OK);
+    // Grow the world past the cap, then tick again.
+    let (s, b) = app.post("/v1/homes", &home_body()).await;
+    assert_eq!(s, StatusCode::CREATED, "{b}");
+    let (s, _) = app.post("/v1/sim:step", &json!({"ticks": 3})).await;
+    assert_eq!(s, StatusCode::OK);
+
+    // Drain whatever the stream produced within a short window.
+    let mut text = String::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        let frame = tokio::time::timeout_at(deadline, body.frame()).await;
+        match frame {
+            Ok(Some(Ok(frame))) => {
+                if let Ok(data) = frame.into_data() {
+                    text.push_str(&String::from_utf8_lossy(&data));
+                }
+            }
+            Ok(Some(Err(_))) | Ok(None) => break,
+            Err(_) => break,
+        }
+        if text.matches("raw_home_rows_suspended").count() >= 1
+            && text.matches("event: tick").count() >= 5
+        {
+            break;
+        }
+    }
+
+    // Before the growth: tick events carried raw home rows.
+    // After it: tick events carry fleet rollups instead, and exactly
+    // one gap notice explains the suspension.
+    assert!(text.contains("\"homes\""), "pre-growth raw rows: {text}");
+    assert!(text.contains("\"fleets\""), "post-growth rollups: {text}");
+    assert_eq!(
+        text.matches("raw_home_rows_suspended").count(),
+        1,
+        "one-time gap notice: {text}"
+    );
+    assert_eq!(text.matches("event: gap").count(), 1, "{text}");
+    // The suspended tick events omit the homes field: the last tick
+    // event in the stream has fleets but no homes.
+    let last_tick = text.rmatch_indices("event: tick").next().unwrap().0;
+    let tail = &text[last_tick..];
+    assert!(tail.contains("\"fleets\""), "{tail}");
+    assert!(!tail.contains("\"homes\""), "{tail}");
 }

@@ -282,6 +282,26 @@ struct StreamFilter {
     home_ids: Option<std::collections::HashSet<String>>,
     raw: bool,
     downsample: u64,
+    /// Set once the subscriber has been told that raw rows stopped
+    /// flowing because the world outgrew the raw-stream cap mid-stream.
+    raw_suspension_notified: bool,
+}
+
+/// One tick projected through a subscriber's filter: the tick payload
+/// (absent on off-downsample ticks) plus a one-time gap notice emitted
+/// when raw rows stop flowing mid-stream.
+struct ProjectedTick {
+    tick: Option<serde_json::Value>,
+    gap: Option<serde_json::Value>,
+}
+
+impl ProjectedTick {
+    fn empty() -> Self {
+        Self {
+            tick: None,
+            gap: None,
+        }
+    }
 }
 
 impl StreamFilter {
@@ -354,13 +374,14 @@ impl StreamFilter {
             home_ids: (!home_set.is_empty()).then_some(home_set),
             raw,
             downsample,
+            raw_suspension_notified: false,
         })
     }
 
     /// Project a tick event through this subscriber's filter.
-    fn project_tick(&self, ev: &TickEvent) -> Option<serde_json::Value> {
+    fn project_tick(&mut self, ev: &TickEvent) -> ProjectedTick {
         if ev.tick % self.downsample != 0 {
-            return None;
+            return ProjectedTick::empty();
         }
         let fleets: Vec<_> = ev
             .fleets
@@ -376,23 +397,56 @@ impl StreamFilter {
             "tick": ev.tick,
             "price_rtm": ev.price_rtm,
         });
+        let mut gap = None;
         if self.raw {
-            let rows: Vec<_> = ev
-                .homes
-                .as_ref()?
-                .iter()
-                .filter(|r| {
-                    self.home_ids
-                        .as_ref()
-                        .is_none_or(|ids| ids.contains(&r.home_id))
-                })
-                .collect();
-            out["homes"] = serde_json::json!(rows);
+            match &ev.homes {
+                Some(homes) => {
+                    let rows: Vec<_> = homes
+                        .iter()
+                        .filter(|r| {
+                            self.home_ids
+                                .as_ref()
+                                .is_none_or(|ids| ids.contains(&r.home_id))
+                        })
+                        .collect();
+                    out["homes"] = serde_json::json!(rows);
+                }
+                None => {
+                    // The world grew past the raw-stream cap after this
+                    // subscription started, so the engine no longer
+                    // attaches raw rows. Never go silent: keep the tick
+                    // flowing with price and fleet rollups, and say once
+                    // why the rows stopped.
+                    out["fleets"] = serde_json::json!(fleets);
+                    if !self.raw_suspension_notified {
+                        self.raw_suspension_notified = true;
+                        gap = Some(serde_json::json!({
+                            "reason": "raw_home_rows_suspended",
+                            "detail": "the world exceeded the raw streaming home limit; tick events omit `homes` from here on",
+                        }));
+                    }
+                }
+            }
         } else {
             out["fleets"] = serde_json::json!(fleets);
         }
-        Some(out)
+        ProjectedTick {
+            tick: Some(out),
+            gap,
+        }
     }
+}
+
+/// Build one SSE event; falls back to a comment frame if the payload
+/// somehow fails to serialize.
+fn sse_event(kind: &str, id: Option<u64>, data: serde_json::Value) -> Event {
+    let ev = Event::default().event(kind);
+    let ev = match id {
+        Some(id) => ev.id(id.to_string()),
+        None => ev,
+    };
+    ev.json_data(data)
+        .unwrap_or_else(|_| Event::default().comment("serialization error"))
 }
 
 /// SSE live stream.
@@ -412,17 +466,21 @@ pub async fn sse_stream(
     State(state): State<AppState>,
     ValidQuery(q): ValidQuery<StreamParams>,
 ) -> ApiResult<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>> {
-    let filter = StreamFilter::parse(&q, &state)?;
+    let mut filter = StreamFilter::parse(&q, &state)?;
     let rx = state.events.subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(move |item| {
-        let event = match item {
-            Ok(SimEvent::Tick(tick)) => filter.project_tick(&tick).map(|data| {
-                Event::default()
-                    .event("tick")
-                    .id(tick.tick.to_string())
-                    .json_data(data)
-                    .unwrap_or_else(|_| Event::default().comment("serialization error"))
-            }),
+    let stream = BroadcastStream::new(rx).flat_map(move |item| {
+        let events: Vec<Event> = match item {
+            Ok(SimEvent::Tick(tick)) => {
+                let projected = filter.project_tick(&tick);
+                let mut events = Vec::with_capacity(2);
+                if let Some(data) = projected.tick {
+                    events.push(sse_event("tick", Some(tick.tick), data));
+                }
+                if let Some(data) = projected.gap {
+                    events.push(sse_event("gap", None, data));
+                }
+                events
+            }
             Ok(SimEvent::Dispatch {
                 command_id,
                 tick,
@@ -434,25 +492,14 @@ pub async fn sse_stream(
                     "targets_applied": targets_applied,
                     "targets_rejected": targets_rejected,
                 });
-                Some(
-                    Event::default()
-                        .event("dispatch")
-                        .id(tick.to_string())
-                        .json_data(data)
-                        .unwrap_or_else(|_| Event::default().comment("serialization error")),
-                )
+                vec![sse_event("dispatch", Some(tick), data)]
             }
             Err(BroadcastStreamRecvError::Lagged(n)) => {
                 let data = serde_json::json!({ "missed_events": n });
-                Some(
-                    Event::default()
-                        .event("gap")
-                        .json_data(data)
-                        .unwrap_or_else(|_| Event::default().comment("serialization error")),
-                )
+                vec![sse_event("gap", None, data)]
             }
         };
-        std::future::ready(event.map(Ok))
+        futures_util::stream::iter(events.into_iter().map(Ok))
     });
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
@@ -486,37 +533,47 @@ pub async fn ws_stream(
 async fn ws_loop(
     mut socket: WebSocket,
     mut rx: tokio::sync::broadcast::Receiver<SimEvent>,
-    filter: StreamFilter,
+    mut filter: StreamFilter,
 ) {
     loop {
         tokio::select! {
             recv = rx.recv() => {
-                let payload = match recv {
-                    Ok(SimEvent::Tick(tick)) => filter.project_tick(&tick),
+                let mut payloads: Vec<serde_json::Value> = match recv {
+                    Ok(SimEvent::Tick(tick)) => {
+                        let projected = filter.project_tick(&tick);
+                        let mut payloads = Vec::with_capacity(2);
+                        if let Some(data) = projected.tick {
+                            payloads.push(data);
+                        }
+                        if let Some(mut data) = projected.gap {
+                            data["event"] = serde_json::json!("gap");
+                            payloads.push(data);
+                        }
+                        payloads
+                    }
                     Ok(SimEvent::Dispatch {
                         command_id,
                         targets_applied,
                         targets_rejected,
                         ..
-                    }) => Some(serde_json::json!({
+                    }) => vec![serde_json::json!({
                         "event": "dispatch",
                         "command_id": command_id,
                         "targets_applied": targets_applied,
                         "targets_rejected": targets_rejected,
-                    })),
+                    })],
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        Some(serde_json::json!({ "event": "gap", "missed_events": n }))
+                        vec![serde_json::json!({ "event": "gap", "missed_events": n })]
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
-                let Some(payload) = payload else {
-                    continue;
-                };
-                let Ok(text) = serde_json::to_string(&payload) else {
-                    continue;
-                };
-                if socket.send(Message::Text(text.into())).await.is_err() {
-                    break;
+                for payload in payloads.drain(..) {
+                    let Ok(text) = serde_json::to_string(&payload) else {
+                        continue;
+                    };
+                    if socket.send(Message::Text(text.into())).await.is_err() {
+                        return;
+                    }
                 }
             }
             incoming = socket.recv() => {
