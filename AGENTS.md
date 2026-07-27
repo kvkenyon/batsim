@@ -1,6 +1,6 @@
 # Project agent memory
 
-batsim is an ERCOT-only residential battery fleet simulator written in Rust: physics-faithful virtual Tesla Powerwall 2/3, Enphase IQ Battery, SolarEdge Home Battery, and sonnen systems. Today it ships as two library crates; an OpenAPI-first HTTP API for dispatch-strategy testing is planned next. The authoritative build brief for upcoming work is `docs/residential-battery-fleet-simulator-spec.md` - follow it; do not duplicate its content here. Human-facing docs live in `docs/` (architecture, device registry, physics models, testing); runnable usage demos live in `crates/batsim-core/examples/`.
+batsim is an ERCOT-only residential battery fleet simulator written in Rust: physics-faithful virtual Tesla Powerwall 2/3, Enphase IQ Battery, SolarEdge Home Battery, and sonnen systems. The OpenAPI-first HTTP API for dispatch-strategy testing shipped in M2 (see Implementation state). The authoritative build brief for upcoming work is `docs/residential-battery-fleet-simulator-spec.md` - follow it; do not duplicate its content here. Human-facing docs live in `docs/` (architecture, device registry, physics models, testing); runnable usage demos live in `crates/batsim-core/examples/`.
 
 ## Implementation state
 

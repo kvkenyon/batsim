@@ -81,6 +81,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(
             SwaggerUi::new("/docs").url("/openapi.json", crate::openapi_document(&state.registry)),
         )
+        .fallback(|| async { Problem::not_found("route", "") })
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

@@ -2,15 +2,15 @@
 //! of the per-tick pipeline).
 //!
 //! Current modes: manual setpoint, self-consumption, backup reserve hold.
-//! Market dispatch (the planned market-dispatch layer) and execution
-//! jitter arrive with the planned HTTP API; the jitter stream
-//! (`DispatchJitter`) is already reserved.
+//! The HTTP API (`batsim-server`) exposes these actions at `/v1/dispatch`
+//! and models execution latency by scheduling `execute_at_tick` in the
+//! future. Market dispatch is planned future work; the jitter stream
+//! (`DispatchJitter`) remains reserved.
 
 use serde::{Deserialize, Serialize};
 
-/// Operating modes a home's battery fleet can be in (the subset the
-/// engine currently supports of the action enum planned for the HTTP
-/// API).
+/// Operating modes a home's battery fleet can be in (the engine-side
+/// set behind the HTTP API's `set_mode` dispatch action).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ControlMode {
     /// Do nothing; hold at standby (zero setpoint).
@@ -25,9 +25,8 @@ pub enum ControlMode {
     BackupReserveHold,
 }
 
-/// A dispatch action applied at a tick boundary (the subset the engine
-/// currently supports of the `/v1/dispatch` actions planned for the HTTP
-/// API).
+/// A dispatch action applied at a tick boundary (the engine-side set
+/// behind the HTTP API's `/v1/dispatch` actions).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum DispatchAction {
     /// Switch control mode.
@@ -44,7 +43,8 @@ pub enum DispatchAction {
 
 /// A scheduled dispatch command: applied when the engine reaches
 /// `execute_at_tick` (the dispatch stage reads the command queue at the
-/// tick top; HTTP-layer latency modeling is planned future work).
+/// tick top; the HTTP layer models execution latency by scheduling
+/// `execute_at_tick` in the future).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ScheduledDispatch {
     /// Tick at which the action takes effect.

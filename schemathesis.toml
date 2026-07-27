@@ -25,6 +25,17 @@ include-method = "POST"
 [operations.checks.positive_data_acceptance]
 enabled = false
 
+# DELETE on a dispatch command is a retraction, not a removal: the
+# command document is the audit record, so GET keeps returning it
+# with status `cancelled`. The use-after-free check assumes DELETE
+# deletes the resource, which does not hold for this endpoint.
+[[operations]]
+include-path = "/v1/dispatch/commands/{command_id}"
+include-method = "DELETE"
+
+[operations.checks.use_after_free]
+enabled = false
+
 # Schemathesis's stateful machinery mis-parses path templates where a
 # parameter shares a segment with a suffix (`{id}:expand`). The phase
 # runs everywhere else; these operations keep their full coverage and

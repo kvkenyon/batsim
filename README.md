@@ -120,11 +120,9 @@ schemathesis run http://localhost:8080/openapi.json --checks all \
   --exclude-path /v1/telemetry/stream --exclude-path /v1/telemetry/ws
 ```
 
-The `schemathesis.toml` in this repo documents two per-operation check
-exemptions (cross-field scenario rules JSON Schema cannot express, and
-the WebSocket upgrade handshake); the two stream paths are excluded
-because they are infinite streams and an upgrade handshake, not
-request/response pairs.
+The `schemathesis.toml` in this repo documents the per-operation
+exemptions; the two stream paths are excluded because they are infinite
+streams and an upgrade handshake, not request/response pairs.
 
 ## Layout
 

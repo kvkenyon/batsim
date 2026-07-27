@@ -399,32 +399,29 @@ impl StreamFilter {
         });
         let mut gap = None;
         if self.raw {
-            match &ev.homes {
-                Some(homes) => {
-                    let rows: Vec<_> = homes
-                        .iter()
-                        .filter(|r| {
-                            self.home_ids
-                                .as_ref()
-                                .is_none_or(|ids| ids.contains(&r.home_id))
-                        })
-                        .collect();
-                    out["homes"] = serde_json::json!(rows);
-                }
-                None => {
-                    // The world grew past the raw-stream cap after this
-                    // subscription started, so the engine no longer
-                    // attaches raw rows. Never go silent: keep the tick
-                    // flowing with price and fleet rollups, and say once
-                    // why the rows stopped.
-                    out["fleets"] = serde_json::json!(fleets);
-                    if !self.raw_suspension_notified {
-                        self.raw_suspension_notified = true;
-                        gap = Some(serde_json::json!({
-                            "reason": "raw_home_rows_suspended",
-                            "detail": "the world exceeded the raw streaming home limit; tick events omit `homes` from here on",
-                        }));
-                    }
+            if let Some(homes) = &ev.homes {
+                let rows: Vec<_> = homes
+                    .iter()
+                    .filter(|r| {
+                        self.home_ids
+                            .as_ref()
+                            .is_none_or(|ids| ids.contains(&r.home_id))
+                    })
+                    .collect();
+                out["homes"] = serde_json::json!(rows);
+            } else {
+                // The world grew past the raw-stream cap after this
+                // subscription started, so the engine no longer
+                // attaches raw rows. Never go silent: keep the tick
+                // flowing with price and fleet rollups, and say once
+                // why the rows stopped.
+                out["fleets"] = serde_json::json!(fleets);
+                if !self.raw_suspension_notified {
+                    self.raw_suspension_notified = true;
+                    gap = Some(serde_json::json!({
+                        "reason": "raw_home_rows_suspended",
+                        "detail": "the world exceeded the raw streaming home limit; tick events omit `homes` from here on",
+                    }));
                 }
             }
         } else {

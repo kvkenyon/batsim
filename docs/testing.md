@@ -3,8 +3,10 @@
 batsim's correctness story is layered: unit tests pin physics anchors, property tests defend
 invariants over random inputs, golden traces snapshot end-to-end behavior per device model, an
 RTE conformance gate ties the catalog to the engine, and a determinism gate makes every run
-bit-reproducible. This guide covers how to run each layer, what it defends, and where to add a
-test when behavior changes.
+bit-reproducible. Over the HTTP API, server integration tests pin route behavior, schemathesis
+contract tests pin the wire contract to the OpenAPI document, and a generated-client end-to-end
+test drives a fleet through the real API. This guide covers how to run each layer, what it
+defends, and where to add a test when behavior changes.
 
 ## The engineering loop
 
@@ -38,6 +40,7 @@ in the suite is seconds.
 | Property tests | `crates/batsim-core/tests/prop_energy.rs` | Energy conservation, SOC window, clamping |
 | RTE conformance | `crates/batsim-core/tests/rte_conformance.rs` | Measured vs catalog round-trip efficiency |
 | Composition | `crates/batsim-core/tests/composition.rs` | Multi-device homes, coupling edge cases |
+| Server API integration | `crates/batsim-server/tests/api.rs` | Route behavior, problem documents, idempotency, dispatch audit |
 | Shared helpers | `crates/batsim-core/tests/common/mod.rs` | Austin site, golden epoch, standard home builders |
 
 The integration tests share `tests/common/mod.rs`: an Austin, TX site (30.27, -97.74), the
@@ -45,6 +48,21 @@ golden epoch `2025-06-15T00:00:00Z`, a standard 2400 sqft load archetype, a no-c
 site, and `build_world` / `one_battery_system` helpers that compose a valid `SystemSpec` for any
 catalog battery (adding the vendor-required hybrid inverter and controller when the model
 demands them).
+
+## API contract and end-to-end layers
+
+Three gates pin the HTTP API to its document; `just ci` runs all of them:
+
+- **Vendored-spec freshness** (`just spec`): `batsim --dump-openapi` must reproduce
+  `api/openapi.json` exactly; CI diffs the two. Regenerate the vendored copy with the same
+  command, never by hand.
+- **Contract tests** (`just contract`): schemathesis runs its full check set against a fixture
+  server's live `/openapi.json`. The per-operation exemptions and the excluded stream paths are
+  documented in `schemathesis.toml` (the authoritative list) - the stream paths are infinite
+  streams and an upgrade handshake, not request/response pairs.
+- **Generated-client E2E** (`just e2e`): `examples/python-e2e/run.sh` generates a Python client
+  from the live document, then creates a 100-home fleet, binds a scenario, dispatches, and reads
+  telemetry through it.
 
 ## Golden SOC traces (`tests/golden.rs`)
 

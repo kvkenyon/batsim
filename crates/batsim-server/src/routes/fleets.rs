@@ -42,12 +42,15 @@ pub async fn fleet_action(
     Path(rest): Path<String>,
     headers: HeaderMap,
     principal: Option<axum::Extension<super::Principal>>,
-    ValidJson(body): ValidJson<serde_json::Value>,
+    body: Result<ValidJson<serde_json::Value>, Problem>,
 ) -> ApiResult<Response> {
     let Some((id, action)) = rest.rsplit_once(':') else {
-        // POST on a bare fleet id is not an operation.
+        // POST on a bare fleet id is not an operation. The body is
+        // validated only after this split so an unsupported-method
+        // call is a 405 regardless of its content type.
         return Err(super::method_not_allowed_problem("GET, DELETE"));
     };
+    let ValidJson(body) = body?;
     match action {
         "expand" => {
             let req: ExpandFleetRequest = serde_json::from_value(body).map_err(|e| {
@@ -244,6 +247,7 @@ pub async fn list_fleets(
     responses(
         (status = 200, description = "The fleet", body = FleetDoc),
         (status = 404, description = "Unknown fleet", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 405, description = "Action-suffixed paths are POST-only", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "fleets"
 )]
@@ -375,6 +379,7 @@ async fn expand_fleet_impl(
     responses(
         (status = 200, description = "Fleet deleted", body = OkDoc),
         (status = 404, description = "Unknown fleet", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 405, description = "Action-suffixed paths are POST-only", body = crate::problem::Problem, content_type = "application/problem+json"),
         (status = 409, description = "Simulation is running", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "fleets"

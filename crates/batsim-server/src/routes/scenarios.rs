@@ -213,6 +213,7 @@ pub async fn list_scenarios(
     responses(
         (status = 200, description = "The scenario", body = ScenarioDoc),
         (status = 404, description = "Unknown scenario", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 405, description = "Action-suffixed paths are POST-only", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "scenarios"
 )]

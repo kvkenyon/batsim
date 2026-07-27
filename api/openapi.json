@@ -408,6 +408,16 @@
                 }
               }
             }
+          },
+          "405": {
+            "description": "Action-suffixed paths are POST-only",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         }
       },
@@ -441,6 +451,16 @@
           },
           "404": {
             "description": "Unknown fleet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Action-suffixed paths are POST-only",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1293,6 +1313,16 @@
           },
           "404": {
             "description": "Unknown scenario",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Action-suffixed paths are POST-only",
             "content": {
               "application/problem+json": {
                 "schema": {

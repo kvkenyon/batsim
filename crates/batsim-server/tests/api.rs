@@ -703,7 +703,9 @@ async fn telemetry_stream_validation() {
         .collect::<Vec<_>>()
         .join(",");
     let (s, b) = app
-        .get(&format!("/v1/telemetry/stream?fields=raw&home_ids={too_many}"))
+        .get(&format!(
+            "/v1/telemetry/stream?fields=raw&home_ids={too_many}"
+        ))
         .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert_eq!(b["code"], "VALIDATION_ERROR");
@@ -724,7 +726,9 @@ async fn telemetry_stream_validation() {
     assert_eq!(b["code"], "UNPROCESSABLE");
     // Comma-separated home_ids parse: a known home subscribes fine.
     let s = small
-        .get_status(&format!("/v1/telemetry/stream?fields=raw&home_ids={home_a}"))
+        .get_status(&format!(
+            "/v1/telemetry/stream?fields=raw&home_ids={home_a}"
+        ))
         .await;
     // Two homes exceed the cap of 1, so even a filtered raw subscribe
     // is refused; the parse itself succeeded (not a 400).
@@ -773,8 +777,7 @@ async fn telemetry_stream_raw_mid_stream_growth() {
                     text.push_str(&String::from_utf8_lossy(&data));
                 }
             }
-            Ok(Some(Err(_))) | Ok(None) => break,
-            Err(_) => break,
+            Ok(Some(Err(_)) | None) | Err(_) => break,
         }
         if text.matches("raw_home_rows_suspended").count() >= 1
             && text.matches("event: tick").count() >= 5
