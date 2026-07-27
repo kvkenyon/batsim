@@ -228,7 +228,7 @@ fn shared_cap_curtails_the_command_not_the_pack() {
             );
         }
     }
-    // The command really was curtailed (PV owns the headroom, B.3.3), and
+    // The command really was curtailed (PV owns the headroom), and
     // that curtailment - not lost pack energy - is what batt_clipped holds.
     assert!(home.meters().batt_clipped.wh > 0.0);
     assert!(
@@ -412,8 +412,8 @@ fn mixed_string_pv_and_hybrid_never_converts_the_array_twice() {
 }
 
 /// Mixed coupling: a PW2 (AC-terminal) plus a PW3 (DC-terminal hybrid) in
-/// one home must split the AC-boundary setpoint ONCE across all units
-/// (B.3.4): the fleet never realizes more than the setpoint (review
+/// one home must apply the AC-boundary setpoint as a single pro-rata split
+/// across all units: the fleet never realizes more than the setpoint (review
 /// finding mixed-coupling-double-dispatch, where each terminal class
 /// received the full setpoint and the pair exported past an 8 kW target).
 #[test]

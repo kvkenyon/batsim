@@ -1,19 +1,19 @@
 //! Registry loading: build-time embedded catalog plus optional external
-//! shadow directory (spec §1.1).
+//! shadow directory.
 //!
 //! - [`Registry::embedded`] loads the catalog compiled into the binary.
 //! - [`Registry::from_dir`] loads a catalog tree from disk.
 //! - [`Registry::load`] layers an optional external directory over the
 //!   embedded catalog; shadowing is entry-by-entry on `(kind, model_id)`
-//!   and every shadow is logged (spec §1.1).
+//!   and every shadow is logged.
 //!
 //! Loading performs, in order: per-file content-hash verification against
-//! `catalog.json` (spec §4.6), JSON parse into the typed schema targets
+//! `catalog.json`, JSON parse into the typed schema targets
 //! (structural validation: the serde types in [`crate::types`] mirror the
-//! Part A schemas field-for-field, with `deny_unknown_fields`), semantic
-//! validation ([`crate::validate`]: bounds, patterns, monotonic curves,
-//! cross-references — every violation enumerated, never fail-fast), and
-//! finally the whole-catalog `catalog_sha256` integrity check.
+//! catalog JSON schemas field-for-field, with `deny_unknown_fields`),
+//! semantic validation ([`crate::validate`]: bounds, patterns, monotonic
+//! curves, cross-references - every violation enumerated, never fail-fast),
+//! and finally the whole-catalog `catalog_sha256` integrity check.
 //!
 //! Note: the `jsonschema` crate was evaluated for validating against the
 //! JSON schema documents in `registry/schemas/` directly, but its
@@ -34,10 +34,10 @@ use crate::types::{
 };
 use crate::validate;
 
-/// The build-time embedded catalog tree (spec §1.1).
+/// The build-time embedded catalog tree.
 static EMBEDDED: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../registry");
 
-/// Manifest filename at the registry root (spec §1.1, §4.6).
+/// Manifest filename at the registry root.
 const MANIFEST_PATH: &str = "catalog.json";
 
 /// Recursively collect every file in an embedded directory
@@ -51,8 +51,7 @@ fn walk_embedded(dir: &'static Dir<'static>, out: &mut Vec<&'static File<'static
     }
 }
 
-/// Where the loaded catalog came from (recorded for the run manifest,
-/// spec §1.2).
+/// Where the loaded catalog came from (recorded for the run manifest).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegistrySource {
     /// The build-time embedded catalog.
@@ -116,7 +115,7 @@ impl ParsedEntry {
         }
     }
 
-    /// Per-entry semantic checks (spec §4.6, [`crate::validate`]).
+    /// Per-entry semantic checks (see [`crate::validate`]).
     fn check(&self, path: &str) -> Vec<Violation> {
         match self {
             Self::Battery(m) => validate::check_battery(path, m),
@@ -157,7 +156,7 @@ fn hex_sha256(bytes: &[u8]) -> String {
     out
 }
 
-/// Whole-catalog integrity hash (spec Part A §5, normative default):
+/// Whole-catalog integrity hash, the normative default:
 /// SHA-256 over the concatenation, in lexicographic path order, of each
 /// entry file's raw 32-byte SHA-256 digest, hex-encoded.
 fn catalog_sha256(records: &[&CatalogEntry]) -> String {
@@ -293,7 +292,7 @@ fn parse_manifest(bytes: &[u8]) -> Result<CatalogManifest, RegistryError> {
     })
 }
 
-/// Phase 1 (spec §4.6): per-file content hashes against the manifest,
+/// Phase 1, integrity: per-file content hashes against the manifest,
 /// plus file-set agreement. All mismatches are enumerated in one error.
 fn verify_file_hashes(
     manifest: &CatalogManifest,
@@ -370,8 +369,8 @@ fn verify_manifest_identity(
 }
 
 /// Final manifest for a tree: the declared one, or a synthesized manifest
-/// whose hashes come from the on-disk content (spec §1.1: a directory
-/// catalog without `catalog.json` is hashed from disk). The bool reports
+/// whose hashes come from the on-disk content: a directory
+/// catalog without `catalog.json` is hashed from disk. The bool reports
 /// whether `catalog_sha256` must still be verified.
 fn build_manifest(
     manifest_opt: Option<CatalogManifest>,
@@ -404,7 +403,7 @@ fn load_entries(source: &EntrySource<'_>) -> Result<(LoadedTree, Vec<Violation>)
     }
 
     // Phase 2: parse into the typed schema targets. The kind comes from the
-    // entry's directory (spec §1.1 layout).
+    // entry's directory layout.
     let mut parsed_files: Vec<ParsedFile> = Vec::with_capacity(files.len());
     for (path, bytes) in &files {
         let kind = path
@@ -479,7 +478,7 @@ fn parse_entry(kind: EntryKind, path: &str, bytes: &[u8]) -> Result<ParsedEntry,
 }
 
 /// Assemble a registry from a loaded tree: build the lookup maps, run the
-/// §4.6 cross-reference checks, and verify the whole-catalog hash.
+/// cross-reference checks, and verify the whole-catalog hash.
 fn finalize(
     tree: LoadedTree,
     mut violations: Vec<Violation>,
@@ -545,7 +544,7 @@ impl Registry {
 
     /// Load a catalog tree from a directory on disk (no embedded layer).
     /// When the directory has no `catalog.json`, a manifest is synthesized
-    /// from on-disk content hashes (spec §1.1).
+    /// from on-disk content hashes.
     ///
     /// # Errors
     /// As [`Registry::embedded`], plus I/O errors.
@@ -579,7 +578,7 @@ impl Registry {
                 violations: ext_violations,
             });
         }
-        // §4.6 whole-manifest integrity on the shadow tree, matching
+        // Whole-manifest integrity on the shadow tree, matching
         // `from_dir`/`embedded` (per-file hashes were already checked in
         // `load_entries`).
         if ext_tree.verify_catalog_hash {
@@ -596,7 +595,7 @@ impl Registry {
         }
 
         // Layer external entries over the embedded catalog, entry-by-entry
-        // on (kind, model_id) (spec §1.1).
+        // on (kind, model_id).
         let mut shadowed: Vec<String> = Vec::new();
         let mut ext_records: Vec<CatalogEntry> = Vec::new();
         for file in ext_tree.files {
@@ -890,7 +889,8 @@ mod tests {
         );
 
         // Every catalog efficiency curve is estimated (including the
-        // verbatim §4.7/§4.8 curves, whose given provenance is estimated).
+        // verbatim charge and discharge curves, whose given provenance is
+        // estimated).
         for battery in r.batteries() {
             assert_eq!(
                 battery.charge_efficiency_curve.provenance,
@@ -904,12 +904,12 @@ mod tests {
         }
     }
 
-    /// Normative calibration (F14 tasking + binding decision D2): the
-    /// AC-path round trip at the 0.5C power point lands within ±0.5 pp of
-    /// `rte_ac_coupled` for every battery. AC-coupled entries:
+    /// Normative calibration: the AC-path round trip at the 0.5C power
+    /// point lands within 0.5 percentage points of each battery's declared
+    /// `rte_ac_coupled`. AC-coupled entries:
     /// `eta_chg x eta_coul x eta_dis`. DC-coupled hybrids: same product
     /// times `eta_hyb^2` from the claiming hybrid inverter (grid charge on
-    /// hybrids is a double conversion, spec §3.3).
+    /// hybrids is a double conversion).
     #[test]
     fn ac_path_rte_calibration_holds() {
         let r = Registry::embedded().unwrap();
@@ -1049,7 +1049,7 @@ mod tests {
         let batteries = tmp.path().join("batteries");
         std::fs::create_dir_all(&batteries).unwrap();
         // ecoLinx has no outbound cross-references, so a single-entry tree
-        // passes §4.6 cross-reference validation standalone.
+        // passes the cross-reference validation standalone.
         std::fs::copy(
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../registry/batteries/sonnen_ecolinx.json"),

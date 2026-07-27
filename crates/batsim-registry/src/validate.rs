@@ -1,5 +1,5 @@
 //! Semantic validation of catalog entries beyond JSON Schema: cross-field
-//! invariants the schema cannot express, plus the §4.6 cross-reference
+//! invariants the schema cannot express, plus the cross-reference
 //! checks. All violations are collected, never fail-fast.
 //!
 //! Checks (non-exhaustive, see implementations):
@@ -11,12 +11,12 @@
 //! - SOC window: `0 <= min < max <= 1`, reserve floor inside the window.
 //! - `usable_energy_kwh <= nameplate_energy_kwh`.
 //! - Power/energy values are finite and non-negative.
-//! - Enphase rule (spec §3.1, ceiling form): declared continuous power
+//! - Enphase rule (ceiling form): declared continuous power
 //!   must not exceed `power_per_microinverter_kw x microinverter_count`.
 //!   Enclosure AC limits (IQ Battery 10/10C) legitimately sit below the
 //!   aggregate IQ8D ceiling, so equality is not required.
 //! - Cross-references: `requires_controller_id`, `compatible_battery_ids`,
-//!   `expansion_pack_model_id`, PV preset inverter ids resolve (§4.6).
+//!   `expansion_pack_model_id`, PV preset inverter ids resolve.
 
 use crate::error::Violation;
 use crate::load::Registry;
@@ -48,8 +48,8 @@ fn check_schema_version(path: &str, actual: &str, out: &mut Vec<Violation>) {
     }
 }
 
-/// `entry_version` must match the §4.2 schema pattern `^\d+\.\d+\.\d+$`
-/// (semver triple; the run manifest records it, spec §1.2).
+/// `entry_version` must match the schema pattern `^\d+\.\d+\.\d+$`
+/// (semver triple; the run manifest records it).
 fn check_entry_version(path: &str, version: &str, out: &mut Vec<Violation>) {
     let mut parts = version.split('.');
     let numeric =
@@ -276,7 +276,7 @@ fn check_battery_soc(path: &str, model: &BatteryModel, out: &mut Vec<Violation>)
     }
 }
 
-/// Enphase rule (spec §3.1, ceiling form): declared continuous power may
+/// Enphase rule (ceiling form): declared continuous power may
 /// not exceed `power_per_microinverter_kw x microinverter_count`. Units
 /// with enclosure AC limits (IQ Battery 10/10C) sit below the ceiling.
 fn check_battery_microinverters(path: &str, model: &BatteryModel, out: &mut Vec<Violation>) {
@@ -303,7 +303,7 @@ fn check_battery_microinverters(path: &str, model: &BatteryModel, out: &mut Vec<
                     path,
                     "continuous_discharge_power_kw",
                     format!(
-                        "continuous {} kW exceeds {} kW x {} microinverters ({} kW ceiling, spec §3.1)",
+                        "continuous {} kW exceeds {} kW x {} microinverters ({} kW ceiling)",
                         model.continuous_discharge_power_kw.value, per_micro.value, count, ceiling
                     ),
                 ));
@@ -314,13 +314,13 @@ fn check_battery_microinverters(path: &str, model: &BatteryModel, out: &mut Vec<
         out.push(violation(
             path,
             "microinverter_count",
-            "microinverter-based coupling requires an explicit microinverter_count (spec §2.3)"
-                .to_owned(),
+            "microinverter-based coupling requires an explicit microinverter_count".to_owned(),
         ));
     }
 }
 
-/// Expansion metadata shape; reference resolution is a §4.6 cross-check.
+/// Expansion metadata shape; reference resolution is a whole-registry
+/// cross-check.
 fn check_battery_expansion(path: &str, model: &BatteryModel, out: &mut Vec<Violation>) {
     if let Some(expansion) = &model.expansion {
         if let Some(max_units) = expansion.max_units_per_inverter {
@@ -467,7 +467,7 @@ pub fn check_inverter(path: &str, model: &InverterModel) -> Vec<Violation> {
     check_curve(path, "efficiency_curve", &model.efficiency_curve, &mut out);
 
     // Entry-level hybrid rule: a DC-coupled hybrid inverter is meaningless
-    // without at least one compatible battery (spec §3.1, §4.3).
+    // without at least one compatible battery.
     if model.topology == InverterTopology::HybridDCCoupled
         && model.compatible_battery_ids.is_empty()
     {
@@ -597,12 +597,12 @@ pub fn check_pv_preset(path: &str, preset: &PvPreset) -> Vec<Violation> {
 }
 
 /// Reconstruct the canonical registry-relative path of an entry
-/// (`model_id` dots become underscores in filenames, spec §1.1/§4.6).
+/// (`model_id` dots become underscores in filenames).
 fn entry_path(kind: EntryKind, model_id: &str) -> String {
     format!("{}/{}.json", kind.dir(), model_id.replace('.', "_"))
 }
 
-/// Cross-reference validation across the whole loaded registry (§4.6):
+/// Cross-reference validation across the whole loaded registry:
 /// controller references, battery/inverter compatibility, expansion-pack
 /// references. Run after all entries pass per-entry checks.
 #[must_use]
@@ -639,7 +639,7 @@ pub fn check_cross_references(registry: &Registry) -> Vec<Violation> {
         }
         // Intersection rule: a DC-coupled battery without an integrated
         // inverter must be claimed by at least one hybrid inverter's
-        // compatible_battery_ids (spec §3.1, §4.6).
+        // compatible_battery_ids.
         if battery.coupling == Coupling::DCCoupledHybrid
             && battery.integrated_inverter != Some(true)
         {

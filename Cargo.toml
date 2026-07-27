@@ -42,10 +42,10 @@ cast_precision_loss = "allow"
 cast_possible_truncation = "allow"
 cast_sign_loss = "allow"
 doc_markdown = "allow"
-# Spec vocabulary wins: HomeSystem, SystemSpec, RegistryError are the Part A
-# names; renaming to satisfy the lint would obscure the spec mapping.
+# Catalog vocabulary wins: HomeSystem, SystemSpec, RegistryError are the
+# catalog type names; renaming to satisfy the lint would obscure the mapping.
 module_name_repetitions = "allow"
 
 [profile.release]
-# Determinism (spec B.10.1): no fast-math-equivalent flags; default codegen.
+# Determinism: no fast-math-equivalent flags; default codegen.
 debug = false

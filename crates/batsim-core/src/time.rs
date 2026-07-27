@@ -1,4 +1,4 @@
-//! Virtual clock (spec B.1.1, B.1.2). Wall time is never read in engine
+//! Virtual clock. Wall time is never read in engine
 //! code; all timestamps derive from `t_sim`.
 
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use crate::error::CoreError;
 /// The engine's virtual clock: seconds since the simulation epoch plus a
 /// tick counter at fixed `dt`.
 ///
-/// Invariants (spec B.1.2): `1 <= dt_s <= 60`; the epoch is 5-minute
+/// Invariants: `1 <= dt_s <= 60`; the epoch is 5-minute
 /// aligned so settlement boundaries fall on `t_sim % 300 == 0`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimClock {
@@ -24,7 +24,7 @@ impl SimClock {
     ///
     /// # Errors
     /// [`CoreError::InvalidConfig`] when `dt_s` is outside `1..=60` or the
-    /// epoch is not 5-minute aligned (spec B.1.2).
+    /// epoch is not 5-minute aligned.
     pub fn new(epoch_s: u64, dt_s: u32) -> Result<Self, CoreError> {
         if !(1..=60).contains(&dt_s) {
             return Err(CoreError::InvalidConfig(format!(
@@ -44,7 +44,7 @@ impl SimClock {
     }
 
     /// Create a clock from an RFC 3339 / ISO-8601 UTC epoch string
-    /// (config boundary; parsed once, spec B.1.1).
+    /// (config boundary; parsed once).
     ///
     /// # Errors
     /// [`CoreError::InvalidConfig`] on unparsable input, plus the

@@ -1,7 +1,7 @@
 [package]
 name = "batsim-core"
 version = "0.1.0"
-description = "Part B simulation engine: deterministic tick loop, battery/inverter/load/PV physics"
+description = "Deterministic home-energy simulation engine: tick loop, battery/inverter/load/PV physics"
 edition.workspace = true
 license.workspace = true
 

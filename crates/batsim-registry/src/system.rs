@@ -1,6 +1,6 @@
-//! HomeSystem composition (spec §3.1, §4.4): the declarative system
-//! document, per-vendor validation rules, and the resolved [`SystemSpec`]
-//! the engine consumes at simulation-init.
+//! HomeSystem composition: the declarative system document, per-vendor
+//! validation rules, and the resolved [`SystemSpec`] the engine consumes
+//! at simulation-init.
 //!
 //! Split of responsibilities: this module validates and computes; it never
 //! constructs engine types. batsim-core turns a [`SystemSpec`] into live
@@ -12,7 +12,7 @@ use crate::error::{RegistryError, Violation};
 use crate::load::Registry;
 use crate::types::{BatteryModel, ControllerModel, Coupling, InverterModel, InverterTopology};
 
-/// A battery line item in a HomeSystem document (spec §4.4).
+/// A battery line item in a HomeSystem document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BatteryRef {
@@ -39,7 +39,7 @@ const fn default_reserve_frac() -> f64 {
     0.2
 }
 
-/// An inverter line item (spec §4.4).
+/// An inverter line item.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InverterRef {
@@ -49,7 +49,7 @@ pub struct InverterRef {
     pub quantity: u32,
 }
 
-/// A controller line item (spec §4.4).
+/// A controller line item.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ControllerRef {
@@ -59,8 +59,7 @@ pub struct ControllerRef {
     pub quantity: u32,
 }
 
-/// Array orientation: named compass point or explicit azimuth degrees
-/// (spec §4.4).
+/// Array orientation: named compass point or explicit azimuth degrees.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Orientation {
@@ -70,7 +69,7 @@ pub enum Orientation {
     Azimuth(u32),
 }
 
-/// Named array orientations (spec §4.4 enum).
+/// Named array orientations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NamedOrientation {
     /// North.
@@ -120,7 +119,7 @@ impl Orientation {
     }
 }
 
-/// PV array configuration (spec §4.4).
+/// PV array configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PvConfig {
@@ -148,7 +147,7 @@ const fn default_dc_ac_ratio() -> f64 {
     1.2
 }
 
-/// Main service panel (spec §4.4).
+/// Main service panel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MainPanel {
@@ -164,7 +163,7 @@ const fn default_service_rating() -> f64 {
     200.0
 }
 
-/// Backup sub-panel declaration (spec §4.4).
+/// Backup sub-panel declaration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackupPanel {
@@ -180,7 +179,7 @@ const fn default_critical_peak() -> f64 {
     5.0
 }
 
-/// Generator input declaration (spec §4.4).
+/// Generator input declaration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeneratorConfig {
@@ -195,7 +194,7 @@ const fn default_true() -> bool {
     true
 }
 
-/// EV charger declaration: load-only (V1G), V2X out of scope (Part A §5).
+/// EV charger declaration: load-only (V1G); V2X is out of scope.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EvChargerConfig {
@@ -214,8 +213,8 @@ const fn default_ev_kw() -> f64 {
     11.5
 }
 
-/// Grid meter point: the ERCOT ESIID binding (spec §4.4; consumed by
-/// Part D in M3+).
+/// Grid meter point: the ERCOT ESIID binding, consumed by the planned
+/// market-dispatch layer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GridMeter {
@@ -226,13 +225,14 @@ pub struct GridMeter {
     pub tdsp: Option<String>,
 }
 
-/// The HomeSystem composition document (spec §4.4).
+/// The HomeSystem composition document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HomeSystem {
     /// Schema version; must equal [`crate::types::SCHEMA_VERSION`].
     pub schema_version: String,
-    /// System UUID (server-assigned in M2+; any string accepted here).
+    /// System UUID (assigned by the planned HTTP API layer; any string
+    /// accepted here).
     pub system_id: String,
     /// Human label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -265,9 +265,10 @@ pub struct HomeSystem {
 }
 
 /// A resolved, validated system: the composition-time output consumed by
-/// batsim-core at simulation-init (spec §3.1).
+/// batsim-core at simulation-init, per the composition rules.
 ///
-/// Beyond the four `total_*` aggregates required by spec §3.1, this struct
+/// Beyond the four `total_*` aggregates the composition rules require,
+/// this struct
 /// carries resolved composition facts that batsim-core would otherwise have
 /// to re-derive: the grid-forming controller identity and the storage
 /// coupling classification.
@@ -279,12 +280,12 @@ pub struct SystemSpec {
     /// `Σ quantity × (head usable + packs-per-unit × pack usable)`.
     pub total_usable_energy_kwh: f64,
     /// Total continuous discharge power at device boundaries, kW.
-    /// Expansion packs add energy only (spec §3.1), never power.
+    /// Expansion packs add energy only, never power.
     pub total_discharge_power_kw: f64,
     /// Total continuous charge power, kW.
     pub total_charge_power_kw: f64,
     /// Computed backup-path continuous power: the minimum of every
-    /// series stage (spec §3.1): total battery continuous discharge, the
+    /// series stage of the backup path: total battery continuous discharge, the
     /// sum of (`max_ac_output_kw_backup` else `rated_ac_output_kw`) over
     /// present explicit inverters (when any are present), and Σ
     /// `max_backup_power_kw` over present controllers that declare it.
@@ -293,19 +294,19 @@ pub struct SystemSpec {
     /// the `min` an identity. `None` when not backup-capable.
     pub backup_path_power_kw: Option<f64>,
     /// `model_id` of the single grid-forming controller resolved during
-    /// validation (spec §3.1 backup rule). `None` when not backup-capable.
+    /// validation under the backup rule. `None` when not backup-capable.
     pub resolved_controller_model_id: Option<String>,
-    /// Whether any present battery is DC-coupled hybrid (spec §3.3). Part B
-    /// uses this to select the single-inversion PV-storage loss path.
+    /// Whether any present battery is DC-coupled hybrid. The simulation
+    /// engine uses this to select the single-inversion PV-storage loss path.
     pub has_dc_coupled_storage: bool,
 }
 
 impl HomeSystem {
-    /// Validate this composition against the registry per spec §3.1 rules
-    /// and §4.6 cross-reference checks; on success return the resolved
+    /// Validate this composition against the registry per the composition
+    /// rules and the cross-reference checks; on success return the resolved
     /// [`SystemSpec`]. All violations are enumerated, never fail-fast.
     ///
-    /// Enforced rules (spec §3.1, §4.4, §4.6):
+    /// Enforced rules:
     /// - `schema_version` equals [`crate::types::SCHEMA_VERSION`].
     /// - Every referenced `model_id` resolves to a registry entry of
     ///   matching kind (batteries, inverters, controllers, PV inverter).
@@ -577,9 +578,9 @@ impl HomeSystem {
         }
     }
 
-    /// DC-coupled batteries need a compatible hybrid inverter (spec §3.1
-    /// rule 2), and every hybrid inverter must name at least one system
-    /// battery in `compatible_battery_ids` (spec §4.6 rule 3). Batteries
+    /// DC-coupled batteries need a compatible hybrid inverter, and every
+    /// hybrid inverter must name at least one system
+    /// battery in `compatible_battery_ids`. Batteries
     /// with an integrated inverter (PW3) ARE their own hybrid inverter,
     /// so the explicit-inverter intersection is skipped for them. A
     /// hybrid in `inverters[]` is always a battery hybrid: PV string-
@@ -694,7 +695,7 @@ impl HomeSystem {
         }
     }
 
-    /// Expansion packs (PW3: <= 3 per head unit, energy only, spec §3.1).
+    /// Expansion packs (PW3: <= 3 per head unit, energy only).
     fn check_expansion_packs(
         &self,
         registry: &Registry,
@@ -755,8 +756,8 @@ impl HomeSystem {
         }
     }
 
-    /// Microinverter power ceiling check (Enphase: 0.64 kW x IQ8D count,
-    /// spec §3.1). The derived 0.64 kW/microinverter value is a CEILING, not
+    /// Microinverter power ceiling check (Enphase: 0.64 kW x IQ8D count).
+    /// The derived 0.64 kW/microinverter value is a CEILING, not
     /// an equality: it holds exactly for the 5P (6 x 0.64 = 3.84 kW) but the
     /// IQ 10/10C declare continuous ratings BELOW 12 x 0.64 kW. Enforced per
     /// distinct model: continuous charge/discharge must not exceed
@@ -814,7 +815,7 @@ impl HomeSystem {
         }
     }
 
-    /// Generator interlock (spec §3.1): a generator requires a present
+    /// Generator interlock: a generator requires a present
     /// controller with `supports_generator_input`.
     fn check_generator(
         &self,
@@ -936,7 +937,7 @@ impl HomeSystem {
         }
     }
 
-    /// Compute the resolved [`SystemSpec`] aggregates (spec §3.1). Only
+    /// Compute the resolved [`SystemSpec`] aggregates. Only
     /// called after validation passed, so every reference resolves.
     fn compute_spec(
         &self,
@@ -968,8 +969,8 @@ impl HomeSystem {
             total_charge_power_kw += q * m.continuous_charge_power_kw.value;
         }
 
-        // Backup-path rating: the minimum of every series stage (spec
-        // §3.1): battery continuous sum, inverter backup-rating sum, and
+        // Backup-path rating: the minimum of every series stage of the
+        // backup path: battery continuous sum, inverter backup-rating sum, and
         // the controller throughput cap when declared.
         let backup_path_power_kw = if self.backup_capable {
             let mut controller_sum = 0.0;
@@ -1191,7 +1192,7 @@ mod tests {
     }
 
     /// Enphase IQ Battery 10: 12 x IQ8D microinverters, but continuous
-    /// 3.84 kW / peak 7.68 kW — BELOW the 12 x 0.64 = 7.68 kW ceiling.
+    /// 3.84 kW / peak 7.68 kW - BELOW the 12 x 0.64 = 7.68 kW ceiling.
     fn enphase_10() -> BatteryModel {
         let mut m = battery(
             "enphase.iq_battery_10",
@@ -1345,15 +1346,18 @@ mod tests {
             pv_inverter_model_id: None, // lands on the PW3's integrated MPPTs
         });
 
-        let spec = sys.validate(&registry).expect("valid PW3 system must pass");
+        let resolved = sys.validate(&registry).expect("valid PW3 system must pass");
         // 1 x (13.5 + 3 x 13.5) kWh.
-        assert_close(spec.total_usable_energy_kwh, 54.0);
-        assert_close(spec.total_discharge_power_kw, 11.5);
-        assert_close(spec.total_charge_power_kw, 11.5);
+        assert_close(resolved.total_usable_energy_kwh, 54.0);
+        assert_close(resolved.total_discharge_power_kw, 11.5);
+        assert_close(resolved.total_charge_power_kw, 11.5);
         // No controller rating, no explicit inverter: battery rating rules.
-        assert_close(spec.backup_path_power_kw.expect("backup-capable"), 11.5);
-        assert_eq!(spec.resolved_controller_model_id.as_deref(), Some(GATEWAY));
-        assert!(spec.has_dc_coupled_storage);
+        assert_close(resolved.backup_path_power_kw.expect("backup-capable"), 11.5);
+        assert_eq!(
+            resolved.resolved_controller_model_id.as_deref(),
+            Some(GATEWAY)
+        );
+        assert!(resolved.has_dc_coupled_storage);
     }
 
     #[test]
@@ -1511,14 +1515,14 @@ mod tests {
         sys.batteries = vec![battery_ref(ENP_5P, 2)];
         sys.controllers = vec![controller_ref(ENP_CTRL, 1)];
         sys.backup_capable = true;
-        let spec = sys
+        let resolved = sys
             .validate(&registry)
             .expect("2x5P passes the ceiling check");
-        assert_close(spec.total_usable_energy_kwh, 10.0);
-        assert_close(spec.total_discharge_power_kw, 7.68);
-        assert_close(spec.total_charge_power_kw, 7.68);
-        assert_close(spec.backup_path_power_kw.expect("backup-capable"), 7.68);
-        assert!(!spec.has_dc_coupled_storage);
+        assert_close(resolved.total_usable_energy_kwh, 10.0);
+        assert_close(resolved.total_discharge_power_kw, 7.68);
+        assert_close(resolved.total_charge_power_kw, 7.68);
+        assert_close(resolved.backup_path_power_kw.expect("backup-capable"), 7.68);
+        assert!(!resolved.has_dc_coupled_storage);
 
         // IQ 10: continuous 3.84 kW is BELOW the 12 x 0.64 = 7.68 kW
         // ceiling; the catalog's own entry must pass.
@@ -1656,10 +1660,10 @@ mod tests {
         sys.inverters = vec![inverter_ref(SE_HUB, 1)];
         sys.controllers = vec![controller_ref(SE_BACKUP_IFACE, 1)];
         sys.backup_capable = true;
-        let spec = sys
+        let resolved = sys
             .validate(&registry)
             .expect("valid SolarEdge backup system");
-        assert_close(spec.backup_path_power_kw.expect("backup-capable"), 7.6);
+        assert_close(resolved.backup_path_power_kw.expect("backup-capable"), 7.6);
 
         // A controller throughput cap outranks the battery sum:
         // min(11.5, 10.0) = 10.0 kW.
@@ -1670,14 +1674,14 @@ mod tests {
         sys.batteries = vec![battery_ref(PW3, 1)];
         sys.controllers = vec![controller_ref(GATEWAY, 1)];
         sys.backup_capable = true;
-        let spec = sys.validate(&registry).expect("valid PW3 backup system");
-        assert_close(spec.backup_path_power_kw.expect("backup-capable"), 10.0);
+        let resolved = sys.validate(&registry).expect("valid PW3 backup system");
+        assert_close(resolved.backup_path_power_kw.expect("backup-capable"), 10.0);
 
         // Not backup-capable: no backup-path power.
         sys.backup_capable = false;
-        let spec = sys.validate(&registry).expect("non-backup system");
-        assert!(spec.backup_path_power_kw.is_none());
-        assert!(spec.resolved_controller_model_id.is_none());
+        let resolved = sys.validate(&registry).expect("non-backup system");
+        assert!(resolved.backup_path_power_kw.is_none());
+        assert!(resolved.resolved_controller_model_id.is_none());
     }
 
     #[test]

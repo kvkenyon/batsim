@@ -7,7 +7,7 @@
   "chemistry": "LFP",
   "coupling": "ACCoupled",
   "nameplate_energy_kwh": { "value": 20.0, "provenance": "estimated", "unit": "kWh", "note": "not separately published; LFP full window, usable ≈ nameplate" },
-  "usable_energy_kwh": { "value": 20.0, "provenance": "spec", "unit": "kWh", "note": "10–20 kWh usable in 2 kWh modular steps; 20 kWh configuration per Part A §5 default" },
+  "usable_energy_kwh": { "value": 20.0, "provenance": "spec", "unit": "kWh", "note": "10–20 kWh usable in 2 kWh modular steps; the catalog's default 20 kWh configuration" },
   "continuous_discharge_power_kw": { "value": 8.0, "provenance": "spec", "unit": "kW" },
   "continuous_charge_power_kw": { "value": 8.0, "provenance": "spec", "unit": "kW" },
   "soc_window": { "min_soc_frac": 0.0, "max_soc_frac": 1.0, "reserve_floor_frac": 0.2, "provenance": "estimated" },

@@ -1,16 +1,16 @@
-//! The simulation world and time-control engine (spec B.1; F1).
+//! The simulation world and time-control engine.
 //!
 //! Owns the home arena (insertion-ordered `Vec`, never `HashMap`
-//! iteration, B.1.4), the [`SimClock`], and the master seed. Execution
-//! modes: `step(n)`, `run_until(t)`, and speed-multiplier pacing
-//! (realtime / fast-forward / unbounded, B.1.3). All modes execute
-//! identical per-tick code; acceleration changes pacing only, never
-//! numerics.
+//! iteration, so traversal order is deterministic), the [`SimClock`],
+//! and the master seed. Execution modes: `step(n)`, `run_until(t)`, and
+//! speed-multiplier pacing (realtime / fast-forward / unbounded). All
+//! modes execute identical per-tick code; acceleration changes pacing
+//! only, never numerics.
 //!
-//! Determinism (B.1.4): per-tick work is a pure function of
+//! Determinism gate: per-tick work is a pure function of
 //! `(state, tick)`. The optional rayon step partitions the arena into
 //! fixed chunks computed once; fleet aggregates are combined in index
-//! order (f64 addition is not associative — no `par_iter().sum()`).
+//! order (f64 addition is not associative - no `par_iter().sum()`).
 
 use serde::{Deserialize, Serialize};
 
@@ -20,10 +20,10 @@ use crate::home::Home;
 use crate::math;
 use crate::time::SimClock;
 
-/// Ambient temperature feed (M1). The Texas TMY/NSRDB hourly feed with
-/// Catmull-Rom interpolation (B.4.2) arrives with the scenario pipeline;
-/// M1 provides deterministic synthetic feeds with the same pure-function
-/// contract.
+/// Ambient temperature feed. A Texas TMY/NSRDB hourly feed with
+/// Catmull-Rom interpolation is planned with the scenario pipeline; the
+/// current engine provides deterministic synthetic feeds with the same
+/// pure-function contract.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum AmbientFeed {
     /// Constant temperature (degC).
@@ -57,7 +57,7 @@ impl AmbientFeed {
     }
 }
 
-/// Execution speed (B.1.3). Switchable only while paused — in this
+/// Execution speed. Switchable only while paused - in this
 /// synchronous library, pacing applies between `run_paced` calls.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Speed {
@@ -79,7 +79,7 @@ pub struct SimWorld {
 }
 
 impl SimWorld {
-    /// Create a world. `master_seed` keys every RNG substream (B.1.4).
+    /// Create a world. `master_seed` keys every RNG substream.
     ///
     /// # Errors
     /// Propagates [`SimClock::new`] errors.
@@ -92,7 +92,7 @@ impl SimWorld {
         })
     }
 
-    /// The master seed (run-manifest recording, B.1.4).
+    /// The master seed (recorded in the run manifest).
     #[must_use]
     pub const fn master_seed(&self) -> u64 {
         self.master_seed
@@ -147,8 +147,9 @@ impl SimWorld {
         Ok(())
     }
 
-    /// Advance one tick: step every home in arena order (B.1.5 pipeline
-    /// per home). Single-threaded; the reference implementation.
+    /// Advance one tick: step every home in arena order (each home runs
+    /// the per-tick pipeline). Single-threaded; the reference
+    /// implementation.
     pub fn step(&mut self) {
         let (tick, unix, dt) = (self.clock.tick(), self.clock.unix_time(), self.clock.dt_s());
         let t_amb = self.ambient.at(unix);
@@ -159,14 +160,14 @@ impl SimWorld {
     }
 
     /// Advance one tick with rayon parallelism. Produces bit-identical
-    /// state to [`SimWorld::step`] (B.1.4): homes are independent within a
+    /// state to [`SimWorld::step`]: homes are independent within a
     /// tick, each home's RNG streams are keyed by `(seed, entity, tick)`,
     /// and no cross-home reduction feeds back into state.
     pub fn step_parallel(&mut self) {
         use rayon::prelude::*;
         let (tick, unix, dt) = (self.clock.tick(), self.clock.unix_time(), self.clock.dt_s());
         let t_amb = self.ambient.at(unix);
-        // Fixed chunk size computed once (B.10.4) so partitioning is
+        // Fixed chunk size computed once so partitioning is
         // deterministic regardless of thread scheduling.
         let n_threads = rayon::current_num_threads().max(1);
         let chunk = (self.homes.len() / (4 * n_threads)).max(1);
@@ -178,7 +179,7 @@ impl SimWorld {
         self.clock.advance();
     }
 
-    /// Advance `n` ticks (unbounded; B.1.3 fast-forward infinity).
+    /// Advance `n` ticks (unbounded fast-forward).
     pub fn step_n(&mut self, n: u64) {
         for _ in 0..n {
             self.step();
@@ -193,7 +194,7 @@ impl SimWorld {
         }
     }
 
-    /// Advance until `t_sim >= t_target_s` (B.1.3 run-until; the primary
+    /// Advance until `t_sim >= t_target_s` (run-until; the primary
     /// scenario-replay mode).
     pub fn run_until(&mut self, t_target_s: u64) {
         while self.clock.t_sim() < t_target_s {
@@ -201,10 +202,10 @@ impl SimWorld {
         }
     }
 
-    /// Advance at a paced speed for `ticks` ticks (B.1.3). Pacing reads
+    /// Advance at a paced speed for `ticks` ticks. Pacing reads
     /// wall time ONLY to sleep between ticks; it never enters simulation
-    /// state, so results are bit-identical to [`SimWorld::step_n`]
-    /// (B.1.3 contract). Overruns are counted, not caught up
+    /// state, so results are bit-identical to [`SimWorld::step_n`].
+    /// Overruns are counted, not caught up
     /// (`RealtimeOverrun` semantics: pacing skew is recorded, not
     /// silently absorbed).
     ///

@@ -32,7 +32,7 @@
     "provenance": "estimated"
   },
   "rte_pv_coupled": { "value": 0.945, "provenance": "estimated", "unit": "frac", "note": "single-inversion DC path; derived from component claims" },
-  "rte_ac_coupled": { "value": 0.89, "provenance": "estimated", "unit": "frac", "note": "Tesla-published ~89% solar-to-grid storage-cycle figure used as AC RTE proxy; curves renormalized per Part A §5 so eta_chg x eta_coul x eta_dis x eta_hyb^2 lands here at 0.5C (grid charge on hybrids is a double conversion, §3.3)" },
+  "rte_ac_coupled": { "value": 0.89, "provenance": "estimated", "unit": "frac", "note": "Tesla-published ~89% solar-to-grid storage-cycle figure used as AC RTE proxy; component curves renormalized so eta_chg x eta_coul x eta_dis x eta_hyb^2 lands here at 0.5C (grid charge on hybrids is a double conversion)" },
   "grid_forming_in_backup": true,
   "requires_controller_id": "tesla.gateway_2",
   "integrated_inverter": true,

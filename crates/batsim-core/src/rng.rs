@@ -1,4 +1,4 @@
-//! Seeded RNG subsystem (spec B.1.4).
+//! Seeded RNG subsystem.
 //!
 //! All randomness in the engine flows through ChaCha stream splitting:
 //!
@@ -8,7 +8,7 @@
 //! ```
 //!
 //! `hash64` is `xxh3_64` over the concatenated little-endian fields (fixed
-//! here, normative per spec B.1.4 "pick one, fix it in code"). Substreams
+//! here; one mixing function is picked once and frozen in code). Substreams
 //! are stateless functions of `(seed, entity, purpose, tick)`, so parallel
 //! scheduling, snapshot/resume, and replay cannot perturb results.
 
@@ -16,7 +16,7 @@ use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use xxhash_rust::xxh3::xxh3_64;
 
-/// Purpose tags for RNG substreams (spec B.1.4 `purpose_tag` enum).
+/// Purpose tags for RNG substreams.
 ///
 /// Never reorder or reuse tags; appended-only evolution keeps replay
 /// compatibility.
@@ -27,11 +27,11 @@ pub enum RngPurpose {
     LoadNoise = 1,
     /// PV cloud-variability overlay.
     PvCloud = 2,
-    /// Telemetry measurement noise (M4; reserved).
+    /// Telemetry measurement noise (reserved for planned future work).
     TelemetryNoise = 3,
     /// Dispatch execution latency/jitter draws.
     DispatchJitter = 4,
-    /// Stochastic outage triggers (M4; reserved).
+    /// Stochastic outage triggers (reserved for planned future work).
     OutageTrigger = 5,
     /// One-time per-home load phase/cycle offsets drawn at init.
     LoadPhase = 6,
@@ -43,7 +43,7 @@ pub enum RngPurpose {
 ///
 /// Home-level streams use `entity_home(home_idx)`; per-device streams use
 /// `entity_device(home_idx, slot)` with `slot` the device's stable index
-/// within the home (batteries 1.., PV 0x100, load 0x101, etc. — slot
+/// within the home (batteries 1.., PV 0x100, load 0x101, etc. - slot
 /// assignments are fixed at the call site and documented there).
 #[must_use]
 pub const fn entity_device(home_idx: u64, slot: u64) -> u64 {
@@ -57,7 +57,7 @@ pub const fn entity_home(home_idx: u64) -> u64 {
     home_idx << 12
 }
 
-/// Fixed non-cryptographic mixing function (spec B.1.4): `xxh3_64` over the
+/// Fixed non-cryptographic mixing function: `xxh3_64` over the
 /// concatenated little-endian fields.
 #[must_use]
 pub fn hash64(master_seed: u64, entity_id: u64, purpose: RngPurpose, tick: u64) -> u64 {
@@ -71,8 +71,8 @@ pub fn hash64(master_seed: u64, entity_id: u64, purpose: RngPurpose, tick: u64) 
 
 /// Construct the ChaCha8 substream for one `(entity, purpose, tick)`.
 ///
-/// Seeding cost is tens of ns (spec B.1.4); callers construct streams per
-/// tick on the stack — no RNG state is ever serialized.
+/// Seeding cost is tens of ns; callers construct streams per
+/// tick on the stack - no RNG state is ever serialized.
 #[must_use]
 pub fn substream(master_seed: u64, entity_id: u64, purpose: RngPurpose, tick: u64) -> ChaCha8Rng {
     ChaCha8Rng::seed_from_u64(hash64(master_seed, entity_id, purpose, tick))

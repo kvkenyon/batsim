@@ -5,8 +5,8 @@
   "vendor": "Tesla",
   "display_name": "Tesla Gateway 2",
   "provides_grid_forming": true,
-  "transfer_time_s": { "value": 0.1, "provenance": "estimated", "unit": "s", "note": "Part A §5 default; Tesla Gateway observed ~0.1–1 s" },
-  "reconnect_s": { "value": 300, "provenance": "estimated", "unit": "s", "note": "Part A §5 default reconnect delay after stable grid returns" },
+  "transfer_time_s": { "value": 0.1, "provenance": "estimated", "unit": "s", "note": "estimated default; Tesla Gateway observed ~0.1-1 s" },
+  "reconnect_s": { "value": 300, "provenance": "estimated", "unit": "s", "note": "estimated default reconnect delay after stable grid returns" },
   "supports_generator_input": false,
   "vendor_api": {
     "family": "tesla_local_gateway",

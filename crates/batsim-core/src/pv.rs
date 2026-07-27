@@ -1,4 +1,4 @@
-//! PV array model (spec B.7; F10).
+//! PV array model.
 //!
 //! Pipeline per home array: solar position (pure-function SPA-lite,
 //! accuracy <= 0.05 deg) -> clear-sky/scenario GHI-DNI-DHI -> Hay-Davies
@@ -6,22 +6,23 @@
 //! with cell-temperature correction -> (optionally) seeded cloud-noise
 //! overlay -> DC power at the array terminals. AC conversion happens
 //! downstream: through a dedicated PV inverter for AC-coupled systems, or
-//! through the shared hybrid inverter for DC-coupled systems (B.3.4), so
+//! through the shared hybrid inverter for DC-coupled systems, so
 //! clipping at the shared inverter is resolved by the home tick.
 //!
-//! # Data provenance (spec B.7.1)
+//! # Data provenance
 //!
-//! NSRDB site series arrive with the scenario pipeline (M2+). M1 ships a
-//! deterministic clear-sky irradiance model (documented estimated) as the
+//! NSRDB site series arrive with the planned scenario pipeline. The
+//! current engine ships a deterministic clear-sky irradiance model
+//! (documented estimated) as the
 //! built-in feed; the architecture accepts an externally supplied series
 //! per tick without code changes.
 //!
-//! # M1 model choices (documented estimates; `assets/DATA_SOURCES.md`)
+//! # Current model choices (documented estimates; `assets/DATA_SOURCES.md`)
 //!
 //! - **Solar position**: NOAA solar calculator series (geom. mean
 //!   longitude/anomaly, equation of center, apparent longitude, obliquity
-//!   correction, equation of time) — PSA/NOAA-class, accuracy <= 0.05 deg
-//!   for 1950-2050 (B.7.2). Extraterrestrial irradiance `G_sc = 1367 W/m^2`
+//!   correction, equation of time) - PSA/NOAA-class, accuracy <= 0.05 deg
+//!   for 1950-2050. Extraterrestrial irradiance `G_sc = 1367 W/m^2`
 //!   with the Spencer/Iqbal eccentricity-correction day-angle series. All
 //!   transcendentals route through the libm-backed [`crate::math`] module
 //!   for cross-platform bit-exactness (no fast-math flags
@@ -30,22 +31,23 @@
 //!   visibility standard atmosphere) at fixed 0.2 km site altitude, with
 //!   the Liu & Jordan (1960) diffuse transmittance relation and the
 //!   Kasten & Young (1989) airmass expression. Documented estimated; the
-//!   NSRDB feed replaces it in M2.
-//! - **System loss stack** (B.7.2 PVWatts-style): mismatch 2 %, DC wiring
+//!   NSRDB feed replaces it with the planned scenario pipeline.
+//! - **System loss stack** (PVWatts-style): mismatch 2 %, DC wiring
 //!   2 %, connections 0.5 %, nameplate rating 1 %, light-induced
 //!   degradation 2 %, availability 1 % -> fixed product 0.9179; plus
 //!   monthly soiling (zone-proxy table, <= 5 % worst month) and the
 //!   per-home `shading_factor`. The PV-inverter loss (~4 %) is applied in
-//!   the downstream inverter stage (B.7.2 note for DC-coupled topology),
+//!   the downstream inverter stage (for the DC-coupled topology),
 //!   giving the PVWatts-consistent ~14 % total end to end.
-//! - **Cloud overlay** (B.7.5): Markov sky-state chain (clear/partly/
+//! - **Cloud overlay**: Markov sky-state chain (clear/partly/
 //!   broken; per-season dwell times, fitted-order magnitudes only) plus a
 //!   within-state additive AR(1) flicker (sigma up to 30 % of clear-sky
 //!   GHI in the broken state, 30 s correlation time). All draws come from
 //!   the `PvCloud` per-tick substream. Energy neutrality is enforced by a
 //!   causal per-clock-hour tracking servo plus a cross-hour gain loop
-//!   (the B.7.5 fold; see [`PvArray::dc_power_w`] for the exact scheme
-//!   and measured error bounds). M1 gaps: the fleet cell-correlation
+//!   (the energy-neutrality fold; see [`PvArray::dc_power_w`] for the
+//!   exact scheme and measured error bounds). Known gaps: the fleet
+//!   cell-correlation
 //!   blend (`m = 0.6 m_cell + 0.4 m_local`) needs a scenario-supplied
 //!   cell id that `PvConfig` does not carry yet, and the transition
 //!   matrix is season-resolved but zone-collapsed for the same reason;
@@ -68,8 +70,7 @@ pub(crate) fn normal_from_uniforms(u1: f64, u2: f64) -> f64 {
     r * math::cos(2.0 * std::f64::consts::PI * u2)
 }
 
-/// One roof sub-array (B.7.3: multiple sub-arrays per home MUST be
-/// supported).
+/// One roof sub-array (multiple sub-arrays per home are supported).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SubArray {
     /// DC nameplate at STC (kW).
@@ -89,9 +90,9 @@ pub struct PvConfig {
     pub latitude_deg: f64,
     /// Site longitude (deg, east positive).
     pub longitude_deg: f64,
-    /// Fixed shading derate in [0, 0.3] (B.7.4).
+    /// Fixed shading derate in [0, 0.3].
     pub shading_factor: f64,
-    /// Enable the seeded cloud-variability overlay (B.7.5).
+    /// Enable the seeded cloud-variability overlay.
     pub cloud_noise: bool,
 }
 
@@ -157,7 +158,7 @@ fn days_from_civil(year: u64, month: u64, day: u64) -> u64 {
 }
 
 /// Pure integer civil-time math (Howard Hinnant's `civil_from_days`),
-/// local frame = UTC - 6 h. No chrono, no wall clock (B.1.1).
+/// local frame = UTC - 6 h. No chrono, no wall clock.
 pub(crate) fn civil_local(unix_time_s: u64) -> CivilLocal {
     let local = unix_time_s.saturating_sub(CST_OFFSET_S);
     let days = local / 86_400;
@@ -192,7 +193,7 @@ const G_SC: f64 = 1367.0;
 /// Degrees-to-radians factor.
 const DEG: f64 = std::f64::consts::PI / 180.0;
 
-/// Pure-function solar position (NOAA/PSA-lite; spec B.7.2, accuracy
+/// Pure-function solar position (NOAA/PSA-lite; accuracy
 /// <= 0.05 deg for 1950-2050). Deterministic, no iteration;
 /// transcendentals route through the libm-backed [`crate::math`] module.
 #[must_use]
@@ -287,7 +288,7 @@ pub fn clear_sky(position: &SolarPosition) -> Irradiance {
     }
 }
 
-/// Hay-Davies plane-of-array transposition (spec B.7.2: picked over Perez
+/// Hay-Davies plane-of-array transposition (picked over Perez
 /// for simplicity). Includes an isotropic ground-reflection term with
 /// fixed albedo 0.2 (PVWatts convention). Returns W/m^2 on the plane.
 #[must_use]
@@ -323,30 +324,32 @@ pub fn poa_irradiance(
     (beam + diffuse + ground).max(0.0)
 }
 
-/// Markov sky states for the cloud overlay (B.7.5).
+/// Markov sky states for the cloud overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum SkyState {
-    /// Clear-sky regime: multiplier mean 1.00, flicker sigma 0.02.
+    /// Clear-sky regime: multiplier mean 1.03-1.05 by season, flicker
+    /// sigma 0.015.
     Clear,
-    /// Partly cloudy: multiplier mean 0.85, flicker sigma 0.12.
+    /// Partly cloudy: multiplier mean 0.97-0.98 by season, flicker
+    /// sigma 0.15.
     Partly,
-    /// Broken/overcast: multiplier mean 0.55, flicker sigma 0.30 (the
-    /// spec's "up to 30 % of GHI", B.7.5).
+    /// Broken/overcast: multiplier mean 0.93-0.94 by season, flicker
+    /// sigma 0.30 (up to 30 % of GHI).
     Broken,
 }
 
 impl SkyState {
-    /// Within-state multiplier mean by season (fitted-order magnitudes,
-    /// B.7.5). The means are fitted so the chain's stationary average is
+    /// Within-state multiplier mean by season (fitted-order magnitudes).
+    /// The means are fitted so the chain's stationary average is
     /// ~1.00-1.01 in every season. This is a hard structural requirement,
-    /// not a cosmetic one: the spec clamps the multiplier to [0.2, 1.05],
+    /// not a cosmetic one: the multiplier is clamped to [0.2, 1.05],
     /// so the causal servo (see [`PvArray::dc_power_w`]) has only ~5 % of
-    /// upward correction room but effectively unlimited downward room —
+    /// upward correction room but effectively unlimited downward room -
     /// the raw process must therefore sit slightly ABOVE 1 on average,
     /// where every hour's correction is deliverable; a below-1 stationary
     /// mean makes cloudy-day hours mathematically unrecoverable
     /// (measured: whole days drifting -8..-20 % before this fit). The
-    /// 1-s volatility the spec asks for lives in the AR(1) flicker
+    /// 1-s volatility target lives in the AR(1) flicker
     /// (sigma up to 30 % in the broken state); regime means stay close
     /// to 1, so "broken" reads as a heavy cumulus field with bright
     /// edges, not dark frontal overcast.
@@ -397,8 +400,8 @@ impl SkyState {
     }
 
     /// Mean dwell time (s) by state and season (fitted-order magnitudes
-    /// only; B.7.5 asks for a matrix "per zone and season" — M1 resolves
-    /// season and collapses zone to a Texas-wide average because
+    /// only; the ideal is a matrix per zone and season - the current
+    /// engine resolves season and collapses zone to a Texas-wide average because
     /// [`PvConfig`] carries lat/lon but no zone id; recorded deviation).
     /// Dwells are chosen at the short end of observed Texas cumulus
     /// persistence so the causal energy servo (see [`PvArray::dc_power_w`])
@@ -447,7 +450,7 @@ impl Season {
     }
 }
 
-/// Monthly soiling loss fraction (B.7.2 `eta_soiling = 1 - 0.02 *
+/// Monthly soiling loss fraction (`eta_soiling = 1 - 0.02 *
 /// soiling_factor`, worst month <= 5 %). Central-Texas base table
 /// (dust/pollen peaks in the dry summer months).
 const SOILING_CENTRAL: [f64; 12] = [
@@ -455,7 +458,7 @@ const SOILING_CENTRAL: [f64; 12] = [
 ];
 
 /// Monthly soiling table for the site's climate-zone proxy. [`PvConfig`]
-/// carries lat/lon but no zone id, so M1 infers a crude zone from
+/// carries lat/lon but no zone id, so the current engine infers a crude zone from
 /// coordinates (documented in module docs and `assets/DATA_SOURCES.md`):
 /// West (El Paso/Midland dust, x1.4, capped at 5 %), North (Panhandle,
 /// x0.9), Gulf Coast (wet, x0.8), otherwise Central.
@@ -485,12 +488,12 @@ fn soiling_table(latitude_deg: f64, longitude_deg: f64) -> [f64; 12] {
 /// nameplate x 0.98 light-induced degradation x 0.99 availability.
 const ETA_FIXED: f64 = 0.98 * 0.98 * 0.995 * 0.99 * 0.98 * 0.99;
 
-/// PVWatts temperature coefficient of DC power (B.7.2 mono-Si default).
+/// PVWatts temperature coefficient of DC power (mono-Si default).
 const GAMMA_PDC_PER_C: f64 = -0.0035;
-/// Cell-to-ambient rise at 1 kW/m^2 POA (B.7.2 `T_cell = T_amb +
+/// Cell-to-ambient rise at 1 kW/m^2 POA (`T_cell = T_amb +
 /// (G_poa/1000) * 30`).
 const NOCT_DELTA_C: f64 = 30.0;
-/// AR(1) flicker correlation time (B.7.5: 30 s).
+/// AR(1) flicker correlation time (30 s).
 const FLICKER_TAU_S: f64 = 30.0;
 /// Servo normalization gain lower bound (see [`PvArray::dc_power_w`]).
 const SERVO_MIN: f64 = 0.5;
@@ -498,9 +501,9 @@ const SERVO_MIN: f64 = 0.5;
 /// high enough to pin the multiplier at its 1.05 clamp whenever a deficit
 /// needs maximum recovery rate.
 const SERVO_MAX: f64 = 4.0;
-/// Cloud multiplier lower clamp (B.7.5: `m(t) in [0.2, 1.05]`).
+/// Cloud multiplier lower clamp (`m(t) in [0.2, 1.05]`).
 const M_MIN: f64 = 0.2;
-/// Cloud multiplier upper clamp (B.7.5).
+/// Cloud multiplier upper clamp.
 const M_MAX: f64 = 1.05;
 
 /// Per-home PV array with cloud-noise state.
@@ -510,12 +513,12 @@ pub struct PvArray {
     master_seed: u64,
     home_entity: u64,
     /// Azimuth per sub-array after the one-time +/-20 deg PvPhase jitter
-    /// (B.7.3 fleet realism), normalized to [0, 360).
+    /// (fleet realism), normalized to [0, 360).
     azimuth_deg: Vec<f64>,
     /// Monthly soiling loss fractions resolved at init from the site
     /// zone proxy.
     soiling: [f64; 12],
-    /// Current Markov sky state (B.7.5).
+    /// Current Markov sky state.
     sky: SkyState,
     /// AR(1) flicker value (fraction of clear-sky irradiance).
     flicker: f64,
@@ -534,7 +537,8 @@ pub struct PvArray {
     /// Cross-hour multiplicative gain on the raw cloud process, updated
     /// integral-controller style at each hour close from the closed
     /// hour's smooth/noisy accumulators (`g *= clamp(A/B, 0.95, 1.05)`,
-    /// bounded to [0.85, 1.2]). This is the B.7.5 "fold the correction
+    /// bounded to [0.85, 1.2]). This is the energy-neutrality fold: "fold
+    /// the correction
     /// into subsequent ticks of the next hour's normalization state":
     /// the in-hour servo cannot correct a SYSTEMATIC delivery loss (the
     /// flicker's asymmetric clipping at the 1.05 ceiling costs ~1 %),
@@ -548,7 +552,7 @@ pub struct PvArray {
 impl PvArray {
     /// Construct from static config, applying one-time seeded per-home
     /// draws from the `PvPhase` stream (+/-20 deg azimuth jitter per
-    /// sub-array, B.7.3).
+    /// sub-array).
     #[must_use]
     pub fn new(config: &PvConfig, master_seed: u64, home_entity: u64) -> Self {
         let mut phase = rng::substream(master_seed, home_entity, RngPurpose::PvPhase, 0);
@@ -574,16 +578,16 @@ impl PvArray {
     }
 
     /// PV DC power at the array terminals (W; >= 0) for one tick (stage 2
-    /// of B.1.5). AC conversion and clipping are downstream (module docs).
+    /// of the per-tick pipeline). AC conversion and clipping are downstream (module docs).
     ///
-    /// # Cloud-overlay energy neutrality (B.7.5)
+    /// # Cloud-overlay energy neutrality
     ///
     /// The servo basis is the array's **POA-weighted pre-derate power**
     /// `S(t) = sum_i kw_dc_i * G_poa_i(t)`; the cloud multiplier `m`
     /// scales DNI/DHI before transposition, so by linearity the noisy
     /// basis is exactly `m(t) * S(t)`. At the first tick of each local
     /// clock hour the smooth full-hour energy `A(T)` is trapezoid-
-    /// integrated from the deterministic feed (13 nodes at 5-min spacing —
+    /// integrated from the deterministic feed (13 nodes at 5-min spacing -
     /// exact for a smooth feed, and causal since the feed is a pure
     /// function of time). Per tick, with `B(t)` the noisy energy so far,
     /// `S_int(t)` the smooth energy so far, `mu_eff` the expected raw
@@ -611,12 +615,12 @@ impl PvArray {
     ///   are fitted to sit at/just above 1 in every season; a below-1
     ///   stationary mean makes cloudy-day hours mathematically
     ///   unrecoverable (measured: whole days at -8..-20 %).
-    /// - **Cross-hour gain (`g`, the B.7.5 fold).** At each hour close
+    /// - **Cross-hour gain (`g`, the fold).** At each hour close
     ///   `g *= clamp(A/B, 0.95, 1.05)` (bounded [0.85, 1.2]): an integral
     ///   controller folding the closed hour's residual into subsequent
     ///   ticks' normalization state. It absorbs the one systematic loss
-    ///   no in-hour scheme can fix — the flicker's asymmetric clipping
-    ///   at the 1.05 ceiling (~1 %) — without the target-inflation
+    ///   no in-hour scheme can fix - the flicker's asymmetric clipping
+    ///   at the 1.05 ceiling (~1 %) - without the target-inflation
     ///   ratchet a naive fold provably creates (measured: +7.5 %
     ///   undeliverable target inflation, -1.1 % run drift).
     ///
@@ -625,9 +629,9 @@ impl PvArray {
     /// accumulators, so the bookkeeping stays consistent through
     /// dawn/dusk. Measured (test `cloud_overlay_hourly_energy_
     /// neutrality`, 30-day July run, Austin): mean |hour error| 0.62 %,
-    /// worst hour 6.0 %, cumulative drift 0.26 % — inside the spec's
-    /// +/-2 % settlement bound (B.7.5 "energy-neutral over each hour on
-    /// average"). The scheme is causal, deterministic, and
+    /// worst hour 6.0 %, cumulative drift 0.26 % - inside the
+    /// +/-2 % settlement bound (energy-neutral over each hour on
+    /// average). The scheme is causal, deterministic, and
     /// allocation-free per tick.
     #[must_use]
     pub fn dc_power_w(&mut self, unix_time_s: u64, tick: u64, dt_s: u32, t_amb_c: f64) -> f64 {
@@ -650,7 +654,7 @@ impl PvArray {
             if hour_id != self.hour_id {
                 // Close the previous hour: fold its energy residual into
                 // the cross-hour gain (integral controller on the
-                // closed-hour smooth/noisy ratio; B.7.5 normalization
+                // closed-hour smooth/noisy ratio; normalization
                 // state carried into subsequent ticks).
                 if self.hour_id != u64::MAX && self.hour_smooth_j > 1.0 {
                     let ratio = self.hour_smooth_j / self.hour_noisy_j;
@@ -778,7 +782,7 @@ impl PvArray {
     fn advance_sky(&mut self, u_exit: f64, u_target: f64, eps: f64, dt_s: f64, month: u64) {
         let season = Season::of_month(month);
         // Markov transition: per-tick exit probability dt/dwell; the
-        // target draw picks the next state (fitted-order split, B.7.5).
+        // target draw picks the next state (fitted-order split).
         if u_exit < dt_s / self.sky.dwell_s(season) {
             self.sky = match self.sky {
                 SkyState::Clear => {
@@ -1008,13 +1012,13 @@ mod tests {
 
     #[test]
     fn cloud_overlay_hourly_energy_neutrality() {
-        // 30-day run at dt = 60 s. B.7.5 requires energy neutrality "over
+        // 30-day run at dt = 60 s. The overlay must be energy-neutral "over
         // each hour on average" with settlement-interval energies within
-        // +/-2 % — a strictly causal scheme cannot hold EVERY hour inside
+        // +/-2 % - a strictly causal scheme cannot hold EVERY hour inside
         // +/-2 % (a long broken spell overlapping an hour close is
         // unrecoverable through the 1.05 multiplier clamp), so the test
         // pins the achieved distribution with margin: (i) mean |hour
-        // error| <= 2 % (measured ~1.1 %), (ii) cumulative drift ~ 0
+        // error| <= 2 % (measured ~0.62 %), (ii) cumulative drift ~ 0
         // (the cross-hour gain loop's job, measured ~0.26 %), (iii)
         // every daylight hour bounded at +/-12 % (measured worst ~6 %).
         let mut smooth_pv = PvArray::new(&austin_config(false), 5, 0x4000);

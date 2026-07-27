@@ -1,9 +1,10 @@
-//! Determinism gate (spec B.1.4 `determinism_check`; F2; release gate).
+//! Determinism gate.
 //!
 //! A seeded 24 h scenario MUST produce bit-identical outputs: twice in the
 //! same process, and single-threaded vs rayon-parallel stepping. The
 //! comparison is a SHA-256 over the serialized world state plus the full
-//! truth telemetry archive of every home.
+//! truth telemetry archive of every home. This is a release gate: any
+//! nondeterminism fails the build.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
