@@ -8,7 +8,7 @@ PORT="${BATSIM_PORT:-18099}"
 BASE="http://127.0.0.1:${PORT}"
 CLIENT_DIR="${ROOT}/clients/python"
 WORK="$(mktemp -d)"
-trap 'rm -rf "${WORK}"; [[ -n "${SERVER_PID:-}" ]] && kill "${SERVER_PID}" 2>/dev/null || true' EXIT
+trap 'rc=$?; if [[ ${rc} -ne 0 && -f "${WORK}/server.log" ]]; then echo "== server.log ==" >&2; cat "${WORK}/server.log" >&2; fi; rm -rf "${WORK}"; [[ -n "${SERVER_PID:-}" ]] && kill "${SERVER_PID}" 2>/dev/null || true' EXIT
 
 echo "== building batsim"
 cargo build -p batsim-server --quiet
@@ -16,10 +16,15 @@ cargo build -p batsim-server --quiet
 echo "== starting server on :${PORT}"
 "${ROOT}/target/debug/batsim" --port "${PORT}" > "${WORK}/server.log" 2>&1 &
 SERVER_PID=$!
+healthy=0
 for _ in $(seq 1 50); do
-  curl -sf "${BASE}/v1/system/health" > /dev/null && break
+  if curl -sf "${BASE}/v1/system/health" > /dev/null; then healthy=1; break; fi
   sleep 0.2
 done
+if [[ "${healthy}" -ne 1 ]]; then
+  echo "server did not become healthy on :${PORT}" >&2
+  exit 1
+fi
 
 echo "== generating python client"
 rm -rf "${CLIENT_DIR}"

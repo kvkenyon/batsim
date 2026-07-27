@@ -285,6 +285,17 @@ pub async fn dispatch_inner(
     .await
 }
 
+/// The acceptance replayed for a duplicate command id.
+fn duplicate_response(existing: &CommandDoc, command_id: &str) -> DispatchResponse {
+    DispatchResponse {
+        command_id: command_id.to_owned(),
+        accepted: true,
+        targets: existing.targets.len(),
+        status: existing.status,
+        status_url: format!("/v1/dispatch/commands/{command_id}"),
+    }
+}
+
 async fn dispatch_execute(
     state: &AppState,
     req: &DispatchRequest,
@@ -301,13 +312,7 @@ async fn dispatch_execute(
     // acceptance without re-enqueueing.
     if let Ok(audit) = state.audit.read() {
         if let Some(existing) = audit.get(&command_id) {
-            return Ok(DispatchResponse {
-                command_id: command_id.clone(),
-                accepted: true,
-                targets: existing.targets.len(),
-                status: existing.status,
-                status_url: format!("/v1/dispatch/commands/{command_id}"),
-            });
+            return Ok(duplicate_response(existing, &command_id));
         }
     }
 
@@ -373,7 +378,9 @@ async fn dispatch_execute(
         });
     }
 
-    // Audit first (the response is derived from it), then enqueue.
+    // Audit first (the response is derived from it), then enqueue. The
+    // duplicate check runs under the same write lock as the insert, so
+    // concurrent retries of one command id cannot both enqueue.
     let record = state.command_record(
         command_id.clone(),
         principal.to_owned(),
@@ -383,7 +390,11 @@ async fn dispatch_execute(
         targets,
     );
     let n_targets = record.targets.len();
-    if let Ok(mut audit) = state.audit.write() {
+    {
+        let mut audit = state.audit.write().map_err(|_| Problem::internal())?;
+        if let Some(existing) = audit.get(&command_id) {
+            return Ok(duplicate_response(existing, &command_id));
+        }
         audit.insert(record);
     }
     state
@@ -429,7 +440,6 @@ pub async fn list_commands(
     let audit = state.audit.read().map_err(|_| Problem::internal())?;
     let mut ids: Vec<String> = audit
         .records()
-        .iter()
         .filter(|r| q.status.is_none_or(|s| r.status == s))
         .filter(|r| {
             q.target

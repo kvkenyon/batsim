@@ -498,6 +498,7 @@ impl Engine {
                     if let Some(slot) = self.slots.get_mut(idx as usize) {
                         slot.1 = false;
                     }
+                    self.telemetry.remove(idx);
                 });
                 drop(reply.send(r));
             }
@@ -688,7 +689,9 @@ impl Engine {
         let mut world = SimWorld::new(clock, seed, ambient).map_err(|e| e.to_string())?;
         for i in 0..self.world.home_count() {
             if let Some(h) = self.world.home(i) {
-                world.add_home(h.clone());
+                let mut h = h.clone();
+                h.clear_dispatch_queue();
+                world.add_home(h);
             }
         }
         self.world = world;

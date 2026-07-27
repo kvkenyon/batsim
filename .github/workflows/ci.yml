@@ -44,13 +44,14 @@ jobs:
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           export PATH="$HOME/.local/bin:$PATH"
-          uv tool install schemathesis
+          uv tool install schemathesis==4.24.3
           cargo +1.83.0 build -p batsim-server
           ./target/debug/batsim --port 18097 &
           for i in $(seq 1 50); do
             curl -sf http://127.0.0.1:18097/v1/system/health >/dev/null && break
             sleep 0.2
           done
+          curl -sf http://127.0.0.1:18097/v1/system/health >/dev/null
           schemathesis run http://127.0.0.1:18097/openapi.json --checks all \
             --request-timeout 60 --max-examples 30 \
             --exclude-path /v1/telemetry/stream --exclude-path /v1/telemetry/ws

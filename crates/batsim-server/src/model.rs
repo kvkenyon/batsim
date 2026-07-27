@@ -915,8 +915,9 @@ pub struct SeriesResponse {
 pub struct StreamParams {
     /// Restrict to a fleet.
     pub fleet_id: Option<String>,
-    /// Restrict to specific homes (repeatable; at most 500).
-    pub home_ids: Option<Vec<String>>,
+    /// Restrict to specific homes (comma-separated; at most 500; raw
+    /// streams only).
+    pub home_ids: Option<String>,
     /// `aggregate` for fleet rollups, `raw` for per-home vectors.
     pub fields: Option<String>,
     /// Stream at most one event per N ticks (default 1).

@@ -160,5 +160,19 @@ fn init_logging(config: &Config) {
 }
 
 async fn shutdown_signal() {
-    drop(tokio::signal::ctrl_c().await);
+    let ctrl_c = tokio::signal::ctrl_c();
+    #[cfg(unix)]
+    {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    () = async { drop(ctrl_c.await) } => {}
+                    _ = term.recv() => {}
+                }
+            }
+            Err(_) => drop(ctrl_c.await),
+        }
+    }
+    #[cfg(not(unix))]
+    drop(ctrl_c.await);
 }

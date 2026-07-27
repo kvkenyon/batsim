@@ -188,6 +188,11 @@ impl TelemetryStore {
         self.homes.clear();
     }
 
+    /// Drop one home's retained data (home retired).
+    pub fn remove(&mut self, home_idx: u64) {
+        self.homes.remove(&home_idx);
+    }
+
     /// Latest raw point for a home.
     #[must_use]
     pub fn latest(&self, home_idx: u64) -> Option<TickPoint> {

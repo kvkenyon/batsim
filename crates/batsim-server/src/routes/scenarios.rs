@@ -266,7 +266,7 @@ async fn activate_impl(state: AppState, id: &str) -> ApiResult<ScenarioDoc> {
         ));
     }
     let price = PriceSource::resolve(&entry.request.prices).map_err(Problem::unprocessable)?;
-    state
+    let rebound = state
         .engine
         .call(|tx| EngineMsg::Rebind {
             epoch_s: start,
@@ -276,8 +276,21 @@ async fn activate_impl(state: AppState, id: &str) -> ApiResult<ScenarioDoc> {
             price,
             reply: tx,
         })
-        .await?
-        .map_err(Problem::unprocessable)?;
+        .await?;
+    if let Err(e) = rebound {
+        // The sim may have started between the pre-check and the rebind;
+        // report the transition conflict, not a data-source failure.
+        let status = state
+            .engine
+            .call(|tx| EngineMsg::Status { reply: tx })
+            .await?;
+        if status.state != SimState::Stopped {
+            return Err(Problem::sim_running(
+                "scenario activation requires a stopped simulation",
+            ));
+        }
+        return Err(Problem::unprocessable(e));
+    }
     if let Ok(mut active) = state.active_scenario.write() {
         *active = Some(id.to_owned());
     }

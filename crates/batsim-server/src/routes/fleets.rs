@@ -42,7 +42,7 @@ pub async fn fleet_action(
     Path(rest): Path<String>,
     headers: HeaderMap,
     principal: Option<axum::Extension<super::Principal>>,
-    body: axum::body::Bytes,
+    ValidJson(body): ValidJson<serde_json::Value>,
 ) -> ApiResult<Response> {
     let Some((id, action)) = rest.rsplit_once(':') else {
         // POST on a bare fleet id is not an operation.
@@ -50,15 +50,17 @@ pub async fn fleet_action(
     };
     match action {
         "expand" => {
-            let req: ExpandFleetRequest = serde_json::from_slice(&body)
-                .map_err(|e| Problem::validation(format!("invalid JSON body: {e}")))?;
+            let req: ExpandFleetRequest = serde_json::from_value(body).map_err(|e| {
+                Problem::validation(format!("Failed to deserialize the JSON body: {e}"))
+            })?;
             expand_fleet_impl(state.0, id.to_owned(), req)
                 .await
                 .map(|doc| (StatusCode::OK, Json(doc)).into_response())
         }
         "dispatch" => {
-            let req: FleetDispatchRequest = serde_json::from_slice(&body)
-                .map_err(|e| Problem::validation(format!("invalid JSON body: {e}")))?;
+            let req: FleetDispatchRequest = serde_json::from_value(body).map_err(|e| {
+                Problem::validation(format!("Failed to deserialize the JSON body: {e}"))
+            })?;
             dispatch_fleet_impl(state.0, id.to_owned(), headers, principal, req).await
         }
         _ => Err(Problem::not_found("route", &rest)),
@@ -112,7 +114,7 @@ async fn create_fleet_inner(
     let mut entries = Vec::with_capacity(plans.len());
     for (i, plan) in plans.iter().enumerate() {
         let home_id = ids::new_id(ids::HOME);
-        let home = compose_home(
+        let composed = compose_home(
             &state.registry,
             plan,
             &home_id,
@@ -123,7 +125,7 @@ async fn create_fleet_inner(
             home_id: home_id.clone(),
             fleet_id: Some(fleet_id.clone()),
         };
-        homes.push((home, meta));
+        homes.push((composed.home, meta));
         entries.push(HomeEntry {
             id: home_id,
             idx: base_idx + i as u64,
@@ -131,8 +133,8 @@ async fn create_fleet_inner(
             config: HomeConfigDoc {
                 fleet_id: Some(fleet_id.clone()),
                 battery: plan.battery.clone(),
-                inverter_model_id: plan.inverter.as_ref().map(|i| i.model_id.clone()),
-                controller_model_id: None,
+                inverter_model_id: composed.inverter_model_id.clone(),
+                controller_model_id: composed.controller_model_id.clone(),
                 pv_peak_kw: plan.pv_peak_kw,
                 load_archetype: plan.load.archetype.clone(),
                 ercot_load_zone: plan.location.ercot_load_zone.clone(),
@@ -147,13 +149,15 @@ async fn create_fleet_inner(
     for (entry, idx) in entries.iter_mut().zip(idxs) {
         entry.idx = idx;
     }
-    let hash = expansion_hash(manifest, ordinal_base);
+    let ordinals = vec![(ordinal_base, u64::from(manifest.count))];
+    let hash = expansion_hash(manifest, &ordinals);
     let entry = FleetEntry {
         id: fleet_id.clone(),
         name: manifest.name.clone(),
         manifest: manifest.clone(),
         home_ids: entries.iter().map(|e| e.id.clone()).collect(),
         expansion_hash: hash.clone(),
+        expansion_ordinals: ordinals,
         created_at: now_rfc3339(),
         expanded_count: manifest.count,
     };
@@ -285,6 +289,11 @@ async fn expand_fleet_impl(
     id: String,
     req: ExpandFleetRequest,
 ) -> ApiResult<FleetDoc> {
+    // The compose lock covers the fleet read, expansion, engine add,
+    // and bookkeeping, so concurrent expands cannot draw the same
+    // ordinal range and a concurrent delete cannot orphan the new
+    // homes.
+    let _compose_guard = state.compose_lock.lock().await;
     let entry = state
         .fleet(&id)
         .ok_or_else(|| Problem::not_found("fleet", &id))?;
@@ -295,7 +304,6 @@ async fn expand_fleet_impl(
     // new homes into this one. The manifest+seed+ordinal chain keeps
     // the expansion deterministic.
     let plans = expand_manifest(&state.registry, &manifest, ordinal_base)?;
-    let _compose_guard = state.compose_lock.lock().await;
     let status = state
         .engine
         .call(|tx| EngineMsg::Status { reply: tx })
@@ -305,7 +313,7 @@ async fn expand_fleet_impl(
     let mut entries = Vec::with_capacity(plans.len());
     for (i, plan) in plans.iter().enumerate() {
         let home_id = ids::new_id(ids::HOME);
-        let home = compose_home(
+        let composed = compose_home(
             &state.registry,
             plan,
             &home_id,
@@ -313,7 +321,7 @@ async fn expand_fleet_impl(
             base_idx + i as u64,
         )?;
         homes.push((
-            home,
+            composed.home,
             SlotMeta {
                 home_id: home_id.clone(),
                 fleet_id: Some(id.clone()),
@@ -326,8 +334,8 @@ async fn expand_fleet_impl(
             config: HomeConfigDoc {
                 fleet_id: Some(id.clone()),
                 battery: plan.battery.clone(),
-                inverter_model_id: plan.inverter.as_ref().map(|i| i.model_id.clone()),
-                controller_model_id: None,
+                inverter_model_id: composed.inverter_model_id.clone(),
+                controller_model_id: composed.controller_model_id.clone(),
                 pv_peak_kw: plan.pv_peak_kw,
                 load_archetype: plan.load.archetype.clone(),
                 ercot_load_zone: plan.location.ercot_load_zone.clone(),
@@ -350,7 +358,9 @@ async fn expand_fleet_impl(
                 }
             }
             f.expanded_count = f.expanded_count.saturating_add(req.count);
-            f.expansion_hash = expansion_hash(&f.manifest, 0);
+            f.expansion_ordinals
+                .push((ordinal_base, u64::from(req.count)));
+            f.expansion_hash = expansion_hash(&f.manifest, &f.expansion_ordinals);
         }
     }
     let updated = state.fleet(&id).ok_or_else(Problem::internal)?;
@@ -376,6 +386,9 @@ pub async fn delete_fleet(
     if id.contains(':') {
         return Err(super::method_not_allowed_problem("POST"));
     }
+    // Deletion mutates fleet membership, so it serializes with
+    // expansion and single-home creation on the compose lock.
+    let _compose_guard = state.compose_lock.lock().await;
     let entry = state
         .fleet(&id)
         .ok_or_else(|| Problem::not_found("fleet", &id))?;

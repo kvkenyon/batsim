@@ -43,6 +43,18 @@ pub struct HomePlan {
     pub initial_soc: f64,
 }
 
+/// A composed engine home plus the catalog ids composition resolved.
+#[derive(Debug)]
+pub struct ComposedHome {
+    /// The engine home.
+    pub home: Home,
+    /// The inverter model composition settled on (explicit selection,
+    /// the vendor-default hybrid, or the string PV inverter).
+    pub inverter_model_id: Option<String>,
+    /// The controller model the battery vendor requires, when any.
+    pub controller_model_id: Option<String>,
+}
+
 /// Household archetype presets.
 fn archetype_load(name: &str) -> Option<LoadConfig> {
     let base = LoadConfig {
@@ -159,14 +171,14 @@ pub fn compose_home(
     home_id: &str,
     master_seed: u64,
     home_idx: u64,
-) -> ApiResult<Home> {
+) -> ApiResult<ComposedHome> {
     if plan.battery.count == 0 || plan.battery.count > 16 {
         return Err(Problem::validation("battery.count must be within 1..=16"));
     }
     if !(0.0..=1.0).contains(&plan.initial_soc) {
         return Err(Problem::validation("initial_soc must be within 0..=1"));
     }
-    let doc = system_doc(registry, plan, home_id)?;
+    let (doc, inverter_model_id, controller_model_id) = system_doc(registry, plan, home_id)?;
     let system = HomeSystem::from_json(&doc.to_string())
         .map_err(|e| Problem::unprocessable(format!("system document invalid: {e}")))?;
     let spec = system.validate(registry).map_err(|e| {
@@ -212,11 +224,20 @@ pub fn compose_home(
     };
     let devices = build_devices(&spec, registry, &cfg, master_seed, home_idx)
         .map_err(|e| Problem::unprocessable(format!("device construction failed: {e}")))?;
-    Ok(Home::new(devices, true))
+    Ok(ComposedHome {
+        home: Home::new(devices, true),
+        inverter_model_id,
+        controller_model_id,
+    })
 }
 
-/// Build the registry composition document for a home plan.
-fn system_doc(registry: &Registry, plan: &HomePlan, home_id: &str) -> ApiResult<serde_json::Value> {
+/// Build the registry composition document for a home plan; also
+/// reports the inverter and controller model ids composition resolved.
+fn system_doc(
+    registry: &Registry,
+    plan: &HomePlan,
+    home_id: &str,
+) -> ApiResult<(serde_json::Value, Option<String>, Option<String>)> {
     let model = registry.battery(&plan.battery.model_id).ok_or_else(|| {
         Problem::validation(format!(
             "unknown battery model `{}`; see /v1/registry/batteries",
@@ -227,6 +248,7 @@ fn system_doc(registry: &Registry, plan: &HomePlan, home_id: &str) -> ApiResult<
     // Inverters: explicit selection, else the vendor default for
     // DC-coupled hybrids without an integrated inverter.
     let mut inverters = Vec::new();
+    let mut resolved_inverter: Option<String> = None;
     if let Some(inv) = &plan.inverter {
         if inv.quantity == 0 || inv.quantity > 16 {
             return Err(Problem::validation(
@@ -240,6 +262,7 @@ fn system_doc(registry: &Registry, plan: &HomePlan, home_id: &str) -> ApiResult<
             )));
         }
         inverters.push(serde_json::json!({"model_id": inv.model_id, "quantity": inv.quantity}));
+        resolved_inverter = Some(inv.model_id.clone());
     } else if matches!(model.coupling, Coupling::DCCoupledHybrid) {
         let compatible = registry.inverters().find(|i| {
             i.compatible_battery_ids
@@ -251,21 +274,29 @@ fn system_doc(registry: &Registry, plan: &HomePlan, home_id: &str) -> ApiResult<
                 "model_id": inv.model_id,
                 "quantity": plan.battery.count,
             }));
+            resolved_inverter = Some(inv.model_id.clone());
         }
     }
 
     // Controllers required by the battery vendor for backup.
     let mut controllers = Vec::new();
+    let resolved_controller = model.requires_controller_id.clone();
     if let Some(ctrl) = &model.requires_controller_id {
         controllers.push(serde_json::json!({"model_id": ctrl, "quantity": 1}));
     }
 
     let pv = match plan.pv_peak_kw {
-        Some(kw) => Some(pv_doc(registry, plan, kw, &mut inverters)?),
+        Some(kw) => Some(pv_doc(
+            registry,
+            plan,
+            kw,
+            &mut inverters,
+            &mut resolved_inverter,
+        )?),
         None => None,
     };
 
-    Ok(serde_json::json!({
+    let doc = serde_json::json!({
         "schema_version": "1.0.0",
         "system_id": home_id,
         "batteries": [{
@@ -280,7 +311,8 @@ fn system_doc(registry: &Registry, plan: &HomePlan, home_id: &str) -> ApiResult<
         "main_panel": {"service_rating_a": 200.0},
         "backup_capable": !controllers.is_empty(),
         "grid_meter": {"esiid": format!("1008900{:013}", xxh3_64(home_id.as_bytes()) % 10_000_000_000_000_u64)},
-    }))
+    });
+    Ok((doc, resolved_inverter, resolved_controller))
 }
 
 /// Build the PV section, adding a string inverter for AC-coupled
@@ -290,6 +322,7 @@ fn pv_doc(
     plan: &HomePlan,
     kw: f64,
     inverters: &mut Vec<serde_json::Value>,
+    resolved_inverter: &mut Option<String>,
 ) -> ApiResult<serde_json::Value> {
     if !(kw.is_finite() && kw > 0.0 && kw <= 100.0) {
         return Err(Problem::validation(
@@ -314,6 +347,9 @@ fn pv_doc(
             "model_id": STRING_PV_INVERTER,
             "quantity": quantity,
         }));
+        if resolved_inverter.is_none() {
+            *resolved_inverter = Some(STRING_PV_INVERTER.to_owned());
+        }
         serde_json::json!(STRING_PV_INVERTER)
     };
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -532,26 +568,32 @@ fn plan_from_template(t: &HomeTemplate, zone: &str, rng: &mut ChaCha8Rng) -> Hom
 /// Resolve a single-home PV spec (ranges are fleet-only).
 ///
 /// # Errors
-/// [`Problem::validation`] when `peak_kw` is a range.
+/// [`Problem::validation`] when `peak_kw` is a range or the angles fall
+/// outside the fleet template's accepted ranges.
 pub fn fixed_pv(pv: &PvSpec) -> ApiResult<(f64, f64, f64)> {
     let kw = pv.peak_kw.fixed().ok_or_else(|| {
         Problem::validation("pv.peak_kw must be a fixed value for single-home creation")
     })?;
-    Ok((
-        kw,
-        pv.azimuth_deg.unwrap_or(180.0),
-        pv.tilt_deg.unwrap_or(25.0),
-    ))
+    let azimuth = pv.azimuth_deg.unwrap_or(180.0);
+    if !(azimuth.is_finite() && (0.0..360.0).contains(&azimuth)) {
+        return Err(Problem::validation("pv.azimuth_deg must be within 0..360"));
+    }
+    let tilt = pv.tilt_deg.unwrap_or(25.0);
+    if !(tilt.is_finite() && (0.0..=90.0).contains(&tilt)) {
+        return Err(Problem::validation("pv.tilt_deg must be within 0..=90"));
+    }
+    Ok((kw, azimuth, tilt))
 }
 
 /// Content hash of a manifest expansion (canonical JSON of manifest +
-/// ordinal base), as `sha256:<hex>`.
+/// every `(ordinal_base, count)` range composed so far), as
+/// `sha256:<hex>`.
 #[must_use]
-pub fn expansion_hash(manifest: &FleetManifest, ordinal_base: u64) -> String {
+pub fn expansion_hash(manifest: &FleetManifest, ordinals: &[(u64, u64)]) -> String {
     use sha2::Digest;
     let canonical = serde_json::json!({
         "manifest": manifest,
-        "ordinal_base": ordinal_base,
+        "ordinals": ordinals,
     });
     let bytes = serde_json::to_vec(&canonical).unwrap_or_default();
     let hash = sha2::Sha256::digest(&bytes);

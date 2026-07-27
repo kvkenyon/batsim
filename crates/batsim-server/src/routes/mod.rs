@@ -241,6 +241,10 @@ pub fn body_hash<T: Serialize>(body: &T) -> u64 {
 /// - Key with same body hash: replay the stored response with
 ///   `Idempotent-Replay: true`.
 /// - Key with a different body: 409 idempotency-key-reuse.
+/// - Key with a request still executing: 409 conflict.
+///
+/// The key is reserved under the store lock before the operation runs,
+/// so concurrent requests carrying the same key cannot both mutate.
 ///
 /// # Errors
 /// Propagates the operation's [`Problem`].
@@ -259,13 +263,12 @@ where
         let (status, body) = produce().await?;
         return Ok((status, Json(body)).into_response());
     };
-    if let Some(rec) = state
-        .idempotency
-        .write()
-        .ok()
-        .and_then(|mut s| s.get(key).cloned())
-    {
-        if rec.body_hash == hash {
+    let reservation = {
+        let mut store = state.idempotency.write().map_err(|_| Problem::internal())?;
+        store.reserve(key, hash)
+    };
+    match reservation {
+        crate::state::IdemReservation::Replay(rec) => {
             let mut resp = (
                 StatusCode::from_u16(rec.status).unwrap_or(StatusCode::OK),
                 Json(rec.body),
@@ -273,29 +276,42 @@ where
                 .into_response();
             resp.headers_mut()
                 .insert("idempotent-replay", HeaderValue::from_static("true"));
-            return Ok(resp);
+            Ok(resp)
         }
-        return Err(Problem::new(
+        crate::state::IdemReservation::ConflictReuse => Err(Problem::new(
             ProblemCode::IdempotencyKeyReuse,
             StatusCode::CONFLICT,
             "Idempotency key reuse",
         )
-        .detail("the same idempotency key arrived with a different request body"));
+        .detail("the same idempotency key arrived with a different request body")),
+        crate::state::IdemReservation::InFlight => Err(Problem::conflict(
+            "a request with this idempotency key is still executing; retry once it completes",
+        )),
+        crate::state::IdemReservation::Reserved => {
+            let produced = produce().await;
+            let mut store = state.idempotency.write().map_err(|_| Problem::internal())?;
+            match produced {
+                Ok((status, body)) => {
+                    let value = serde_json::to_value(&body).map_err(|_| Problem::internal())?;
+                    store.complete(
+                        key,
+                        crate::state::IdemRecord {
+                            body_hash: hash,
+                            status: status.as_u16(),
+                            body: value,
+                            created: std::time::Instant::now(),
+                        },
+                    );
+                    drop(store);
+                    Ok((status, Json(body)).into_response())
+                }
+                Err(e) => {
+                    store.abort(key);
+                    Err(e)
+                }
+            }
+        }
     }
-    let (status, body) = produce().await?;
-    let value = serde_json::to_value(&body).map_err(|_| Problem::internal())?;
-    if let Ok(mut store) = state.idempotency.write() {
-        store.put(
-            key.to_owned(),
-            crate::state::IdemRecord {
-                body_hash: hash,
-                status: status.as_u16(),
-                body: value.clone(),
-                created: std::time::Instant::now(),
-            },
-        );
-    }
-    Ok((status, Json(body)).into_response())
 }
 
 /// The `Idempotency-Key` header.

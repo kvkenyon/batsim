@@ -154,6 +154,12 @@ fn percentile(sorted: &mut [f64], p: f64) -> f64 {
     sorted[rank.min(sorted.len()) - 1]
 }
 
+/// Bound on homes x buckets one fleet-series request may materialize:
+/// the engine copies every bucket across the command channel and the
+/// handler copies them again for aggregation, so an unbounded request
+/// would stall ticks and exhaust memory.
+const MAX_FLEET_SERIES_CELLS: u64 = 1_000_000;
+
 /// Aggregated series for a fleet.
 #[utoipa::path(
     get,
@@ -191,6 +197,23 @@ pub async fn fleet_series(
         .filter_map(|h| state.home(h))
         .map(|e| e.idx)
         .collect();
+    let span_buckets = (to - from) / resolution.seconds() + 1;
+    let secs = resolution.seconds();
+    let retained = if secs == 1 {
+        state.config.telemetry.raw_ticks as u64
+    } else if secs <= 60 {
+        state.config.telemetry.rollup_minutes as u64 + 1
+    } else {
+        state.config.telemetry.rollup_minutes as u64 / (secs / 60) + 2
+    };
+    let per_home = span_buckets.min(retained);
+    let cells = idxs.len() as u64 * per_home;
+    if cells > MAX_FLEET_SERIES_CELLS {
+        return Err(Problem::validation(format!(
+            "fleet series too broad: {} homes x up to {per_home} buckets exceeds the {MAX_FLEET_SERIES_CELLS} cell budget; narrow the range or use a coarser resolution",
+            idxs.len()
+        )));
+    }
     let per_home = state
         .engine
         .call(|tx| EngineMsg::FleetSeries {
@@ -256,7 +279,7 @@ pub async fn fleet_series(
 
 struct StreamFilter {
     fleet_id: Option<String>,
-    home_ids: Option<Vec<String>>,
+    home_ids: Option<std::collections::HashSet<String>>,
     raw: bool,
     downsample: u64,
 }
@@ -272,33 +295,47 @@ impl StreamFilter {
                 )))
             }
         };
-        if let Some(ids) = &q.home_ids {
-            if ids.len() > 500 {
+        let requested: Vec<String> = q
+            .home_ids
+            .as_deref()
+            .map(|s| {
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !requested.is_empty() {
+            if !raw {
+                return Err(Problem::validation(
+                    "home_ids applies to raw streams only; add `fields=raw`",
+                ));
+            }
+            if requested.len() > 500 {
                 return Err(Problem::validation("home_ids accepts at most 500 entries"));
             }
-            for id in ids {
+            for id in &requested {
                 if state.home(id).is_none() {
                     return Err(Problem::not_found("home", id));
                 }
             }
         }
+        let mut home_set: std::collections::HashSet<String> = requested.into_iter().collect();
         if let Some(fleet_id) = &q.fleet_id {
             let fleet = state
                 .fleet(fleet_id)
                 .ok_or_else(|| Problem::not_found("fleet", fleet_id))?;
-            if raw && fleet.home_ids.len() > state.config.engine.raw_stream_max_homes {
-                return Err(Problem::unprocessable(format!(
-                    "raw streaming is limited to {} homes; this fleet has {}",
-                    state.config.engine.raw_stream_max_homes,
-                    fleet.home_ids.len()
-                )));
-            }
+            home_set.extend(fleet.home_ids.iter().cloned());
         }
-        if raw && q.fleet_id.is_none() && q.home_ids.is_none() {
+        // Raw per-home rows exist only while the whole world is small
+        // enough to stream; the engine gates on its active-home count,
+        // so the check here must match it exactly.
+        if raw {
             let n = state.homes.read().map_err(|_| Problem::internal())?.len();
             if n > state.config.engine.raw_stream_max_homes {
                 return Err(Problem::unprocessable(format!(
-                    "raw streaming requires a fleet_id or home_ids when more than {} homes exist",
+                    "raw streaming is limited to {} active homes; this world has {n}",
                     state.config.engine.raw_stream_max_homes
                 )));
             }
@@ -309,7 +346,7 @@ impl StreamFilter {
         }
         Ok(Self {
             fleet_id: q.fleet_id.clone(),
-            home_ids: q.home_ids.clone(),
+            home_ids: (!home_set.is_empty()).then_some(home_set),
             raw,
             downsample,
         })

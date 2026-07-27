@@ -312,10 +312,27 @@ impl std::error::Error for ApiError {}
 /// HTTP helpers over ureq.
 struct Client<'a> {
     base: &'a str,
-    api_key: &'a Option<String>,
+    api_key: Option<&'a String>,
+    agent: ureq::Agent,
 }
 
 impl Client<'_> {
+    fn new<'a>(base: &'a str, api_key: Option<&'a String>) -> Client<'a> {
+        // Non-2xx is a response, not a transport error: the RFC 9457
+        // problem document lives in the body, and ureq's
+        // Error::StatusCode would discard it.
+        let agent = ureq::Agent::new_with_config(
+            ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .build(),
+        );
+        Client {
+            base,
+            api_key,
+            agent,
+        }
+    }
+
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base.trim_end_matches('/'), path)
     }
@@ -333,17 +350,30 @@ impl Client<'_> {
         }
     }
 
+    fn finish(resp: ureq::http::Response<ureq::Body>) -> Result<serde_json::Value> {
+        let status = resp.status();
+        if status.is_success() {
+            return Self::read_body(resp);
+        }
+        let mut s = String::new();
+        _ = resp.into_body().into_reader().read_to_string(&mut s);
+        Err(ApiError {
+            body: if s.is_empty() {
+                format!("status {status}")
+            } else {
+                s
+            },
+        }
+        .into())
+    }
+
     fn get(&self, path: &str) -> Result<serde_json::Value> {
-        let mut req = ureq::get(self.url(path));
+        let mut req = self.agent.get(self.url(path));
         if let Some(k) = self.api_key {
             req = req.header("Authorization", format!("Bearer {k}"));
         }
         match req.call() {
-            Ok(resp) => Self::read_body(resp),
-            Err(ureq::Error::StatusCode(code)) => Err(ApiError {
-                body: format!("status {code}"),
-            }
-            .into()),
+            Ok(resp) => Self::finish(resp),
             Err(e) => Err(e.into()),
         }
     }
@@ -364,16 +394,16 @@ impl Client<'_> {
             headers.push(("Idempotency-Key".to_owned(), k.to_owned()));
         }
         let result = if method == "DELETE" {
-            let mut req = ureq::delete(&url);
+            let mut req = self.agent.delete(&url);
             for (k, v) in &headers {
                 req = req.header(k, v);
             }
             req.call()
         } else {
             let mut req = match method {
-                "POST" => ureq::post(&url),
-                "PUT" => ureq::put(&url),
-                "PATCH" => ureq::patch(&url),
+                "POST" => self.agent.post(&url),
+                "PUT" => self.agent.put(&url),
+                "PATCH" => self.agent.patch(&url),
                 other => anyhow::bail!("unsupported method {other}"),
             };
             for (k, v) in &headers {
@@ -385,11 +415,7 @@ impl Client<'_> {
             }
         };
         match result {
-            Ok(resp) => Self::read_body(resp),
-            Err(ureq::Error::StatusCode(code)) => Err(ApiError {
-                body: format!("status {code}"),
-            }
-            .into()),
+            Ok(resp) => Self::finish(resp),
             Err(e) => Err(e.into()),
         }
     }
@@ -451,10 +477,7 @@ fn print_table(value: &serde_json::Value) {
 
 #[allow(clippy::too_many_lines)]
 fn run(cli: &Cli) -> Result<()> {
-    let http = Client {
-        base: &cli.url,
-        api_key: &cli.api_key,
-    };
+    let http = Client::new(&cli.url, cli.api_key.as_ref());
     match &cli.cmd {
         Cmd::Homes { cmd } => match cmd {
             HomesCmd::Create { body } => {

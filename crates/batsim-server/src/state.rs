@@ -43,6 +43,8 @@ pub struct FleetEntry {
     pub home_ids: Vec<String>,
     /// Content hash of the expansion.
     pub expansion_hash: String,
+    /// `(ordinal_base, count)` ranges composed so far, in order.
+    pub expansion_ordinals: Vec<(u64, u64)>,
     /// Wall-clock creation time.
     pub created_at: String,
     /// Homes created by later expansions (ordinal offset base).
@@ -63,8 +65,10 @@ pub struct ScenarioEntry {
 /// Append-only dispatch audit log (bounded).
 #[derive(Debug, Default)]
 pub struct AuditStore {
-    records: Vec<CommandDoc>,
-    by_id: HashMap<String, usize>,
+    records: std::collections::VecDeque<CommandDoc>,
+    by_id: HashMap<String, u64>,
+    base_seq: u64,
+    next_seq: u64,
     cap: usize,
 }
 
@@ -73,8 +77,10 @@ impl AuditStore {
     #[must_use]
     pub fn new(cap: usize) -> Self {
         Self {
-            records: Vec::new(),
+            records: std::collections::VecDeque::new(),
             by_id: HashMap::new(),
+            base_seq: 0,
+            next_seq: 0,
             cap,
         }
     }
@@ -82,27 +88,26 @@ impl AuditStore {
     /// Insert a new command record.
     pub fn insert(&mut self, record: CommandDoc) {
         if self.records.len() >= self.cap {
-            if let Some(old) = self.records.first() {
+            if let Some(old) = self.records.pop_front() {
                 self.by_id.remove(&old.command_id);
+                self.base_seq += 1;
             }
-            self.records.remove(0);
-            // Re-index: positions shifted by one.
-            self.by_id = self
-                .records
-                .iter()
-                .enumerate()
-                .map(|(i, r)| (r.command_id.clone(), i))
-                .collect();
         }
-        self.by_id
-            .insert(record.command_id.clone(), self.records.len());
-        self.records.push(record);
+        self.by_id.insert(record.command_id.clone(), self.next_seq);
+        self.next_seq += 1;
+        self.records.push_back(record);
+    }
+
+    /// Position of a sequence number inside the deque.
+    fn pos(&self, seq: u64) -> Option<usize> {
+        usize::try_from(seq.checked_sub(self.base_seq)?).ok()
     }
 
     /// Look up a command.
     #[must_use]
     pub fn get(&self, command_id: &str) -> Option<&CommandDoc> {
-        self.by_id.get(command_id).map(|i| &self.records[*i])
+        let seq = *self.by_id.get(command_id)?;
+        self.records.get(self.pos(seq)?)
     }
 
     /// Whether a command id is known (deduplication).
@@ -113,8 +118,8 @@ impl AuditStore {
 
     /// All records, oldest first.
     #[must_use]
-    pub fn records(&self) -> &[CommandDoc] {
-        &self.records
+    pub fn records(&self) -> std::collections::vec_deque::Iter<'_, CommandDoc> {
+        self.records.iter()
     }
 
     /// Record a target's execution outcome.
@@ -126,10 +131,17 @@ impl AuditStore {
         applied_kw: Option<f64>,
         executed_at: Option<String>,
     ) {
-        let Some(i) = self.by_id.get(command_id).copied() else {
+        let Some(seq) = self.by_id.get(command_id).copied() else {
             return;
         };
-        if let Some(target) = self.records[i].targets.get_mut(target_pos) {
+        let Some(pos) = self.pos(seq) else {
+            return;
+        };
+        if let Some(target) = self
+            .records
+            .get_mut(pos)
+            .and_then(|r| r.targets.get_mut(target_pos))
+        {
             target.status = Some(status);
             target.applied_kw = applied_kw;
             target.executed_at_sim_time = executed_at;
@@ -139,8 +151,8 @@ impl AuditStore {
     /// Recompute a command's rollup status; returns
     /// `(applied, rejected, done)` when the command exists.
     pub fn rollup(&mut self, command_id: &str) -> Option<(usize, usize, bool)> {
-        let i = *self.by_id.get(command_id)?;
-        let rec = &self.records[i];
+        let pos = self.pos(*self.by_id.get(command_id)?)?;
+        let rec = &self.records[pos];
         let total = rec.targets.len();
         let mut applied = 0usize;
         let mut clean = 0usize;
@@ -170,7 +182,7 @@ impl AuditStore {
             .targets
             .iter()
             .all(|t| t.status == Some(TargetStatus::Cancelled));
-        self.records[i].status = if done == total && all_cancelled && total > 0 {
+        self.records[pos].status = if done == total && all_cancelled && total > 0 {
             CommandStatus::Cancelled
         } else {
             status
@@ -181,12 +193,17 @@ impl AuditStore {
     /// Mark every still-queued target cancelled (best-effort cancel of a
     /// command the engine has fully retracted).
     pub fn mark_queued_cancelled(&mut self, command_id: &str) {
-        let Some(i) = self.by_id.get(command_id).copied() else {
+        let Some(seq) = self.by_id.get(command_id).copied() else {
             return;
         };
-        for t in &mut self.records[i].targets {
-            if t.status.is_none() {
-                t.status = Some(TargetStatus::Cancelled);
+        let Some(pos) = self.pos(seq) else {
+            return;
+        };
+        if let Some(rec) = self.records.get_mut(pos) {
+            for t in &mut rec.targets {
+                if t.status.is_none() {
+                    t.status = Some(TargetStatus::Cancelled);
+                }
             }
         }
     }
@@ -205,11 +222,26 @@ pub struct IdemRecord {
     pub created: Instant,
 }
 
+/// Outcome of reserving an idempotency key for one in-flight request.
+#[derive(Debug)]
+pub enum IdemReservation {
+    /// The key is free; this caller now owns it and must complete or
+    /// abort the reservation.
+    Reserved,
+    /// A completed request with the same body hash exists; replay it.
+    Replay(IdemRecord),
+    /// A completed request with a different body hash exists.
+    ConflictReuse,
+    /// Another request with this key is still executing.
+    InFlight,
+}
+
 /// Idempotency-key store with TTL.
 #[derive(Debug)]
 pub struct IdemStore {
     ttl: std::time::Duration,
     records: HashMap<String, IdemRecord>,
+    pending: std::collections::HashSet<String>,
 }
 
 impl IdemStore {
@@ -219,6 +251,7 @@ impl IdemStore {
         Self {
             ttl: std::time::Duration::from_secs(ttl_hours.saturating_mul(3600)),
             records: HashMap::new(),
+            pending: std::collections::HashSet::new(),
         }
     }
 
@@ -233,6 +266,35 @@ impl IdemStore {
             self.records.remove(key);
         }
         self.records.get(key)
+    }
+
+    /// Atomically check a key and reserve it when free, so concurrent
+    /// requests carrying the same key cannot both execute.
+    pub fn reserve(&mut self, key: &str, body_hash: u64) -> IdemReservation {
+        if self.pending.contains(key) {
+            return IdemReservation::InFlight;
+        }
+        if let Some(rec) = self.get(key) {
+            let rec = rec.clone();
+            return if rec.body_hash == body_hash {
+                IdemReservation::Replay(rec)
+            } else {
+                IdemReservation::ConflictReuse
+            };
+        }
+        self.pending.insert(key.to_owned());
+        IdemReservation::Reserved
+    }
+
+    /// Complete a reservation with the produced response.
+    pub fn complete(&mut self, key: &str, record: IdemRecord) {
+        self.pending.remove(key);
+        self.put(key.to_owned(), record);
+    }
+
+    /// Abandon a reservation whose request failed.
+    pub fn abort(&mut self, key: &str) {
+        self.pending.remove(key);
     }
 
     /// Store a record.

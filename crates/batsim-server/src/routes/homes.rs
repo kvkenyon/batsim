@@ -119,12 +119,15 @@ pub async fn create_home(
 }
 
 async fn create_home_inner(state: &AppState, req: &CreateHomeRequest) -> ApiResult<HomeDoc> {
+    // The fleet check must hold for the whole composition: fleet
+    // deletion takes the same lock, so a home can never be composed
+    // into a fleet that is gone by the time membership is recorded.
+    let _compose_guard = state.compose_lock.lock().await;
     if let Some(fleet_id) = &req.fleet_id {
         if state.fleet(fleet_id).is_none() {
             return Err(Problem::not_found("fleet", fleet_id));
         }
     }
-    let _compose_guard = state.compose_lock.lock().await;
     let (peak, azimuth, tilt) = match &req.pv {
         Some(pv) => {
             let (kw, az, ti) = fixed_pv(pv)?;
@@ -147,7 +150,7 @@ async fn create_home_inner(state: &AppState, req: &CreateHomeRequest) -> ApiResu
         .engine
         .call(|tx| EngineMsg::Status { reply: tx })
         .await?;
-    let home = compose_home(
+    let composed = compose_home(
         &state.registry,
         &plan,
         &home_id,
@@ -161,7 +164,7 @@ async fn create_home_inner(state: &AppState, req: &CreateHomeRequest) -> ApiResu
     let idxs = state
         .engine
         .call(|tx| EngineMsg::AddHomes {
-            homes: vec![(home, meta)],
+            homes: vec![(composed.home, meta)],
             reply: tx,
         })
         .await?;
@@ -173,8 +176,8 @@ async fn create_home_inner(state: &AppState, req: &CreateHomeRequest) -> ApiResu
         config: crate::model::HomeConfigDoc {
             fleet_id: req.fleet_id.clone(),
             battery: plan.battery.clone(),
-            inverter_model_id: plan.inverter.as_ref().map(|i| i.model_id.clone()),
-            controller_model_id: None,
+            inverter_model_id: composed.inverter_model_id.clone(),
+            controller_model_id: composed.controller_model_id.clone(),
             pv_peak_kw: plan.pv_peak_kw,
             load_archetype: plan.load.archetype.clone(),
             ercot_load_zone: plan.location.ercot_load_zone.clone(),

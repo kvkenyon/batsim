@@ -98,6 +98,14 @@ impl Home {
         self.dispatch_queue.len()
     }
 
+    /// Drop every still-queued command without applying it. The engine
+    /// server drains queues at a scenario rebind boundary: tick numbers
+    /// restart with the new binding, so commands scheduled against the
+    /// old clock would otherwise fire on the new world's first ticks.
+    pub fn clear_dispatch_queue(&mut self) {
+        self.dispatch_queue.clear();
+    }
+
     /// The active control mode.
     #[must_use]
     pub const fn mode(&self) -> ControlMode {

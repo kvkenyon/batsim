@@ -386,4 +386,21 @@ mod tests {
             panic!("PATH: {} ERR: {e}", e.path());
         }
     }
+
+    /// The PATCHED document (what the server actually serves and what
+    /// `--dump-openapi` prints) must deserialize as `OpenApi`; the
+    /// `build_openapi` fallback otherwise degrades silently in release
+    /// builds.
+    #[test]
+    fn patched_document_roundtrips() {
+        let registry = batsim_registry::Registry::load(None).unwrap();
+        let doc = super::build_openapi(&registry);
+        let value = serde_json::to_value(&doc).unwrap();
+        let text = serde_json::to_string(&value).unwrap();
+        let mut de = serde_json::Deserializer::from_str(&text);
+        let r: Result<utoipa::openapi::OpenApi, _> = serde_path_to_error::deserialize(&mut de);
+        if let Err(e) = r {
+            panic!("PATH: {} ERR: {e}", e.path());
+        }
+    }
 }

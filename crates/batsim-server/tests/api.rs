@@ -628,7 +628,8 @@ async fn telemetry_series() {
     assert_eq!(s, StatusCode::OK);
     for t in b["t"].as_array().unwrap() {
         let ts = t.as_str().unwrap();
-        assert!(ts.ends_with("00Z"), "bucket start {ts} not 5-min aligned");
+        let unix = batsim_server::engine::unix_of(ts).unwrap();
+        assert_eq!(unix % 300, 0, "bucket start {ts} not 5-min aligned");
     }
 
     // Unknown field -> 400.

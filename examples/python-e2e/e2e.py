@@ -6,8 +6,10 @@ fleet, and reads back telemetry. Run via examples/python-e2e/run.sh.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+from pathlib import Path
 
 import batsim_client
 from batsim_client.models.fleet_manifest import FleetManifest
@@ -18,6 +20,11 @@ from batsim_client.models.run_until_request import RunUntilRequest
 from batsim_client.rest import ApiException
 
 BASE_URL = os.environ.get("BATSIM_URL", "http://127.0.0.1:8080")
+EXAMPLES = Path(__file__).resolve().parent.parent
+
+
+def load_fixture(name: str) -> dict:
+    return json.loads((EXAMPLES / name).read_text())
 
 
 def main() -> int:
@@ -30,31 +37,8 @@ def main() -> int:
     telemetry = batsim_client.TelemetryApi(api)
     homes = batsim_client.HomesApi(api)
 
-    # 1. Compose a 100-home fleet from a manifest.
-    manifest = {
-        "name": "python-e2e-100",
-        "seed": 42,
-        "archetypes": [
-            {
-                "weight": 0.6,
-                "template": {
-                    "battery": {"model_id": "tesla.powerwall_3", "count": 1},
-                    "pv": {"peak_kw": {"uniform": [5.0, 11.0]}},
-                    "load": {"archetype": "sfh_family"},
-                },
-            },
-            {
-                "weight": 0.4,
-                "template": {
-                    "battery": {"model_id": "enphase.iq_battery_5p", "count": 2},
-                    "pv": {"peak_kw": {"uniform": [4.0, 9.0]}},
-                    "load": {"archetype": "townhome"},
-                },
-            },
-        ],
-        "geo": {"ercot_load_zones": {"LZ_NORTH": 0.6, "LZ_HOUSTON": 0.4}},
-        "count": 100,
-    }
+    # 1. Compose a 100-home fleet from the shipped manifest fixture.
+    manifest = load_fixture("fleet-100.json")
     fleet = fleets.create_fleet(FleetManifest.from_dict(manifest))
     assert fleet.home_count == 100, fleet
     print(f"fleet {fleet.id}: {fleet.home_count} homes, hash {fleet.expansion_hash[:24]}")
@@ -67,24 +51,7 @@ def main() -> int:
 
     # 2. Bind a scenario (time, prices, weather, seed) and activate it.
     scenario = scenarios.create_scenario(
-        ScenarioRequest.from_dict(
-            {
-                "name": "e2e-summer-day",
-                "time": {"start": "2025-06-15T00:00:00Z", "end": "2025-06-16T00:00:00Z"},
-                "prices": {
-                    "source": "synthetic",
-                    "profile": "summer_peak",
-                    "base_price_per_mwh": 45.0,
-                    "amplitude_per_mwh": 30.0,
-                    "seed": 7,
-                },
-                "weather": {
-                    "source": "synthetic",
-                    "ambient": {"kind": "diurnal", "mean_c": 30.0, "amplitude_c": 6.0},
-                },
-                "seed": 1337,
-            }
-        )
+        ScenarioRequest.from_dict(load_fixture("scenario-day.json"))
     )
     scenarios.activate_scenario(scenario.id)
     status = sim.status()
@@ -114,11 +81,11 @@ def main() -> int:
     # (Client libraries surface headers via with_http_info.)
     sim.step(StepRequest(ticks=10))
     record = dispatch.get_command(cmd.command_id)
-    done = sum(1 for t in record.targets if t.status is not None)
-    assert done == 100, f"{done}/100 executed"
     from collections import Counter
     breakdown = Counter(str(t.status) for t in record.targets)
-    print(f"dispatch {record.command_id}: all 100 executed, outcomes {dict(breakdown)}")
+    applied = sum(1 for t in record.targets if t.status == "applied")
+    assert applied == 100, f"{applied}/100 applied, outcomes {dict(breakdown)}"
+    print(f"dispatch {record.command_id}: all 100 applied, outcomes {dict(breakdown)}")
 
     # 5. Continue to midday and read telemetry back.
     sim.run_until(RunUntilRequest(until="2025-06-15T12:00:00Z"))

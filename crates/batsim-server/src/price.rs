@@ -130,20 +130,20 @@ impl PriceSource {
             } => match profile {
                 SyntheticProfile::Flat => *base,
                 SyntheticProfile::SummerPeak => {
-                    // Sine peaking at 16:00 local (UTC-5 CDT); trough in
-                    // the early morning.
+                    // Sine peaking at 16:00 local (UTC-5 CDT); trough
+                    // at 04:00 local.
                     let day_s = 86_400.0;
-                    let t = (unix_time_s as f64 + 5.0 * 3600.0) % day_s;
+                    let t = (unix_time_s as f64 - 5.0 * 3600.0).rem_euclid(day_s);
                     let phase = 2.0 * std::f64::consts::PI * (t / day_s - 16.0 / 24.0);
-                    base - amplitude * libm_cos(phase)
+                    base + amplitude * libm_cos(phase)
                 }
             },
         }
     }
 }
 
-/// Cosine via a deterministic polynomial-free path: platform libm cos is
-/// fine here because prices never feed physics state, only telemetry.
+/// Cosine through the `libm` crate: identical results on every
+/// target, so the price series cannot drift cross-platform.
 fn libm_cos(x: f64) -> f64 {
-    x.cos()
+    libm::cos(x)
 }

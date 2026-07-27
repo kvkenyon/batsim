@@ -2005,13 +2005,10 @@
           {
             "name": "home_ids",
             "in": "query",
-            "description": "Restrict to specific homes (repeatable; at most 500).",
+            "description": "Restrict to specific homes (comma-separated; at most 500; raw\nstreams only).",
             "required": false,
             "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
+              "type": "string"
             }
           },
           {
@@ -2092,13 +2089,10 @@
           {
             "name": "home_ids",
             "in": "query",
-            "description": "Restrict to specific homes (repeatable; at most 500).",
+            "description": "Restrict to specific homes (comma-separated; at most 500; raw\nstreams only).",
             "required": false,
             "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
+              "type": "string"
             }
           },
           {
