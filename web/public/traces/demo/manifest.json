@@ -1,0 +1,21 @@
+{
+  "format": "batsim-trace/1",
+  "recorded_from": {
+    "batsim_version": "0.1.0"
+  },
+  "scenario": {
+    "name": "scn_01KYJD83MJTWQGCXVFF72N8A40",
+    "seed": 1337,
+    "tick_seconds": 60
+  },
+  "tick_range": [
+    782,
+    1381
+  ],
+  "sim_time_range": [
+    "2025-06-15T13:02:00Z",
+    "2025-06-15T23:01:00Z"
+  ],
+  "homes": 64,
+  "events": 600
+}
