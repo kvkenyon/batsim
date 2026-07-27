@@ -82,6 +82,33 @@ function StratumHandoff({ controlsRef }: { controlsRef: RefObject<MapControlsRef
 }
 
 /**
+ * Re-frames the canonical oblique view whenever the neighborhood world
+ * is rebuilt for a different zone; without this the camera keeps the
+ * orbit it had over the previous zone's street.
+ */
+function CameraRig({
+  world,
+  controlsRef,
+}: {
+  world: NeighborhoodWorld;
+  controlsRef: RefObject<MapControlsRef>;
+}) {
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    const { center } = world;
+    controls.object.position.set(
+      center.x + CAMERA_OFFSET_X,
+      CAMERA_ALTITUDE_M,
+      center.z + CAMERA_OFFSET_Z,
+    );
+    controls.target.set(center.x, 0, center.z);
+    controls.update();
+  }, [world, controlsRef]);
+  return null;
+}
+
+/**
  * Binds the scene's light rig, sky, and window glow to the simulated
  * time of day. Recomputed a few times a second from the live-buffer
  * clock; at high replay speeds the whole neighborhood time-lapses.
@@ -232,6 +259,7 @@ export default function NeighborhoodView({ live, active }: NeighborhoodViewProps
         minPolarAngle={MIN_POLAR_RAD}
         maxPolarAngle={MAX_POLAR_RAD}
       />
+      {world !== null && <CameraRig world={world} controlsRef={controlsRef} />}
       <StratumHandoff controlsRef={controlsRef} />
     </Canvas>
   );

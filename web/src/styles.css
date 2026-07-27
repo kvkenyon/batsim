@@ -3,6 +3,16 @@
  * frosted-glass HUD panels, hairline borders, IBM Plex Sans for prose and
  * IBM Plex Mono (tabular numerals) for every number. Spacing follows a
  * 4 px grid (4/8/12/16/24/32); type follows one scale (see .t-* classes).
+ *
+ * Panel z-order contract (no interactive element is ever covered by a
+ * sibling panel; geometry, not paint order, separates panels that share
+ * a screen edge):
+ *   0-5   viewports and their in-canvas overlays (flow canvas 4, day veil 5)
+ *   20    top bar, KPI strip (screen-edge chrome)
+ *   21    floating panels: events feed, dispatch panel, breadcrumb, dive chip
+ *   22    inspector (always above the events feed so its close stays live)
+ *   30    error toast
+ *   40    boot screen
  */
 
 :root {
@@ -143,6 +153,13 @@ body,
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   z-index: 20;
+  pointer-events: none;
+}
+
+/* The bar frames the viewport; only its own controls take clicks, so the
+   map stays pannable in the gaps. */
+.top-bar > * {
+  pointer-events: auto;
 }
 
 .top-bar .brand {
@@ -307,11 +324,17 @@ body,
   top: 60px;
   right: 12px;
   width: 300px;
-  max-height: 34%;
+  max-height: 30%;
   display: flex;
   flex-direction: column;
-  z-index: 19;
+  z-index: 21;
   overflow: hidden;
+}
+
+/* While the inspector is open the feed yields the right edge: it
+   collapses to its newest entries so the two panels never overlap. */
+.events-feed.shrunk {
+  max-height: 128px;
 }
 
 .events-feed .feed-head {
@@ -397,9 +420,9 @@ body,
   right: 12px;
   width: 300px;
   padding: 14px 16px;
-  z-index: 20;
+  z-index: 22;
   font-size: 13px;
-  max-height: min(580px, calc(100% - 120px));
+  max-height: min(580px, calc(100% - 250px));
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--hairline) transparent;
@@ -668,6 +691,14 @@ body,
 }
 
 /* ---- MapLibre chrome ------------------------------------------------ */
+
+/* Zoom controls sit left of the events feed and below the top bar, never
+   under either; ours loads before maplibre-gl.css, so the extra
+   specificity is load-order insurance. */
+.app-shell .maplibregl-ctrl-top-right {
+  top: 56px;
+  right: 324px;
+}
 
 .maplibregl-ctrl-attrib {
   font-size: 10px;

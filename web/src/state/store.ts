@@ -54,6 +54,11 @@ export interface AppState {
   neighborhoodZone: string | null;
   neighborhoodHomeIds: string[];
   neighborhoodAnchor: [number, number];
+  /** Zone under the map crosshair; the dive gestures target it. */
+  centerZone: string | null;
+  /** Per-zone anchor points and display labels from the zones GeoJSON. */
+  zoneAnchors: Record<string, [number, number]>;
+  zoneLabels: Record<string, string>;
   priceRtm: number;
   simTimeMs: number;
   tick: number;
@@ -77,6 +82,12 @@ export interface AppState {
   setLens: (lens: Lens) => void;
   selectHome: (id: string | null) => void;
   setStratum: (stratum: Stratum) => void;
+  /**
+   * Dive into the street-level neighborhood for a zone. Null means the
+   * zone currently under the map crosshair. No-op when the zone has no
+   * homes - there is no street to show.
+   */
+  diveZone: (zone: string | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -90,6 +101,9 @@ export const useAppStore = create<AppState>((set) => ({
   neighborhoodZone: null,
   neighborhoodHomeIds: [],
   neighborhoodAnchor: [-97.4, 32.9],
+  centerZone: null,
+  zoneAnchors: {},
+  zoneLabels: {},
   priceRtm: 0,
   simTimeMs: 0,
   tick: 0,
@@ -107,6 +121,19 @@ export const useAppStore = create<AppState>((set) => ({
   setLens: (lens) => set({ lens }),
   selectHome: (id) => set({ selectedHomeId: id }),
   setStratum: (stratum) => set({ stratum }),
+  diveZone: (zone) =>
+    set((state) => {
+      const target = zone ?? state.centerZone ?? state.neighborhoodZone;
+      if (!target) return {};
+      const homeIds = state.homeOrder.filter((id) => state.homesMeta[id]?.zone === target);
+      if (homeIds.length === 0) return {};
+      return {
+        neighborhoodZone: target,
+        neighborhoodHomeIds: homeIds,
+        neighborhoodAnchor: state.zoneAnchors[target] ?? state.neighborhoodAnchor,
+        stratum: "neighborhood" as const,
+      };
+    }),
 }));
 
 /** Prepend events to the feed, capped at the ring depth. */

@@ -52,8 +52,6 @@ const PAN_BOUNDS: LngLatBoundsLike = [
 ];
 /** Zoom at or above which the map hands off to the street-level stratum. */
 const NEIGHBORHOOD_ZOOM = 13.4;
-/** Center proximity to the neighborhood anchor required for the handoff. */
-const NEIGHBORHOOD_RADIUS_DEG = 0.6;
 /** Telemetry push cadence for marker and zone tints. */
 const TELEMETRY_PUSH_MS = 500;
 
@@ -299,9 +297,25 @@ export default function MapView({ live, active }: MapViewProps) {
           { padding: 64, duration: 650 },
         );
       });
+      // Zone under the map crosshair: the dive chip and the zoom
+      // handoff both target this zone, not a fixed one.
+      const updateCenterZone = () => {
+        const center = map.getCenter();
+        const features = map.queryRenderedFeatures(map.project([center.lng, center.lat]), {
+          layers: [LAYER_ZONES_FILL],
+        });
+        const zone: unknown = features[0]?.properties?.zone;
+        const next = typeof zone === "string" ? zone : null;
+        if (useAppStore.getState().centerZone !== next) {
+          useAppStore.setState({ centerZone: next });
+        }
+      };
+
       map.on("dblclick", (e) => {
         e.preventDefault();
-        useAppStore.getState().setStratum("neighborhood");
+        const features = map.queryRenderedFeatures(e.point, { layers: [LAYER_ZONES_FILL] });
+        const zone: unknown = features[0]?.properties?.zone;
+        useAppStore.getState().diveZone(typeof zone === "string" ? zone : null);
       });
 
       // Handoff is armed while zoomed out below the threshold and consumed
@@ -310,6 +324,7 @@ export default function MapView({ live, active }: MapViewProps) {
       let handoffArmed = map.getZoom() < NEIGHBORHOOD_ZOOM;
       map.on("moveend", () => {
         useAppStore.setState({ mapZoom: map.getZoom() });
+        updateCenterZone();
         if (map.getZoom() < NEIGHBORHOOD_ZOOM) {
           handoffArmed = true;
           return;
@@ -317,16 +332,12 @@ export default function MapView({ live, active }: MapViewProps) {
         if (!handoffArmed || !activeRef.current) return;
         const state = useAppStore.getState();
         if (state.stratum !== "map") return;
-        const center = map.getCenter();
-        const [anchorLng, anchorLat] = state.neighborhoodAnchor;
-        if (
-          Math.abs(center.lng - anchorLng) <= NEIGHBORHOOD_RADIUS_DEG &&
-          Math.abs(center.lat - anchorLat) <= NEIGHBORHOOD_RADIUS_DEG
-        ) {
+        if (state.centerZone !== null) {
           handoffArmed = false;
-          state.setStratum("neighborhood");
+          state.diveZone(state.centerZone);
         }
       });
+      updateCenterZone();
     };
 
     const addLayers = (zonesFc: FeatureCollection) => {

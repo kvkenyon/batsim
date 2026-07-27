@@ -193,6 +193,9 @@ async function runBootstrap(options: { forceDemo?: boolean; apiBase?: string }):
     neighborhoodZone: neighborhood.zone,
     neighborhoodHomeIds: neighborhood.homeIds,
     neighborhoodAnchor: neighborhood.anchor,
+    centerZone: neighborhood.zone,
+    zoneAnchors: Object.fromEntries([...zones.values()].map((z) => [z.zone, z.anchor])),
+    zoneLabels: Object.fromEntries([...zones.values()].map((z) => [z.zone, z.label])),
   });
 
   const ingest = createIngest(live);

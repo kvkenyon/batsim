@@ -38,6 +38,9 @@ export function App() {
   const selectedMeta = useAppStore((s) => (s.selectedHomeId ? s.homesMeta[s.selectedHomeId] : undefined));
   const neighborhoodZone = useAppStore((s) => s.neighborhoodZone);
   const mapZoom = useAppStore((s) => s.mapZoom);
+  const centerZone = useAppStore((s) => s.centerZone);
+  const homesMeta = useAppStore((s) => s.homesMeta);
+  const zoneLabels = useAppStore((s) => s.zoneLabels);
   const lastError = useAppStore((s) => s.lastError);
 
   useEffect(() => {
@@ -63,13 +66,13 @@ export function App() {
     return () => cancelAnimationFrame(frame);
   }, [ready]);
 
-  // Esc ascends one stratum, then clears the selection.
+  // Esc clears the selection first, then ascends one stratum.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       const state = useAppStore.getState();
-      if (state.stratum === "neighborhood") state.setStratum("map");
-      else if (state.selectedHomeId !== null) state.selectHome(null);
+      if (state.selectedHomeId !== null) state.selectHome(null);
+      else if (state.stratum === "neighborhood") state.setStratum("map");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -94,6 +97,14 @@ export function App() {
   }
 
   const { live } = getRuntime();
+
+  // The dive chip offers the neighborhood under the map crosshair, and
+  // only when that zone actually has homes to walk.
+  let diveLabel: string | null = null;
+  if (centerZone !== null) {
+    const hasHomes = Object.values(homesMeta).some((m) => m.zone === centerZone);
+    if (hasHomes) diveLabel = zoneLabels[centerZone] ?? centerZone;
+  }
 
   return (
     <div className={`app-shell${crossfadeArmed ? " crossfade-armed" : ""}`}>
@@ -127,11 +138,11 @@ export function App() {
           </>
         )}
       </div>
-      {stratum === "map" && mapZoom >= 9 && (
+      {stratum === "map" && mapZoom >= 9 && diveLabel !== null && (
         <button
           className="dive-chip"
-          onClick={() => useAppStore.getState().setStratum("neighborhood")}>
-          dive into <span className="zone">{neighborhoodZone}</span> neighborhood
+          onClick={() => useAppStore.getState().diveZone(null)}>
+          dive into <span className="zone">{diveLabel}</span>
         </button>
       )}
       <EventsFeed />

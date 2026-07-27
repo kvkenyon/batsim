@@ -26,6 +26,50 @@ async function bootDemo(page: Page): Promise<void> {
     .toBeGreaterThan(5);
 }
 
+/** True when the element's center is the topmost hit target (not occluded). */
+async function expectUnoccluded(page: Page, selector: string): Promise<void> {
+  const locator = page.locator(selector).first();
+  await expect(locator).toBeVisible();
+  const reachable = await locator.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+    );
+    return hit !== null && (hit === el || el.contains(hit));
+  });
+  expect(reachable, `${selector} is covered by another panel`).toBe(true);
+}
+
+async function clickRenderedHomeDot(page: Page): Promise<void> {
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const map = window.__batsimMap;
+        if (!map || !map.getLayer("homes")) return false;
+        return map.queryRenderedFeatures({ layers: ["homes"] }).length > 0;
+      }),
+    )
+    .toBe(true);
+  const dot = await page.evaluate(() => {
+    const map = window.__batsimMap;
+    if (!map) return null;
+    for (const feature of map.queryRenderedFeatures({ layers: ["homes"] })) {
+      if (feature.geometry.type !== "Point") continue;
+      const [lng, lat] = feature.geometry.coordinates;
+      const pt = map.project([lng ?? 0, lat ?? 0]);
+      if (pt.x > 80 && pt.x < window.innerWidth - 320 && pt.y > 120 && pt.y < window.innerHeight - 120) {
+        const id: unknown = feature.properties?.id;
+        if (typeof id === "string") return { id, x: pt.x, y: pt.y };
+      }
+    }
+    return null;
+  });
+  if (!dot) throw new Error("no rendered home dot found to click");
+  await page.mouse.click(dot.x, dot.y);
+  await expect(page.locator(".inspector")).toBeVisible();
+}
+
 test("tiled map renders zone overlay and lensed markers", async ({ page }) => {
   await bootDemo(page);
 
@@ -111,33 +155,7 @@ test("events feed records the fleet dispatch entry", async ({ page }) => {
 
 test("inspect panel shows device detail, sparkline, and day totals", async ({ page }) => {
   await bootDemo(page);
-
-  // Click a rendered home dot through the real pointer path.
-  await expect
-    .poll(async () =>
-      page.evaluate(() => {
-        const map = window.__batsimMap;
-        if (!map || !map.getLayer("homes")) return false;
-        return map.queryRenderedFeatures({ layers: ["homes"] }).length > 0;
-      }),
-    )
-    .toBe(true);
-  const dot = await page.evaluate(() => {
-    const map = window.__batsimMap;
-    if (!map) return null;
-    for (const feature of map.queryRenderedFeatures({ layers: ["homes"] })) {
-      if (feature.geometry.type !== "Point") continue;
-      const [lng, lat] = feature.geometry.coordinates;
-      const pt = map.project([lng ?? 0, lat ?? 0]);
-      if (pt.x > 80 && pt.x < window.innerWidth - 320 && pt.y > 120 && pt.y < window.innerHeight - 120) {
-        const id: unknown = feature.properties?.id;
-        if (typeof id === "string") return { id, x: pt.x, y: pt.y };
-      }
-    }
-    return null;
-  });
-  if (!dot) throw new Error("no rendered home dot found to click");
-  await page.mouse.click(dot.x, dot.y);
+  await clickRenderedHomeDot(page);
 
   const inspector = page.locator(".inspector");
   await expect(inspector).toBeVisible();
@@ -152,4 +170,109 @@ test("inspect panel shows device detail, sparkline, and day totals", async ({ pa
   await expect(inspector.locator(".state-chip").first()).toBeVisible();
   await page.waitForTimeout(2500);
   await page.screenshot({ path: "test-results/visual/d-inspect.png" });
+});
+
+test("events feed never traps the inspector's exits", async ({ page }) => {
+  await bootDemo(page);
+  await clickRenderedHomeDot(page);
+
+  const inspector = page.locator(".inspector");
+  // The close button sits above the events overlay and clicks through.
+  await expectUnoccluded(page, ".inspector .close");
+  await inspector.locator(".close").click();
+  await expect(inspector).toBeHidden();
+
+  // Reopen, then Esc dismisses the inspector without leaving the map.
+  await clickRenderedHomeDot(page);
+  await page.keyboard.press("Escape");
+  await expect(inspector).toBeHidden();
+  await expect
+    .poll(async () => page.evaluate(() => window.__batsim?.store.getState().stratum))
+    .toBe("map");
+
+  // Clicking empty map (outside the panel) clears the selection too.
+  await clickRenderedHomeDot(page);
+  await page.mouse.click(60, 500);
+  await expect(inspector).toBeHidden();
+});
+
+test("dive targets the zone under the crosshair", async ({ page }) => {
+  await bootDemo(page);
+
+  // Zoom into a zone that is NOT the largest one; the chip must offer
+  // that zone's neighborhood, generated from that zone's own homes.
+  const target = await page.evaluate(() => {
+    const state = window.__batsim?.store.getState();
+    if (!state) return null;
+    const zone = "LZ_HOUSTON";
+    const anchor = state.zoneAnchors[zone];
+    if (!anchor) return null;
+    window.__batsimMap?.jumpTo({ center: anchor, zoom: 11 });
+    return { zone, anchor };
+  });
+  if (!target) throw new Error("LZ_HOUSTON anchor missing");
+  await page.waitForTimeout(1000);
+
+  const chip = page.locator(".dive-chip");
+  await expect(chip).toBeVisible();
+  await expect(chip).toContainText("Houston");
+  await expect(chip).not.toContainText("North");
+  await chip.click();
+
+  await expect
+    .poll(async () => page.evaluate(() => window.__batsim?.store.getState().stratum))
+    .toBe("neighborhood");
+  await expect(page.locator(".stratum-chip")).toContainText("LZ_HOUSTON");
+  const allInZone = await page.evaluate(() => {
+    const state = window.__batsim?.store.getState();
+    if (!state) return false;
+    return (
+      state.neighborhoodZone === "LZ_HOUSTON" &&
+      state.neighborhoodHomeIds.length > 0 &&
+      state.neighborhoodHomeIds.every((id) => state.homesMeta[id]?.zone === "LZ_HOUSTON")
+    );
+  });
+  expect(allInZone).toBe(true);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: "test-results/visual/e-dive-zone.png" });
+
+  // Esc with no selection ascends back to the map.
+  await page.keyboard.press("Escape");
+  await expect
+    .poll(async () => page.evaluate(() => window.__batsim?.store.getState().stratum))
+    .toBe("map");
+});
+
+test("every interactive control is clickable at its rendered position", async ({ page }) => {
+  await bootDemo(page);
+
+  const controls = [
+    ".transport .seg button:nth-child(1)",
+    ".transport .seg button:nth-child(2)",
+    ".transport .seg button:nth-child(3)",
+    ".transport .seg button:nth-child(4)",
+    ".transport .jump",
+    ".seg button:text-is('price')",
+    ".seg button:text-is('soc')",
+    ".dispatch-panel .cmd.discharge",
+    ".dispatch-panel .cmd.charge",
+    ".maplibregl-ctrl-zoom-in",
+    ".maplibregl-ctrl-zoom-out",
+  ];
+  for (const selector of controls) {
+    await expectUnoccluded(page, selector);
+  }
+
+  // The map zoom controls actually zoom when clicked.
+  const before = await page.evaluate(() => window.__batsimMap?.getZoom() ?? 0);
+  await page.locator(".maplibregl-ctrl-zoom-in").click();
+  await page.waitForTimeout(600);
+  const after = await page.evaluate(() => window.__batsimMap?.getZoom() ?? 0);
+  expect(after).toBeGreaterThan(before);
+
+  // With the inspector open the same controls stay reachable.
+  await clickRenderedHomeDot(page);
+  for (const selector of [...controls, ".inspector .close"]) {
+    await expectUnoccluded(page, selector);
+  }
 });

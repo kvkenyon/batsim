@@ -17,6 +17,7 @@ const feedTimeFormatter = new Intl.DateTimeFormat("en-US", {
 
 export function EventsFeed() {
   const events = useAppStore((s) => s.events);
+  const inspectorOpen = useAppStore((s) => s.selectedHomeId !== null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const newestId = events[0]?.id;
 
@@ -26,7 +27,7 @@ export function EventsFeed() {
   }, [newestId]);
 
   return (
-    <section className="events-feed hud-panel" aria-label="grid events">
+    <section className={`events-feed hud-panel${inspectorOpen ? " shrunk" : ""}`} aria-label="grid events">
       <div className="feed-head">
         <span className="t-micro">grid events</span>
         <span className="t-num-s">{events.length}</span>
