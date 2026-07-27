@@ -86,7 +86,7 @@
     },
     {
       "type": "Feature",
-      "properties": { "kind": "zone", "zone": "LZ_COAST", "label": "Coast", "anchor": [-96.3, 28.6] },
+      "properties": { "kind": "zone", "zone": "LZ_COAST", "label": "Coast", "anchor": [-96.4, 29.2] },
       "geometry": { "type": "Polygon", "coordinates": [[
         [-97.1, 28.7], [-96.0, 29.1], [-95.8, 29.7], [-97.1, 29.7], [-97.1, 28.7]
       ]] }

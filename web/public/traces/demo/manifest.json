@@ -4,7 +4,7 @@
     "batsim_version": "0.1.0"
   },
   "scenario": {
-    "name": "scn_01KYJD83MJTWQGCXVFF72N8A40",
+    "name": "summer-day",
     "seed": 1337,
     "tick_seconds": 60
   },

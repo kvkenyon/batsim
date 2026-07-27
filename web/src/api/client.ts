@@ -92,9 +92,13 @@ export function createBatsimApi(baseUrl: string): BatsimApi {
     },
 
     async simStatus() {
-      // The endpoint declares only a 200 response; transport failures throw.
-      const { data } = await client.GET("/v1/sim:status");
-      if (!data) throw new ApiError(0, null, "sim status returned no body");
+      const { data, error, response } = await client.GET("/v1/sim:status");
+      // The spec declares only a 200 response, so `error` is typed never;
+      // a non-2xx still arrives at runtime and must carry its status.
+      if (!response.ok) {
+        throw new ApiError(response.status, error ?? null, "failed to read sim status");
+      }
+      if (!data) throw new ApiError(response.status, null, "sim status returned no body");
       return data;
     },
   };

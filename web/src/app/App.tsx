@@ -3,7 +3,7 @@
  * viewports with a crossfade between strata, under the HUD chrome.
  */
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import MapView from "../map/MapView";
 import NeighborhoodView from "../scene/NeighborhoodView";
 import { bootstrap } from "../state/bootstrap";
@@ -25,6 +25,11 @@ declare global {
 export function App() {
   const [ready, setReady] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
+  // The stratum crossfade is armed only after the shell's first paint:
+  // while it is armed at mount, the browser fades the freshly inserted
+  // inactive layer in from the default styles, leaving it hit-testable
+  // (and on top of the map) for the duration of the fade.
+  const [crossfadeArmed, setCrossfadeArmed] = useState(false);
   const stratum = useAppStore((s) => s.stratum);
   const selectedHomeId = useAppStore((s) => s.selectedHomeId);
   const selectedMeta = useAppStore((s) => (s.selectedHomeId ? s.homesMeta[s.selectedHomeId] : undefined));
@@ -41,6 +46,12 @@ export function App() {
       .catch((err: unknown) => setBootError(err instanceof Error ? err.message : String(err)));
     window.__batsim = { store: useAppStore };
   }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    const frame = requestAnimationFrame(() => setCrossfadeArmed(true));
+    return () => cancelAnimationFrame(frame);
+  }, [ready]);
 
   if (bootError) {
     return (
@@ -61,13 +72,11 @@ export function App() {
   }
 
   const { live } = getRuntime();
-  const layerStyle = (active: boolean): CSSProperties => ({ opacity: active ? 1 : 0 });
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${crossfadeArmed ? " crossfade-armed" : ""}`}>
       <div
         className={`viewport-layer ${stratum === "map" ? "active" : "inactive"}`}
-        style={layerStyle(stratum === "map")}
       >
         <ViewportBoundary name="map">
           <MapView live={live} active={stratum === "map"} />
@@ -75,7 +84,6 @@ export function App() {
       </div>
       <div
         className={`viewport-layer ${stratum === "neighborhood" ? "active" : "inactive"}`}
-        style={layerStyle(stratum === "neighborhood")}
       >
         <ViewportBoundary name="neighborhood">
           <NeighborhoodView live={live} active={stratum === "neighborhood"} />

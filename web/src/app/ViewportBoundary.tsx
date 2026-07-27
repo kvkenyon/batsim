@@ -30,7 +30,7 @@ export class ViewportBoundary extends Component<Props, State> {
   render(): ReactNode {
     if (this.state.failure) {
       return (
-        <div className="boot-screen">
+        <div className="viewport-failure">
           <div className="title">graphics view unavailable</div>
           <div className="detail">
             {this.props.name}: {this.state.failure}

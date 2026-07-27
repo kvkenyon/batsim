@@ -30,19 +30,48 @@ export interface SseTransportOptions {
 export class SseTransport implements TelemetryTransport {
   readonly kind = "live" as const;
   private source: EventSource | null = null;
+  private stopped = false;
 
   constructor(private readonly options: SseTransportOptions) {}
 
   start(handlers: TransportHandlers): void {
+    this.stopped = false;
+    void this.open(handlers);
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.source?.close();
+    this.source = null;
+  }
+
+  private url(raw: boolean): string {
     const params = new URLSearchParams();
-    params.set("fields", this.options.raw ? "raw" : "aggregate");
+    params.set("fields", raw ? "raw" : "aggregate");
     if (this.options.fleetId) params.set("fleet_id", this.options.fleetId);
     if (this.options.homeIds?.length) params.set("home_ids", this.options.homeIds.join(","));
     if (this.options.downsample && this.options.downsample > 1) {
       params.set("downsample", String(this.options.downsample));
     }
-    const url = `${this.options.baseUrl}/v1/telemetry/stream?${params.toString()}`;
-    const source = new EventSource(url);
+    return `${this.options.baseUrl}/v1/telemetry/stream?${params.toString()}`;
+  }
+
+  private async open(handlers: TransportHandlers): Promise<void> {
+    let raw = this.options.raw;
+    if (raw) {
+      // The server caps raw streams; past the cap it answers 422, which
+      // EventSource surfaces only as a terminal error. Preflight to drop
+      // to fleet aggregates so large fleets still get live rollups.
+      try {
+        const probe = await fetch(this.url(true), { headers: { accept: "text/event-stream" } });
+        if (probe.status === 422) raw = false;
+        await probe.body?.cancel().catch(() => undefined);
+      } catch {
+        // Preflight unreachable: let the EventSource error path report it.
+      }
+    }
+    if (this.stopped) return;
+    const source = new EventSource(this.url(raw));
     this.source = source;
     source.onopen = () => handlers.onOpen();
     source.onerror = () => handlers.onError("telemetry stream connection lost");
@@ -55,11 +84,6 @@ export class SseTransport implements TelemetryTransport {
         }
       });
     }
-  }
-
-  stop(): void {
-    this.source?.close();
-    this.source = null;
   }
 }
 
@@ -99,12 +123,23 @@ export class ReplayTransport implements TelemetryTransport {
 
   async start(handlers: TransportHandlers): Promise<void> {
     this.stopped = false;
-    const res = await fetch(`${this.options.traceUrl}/telemetry.jsonl`);
-    if (!res.ok) {
-      handlers.onError(`trace fetch failed: HTTP ${res.status}`);
+    let text: string;
+    try {
+      const res = await fetch(`${this.options.traceUrl}/telemetry.jsonl`);
+      if (!res.ok) {
+        handlers.onError(`trace fetch failed: HTTP ${res.status}`);
+        return;
+      }
+      text = await res.text();
+    } catch (err) {
+      if (!this.stopped) {
+        handlers.onError(
+          `trace fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       return;
     }
-    const text = await res.text();
+    if (this.stopped) return;
     const lines: RecordedLine[] = [];
     for (const raw of text.split("\n")) {
       const line = raw.trim();

@@ -38,15 +38,39 @@ export function parseZones(geojson: unknown): Map<string, ZoneFeature> {
       if (x > maxX) maxX = x;
       if (y > maxY) maxY = y;
     }
+    const bbox: [number, number, number, number] = [minX, minY, maxX, maxY];
+    const anchor = f.properties.anchor ?? [(minX + maxX) / 2, (minY + maxY) / 2];
     out.set(f.properties.zone, {
       zone: f.properties.zone,
       label: f.properties.label ?? f.properties.zone,
-      anchor: f.properties.anchor ?? [(minX + maxX) / 2, (minY + maxY) / 2],
+      anchor: pointInPolygon(anchor[0], anchor[1], ring) ? anchor : interiorPoint(ring, bbox),
       polygon: ring,
-      bbox: [minX, minY, maxX, maxY],
+      bbox,
     });
   }
   return out;
+}
+
+/**
+ * Deterministic interior point for a ring: the bbox center when it lies
+ * inside, otherwise the first hit of a coarse grid scan. Zone anchors in
+ * the bundled GeoJSON are hand-drawn and can drift outside their polygon,
+ * which would stack every home of the zone on one out-of-zone marker.
+ */
+function interiorPoint(ring: [number, number][], bbox: [number, number, number, number]): [number, number] {
+  const [minX, minY, maxX, maxY] = bbox;
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  if (pointInPolygon(cx, cy, ring)) return [cx, cy];
+  const steps = 16;
+  for (let i = 1; i < steps; i++) {
+    for (let j = 1; j < steps; j++) {
+      const x = minX + ((maxX - minX) * i) / steps;
+      const y = minY + ((maxY - minY) * j) / steps;
+      if (pointInPolygon(x, y, ring)) return [x, y];
+    }
+  }
+  return [cx, cy];
 }
 
 function pointInPolygon(x: number, y: number, ring: [number, number][]): boolean {
@@ -115,18 +139,16 @@ export function layoutNeighborhood(homeIds: string[], seed: string): Neighborhoo
 
   const rowPitch = LOT_DEPTH_M * 2 + STREET_GAP_M;
   const rowCount = Math.max(1, Math.ceil(sorted.length / (LOTS_PER_ROW * 2)));
+  const half = (LOTS_PER_ROW * LOT_WIDTH_M) / 2;
 
   for (let row = 0; row < rowCount; row++) {
     const streetZ = row * rowPitch;
-    const half = (LOTS_PER_ROW * LOT_WIDTH_M) / 2;
     streets.push({ ax: -half - 10, az: streetZ, bx: half + 10, bz: streetZ });
   }
-  const sideStreetCount = Math.ceil(rowCount / 2);
-  for (let s = 0; s <= sideStreetCount; s++) {
-    const x = -((LOTS_PER_ROW * LOT_WIDTH_M) / 2) - 4 + s * LOTS_PER_ROW * LOT_WIDTH_M;
-    if (s > 0 && s < sideStreetCount) {
-      streets.push({ ax: x, az: -STREET_GAP_M, bx: x, bz: rowCount * rowPitch });
-    }
+  const sideStreetX = half + 10 + STREET_GAP_M;
+  const lastAvenueZ = (rowCount - 1) * rowPitch;
+  for (const x of [-sideStreetX, sideStreetX]) {
+    streets.push({ ax: x, az: -STREET_GAP_M, bx: x, bz: lastAvenueZ });
   }
 
   for (let i = 0; i < sorted.length; i++) {

@@ -143,13 +143,27 @@ function pickNeighborhood(
   return { zone: best[0], homeIds: best[1], anchor: zone?.anchor ?? [-97.4, 32.9] };
 }
 
-export async function bootstrap(options: { forceDemo?: boolean; apiBase?: string } = {}): Promise<BootResult> {
+let bootPromise: Promise<BootResult> | null = null;
+
+/**
+ * Idempotent: React StrictMode mounts the app effect twice in dev, and a
+ * second run would leak a transport and interleave two ingest pipelines
+ * into the shared store. The first in-flight boot wins.
+ */
+export function bootstrap(options: { forceDemo?: boolean; apiBase?: string } = {}): Promise<BootResult> {
+  bootPromise ??= runBootstrap(options);
+  return bootPromise;
+}
+
+async function runBootstrap(options: { forceDemo?: boolean; apiBase?: string }): Promise<BootResult> {
   const store = useAppStore;
   const apiBase = options.apiBase ?? "";
   const api = createBatsimApi(apiBase);
 
   const zonesRes = await fetch("geo/texas-zones.json");
+  if (!zonesRes.ok) throw new Error(`zone geojson fetch failed: HTTP ${zonesRes.status}`);
   const zones = parseZones(await zonesRes.json());
+  if (zones.size === 0) throw new Error("zone geojson contained no load zones");
 
   let connection: "live" | "demo" = "live";
   let bundle: EntitiesBundle;
@@ -181,7 +195,7 @@ export async function bootstrap(options: { forceDemo?: boolean; apiBase?: string
     : new ReplayTransport({ traceUrl: DEMO_TRACE_URL, speed: 120, loop: true });
   void transport.start({
     onEvent: ingest.handleEvent,
-    onOpen: () => undefined,
+    onOpen: () => store.setState({ lastError: null }),
     onError: (message) => store.setState({ lastError: message }),
   });
 

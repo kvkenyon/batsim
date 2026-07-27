@@ -11,7 +11,9 @@ export function KpiStrip() {
   const fleet = useAppStore((s) => s.fleet);
   const priceRtm = useAppStore((s) => s.priceRtm);
 
-  const fleetMw = Math.abs(fleet.batteryKw) / 1000;
+  const fleetMw = fleet.batteryKw / 1000;
+  const batteryFlow =
+    fleet.batteryKw > 0.05 ? "discharging" : fleet.batteryKw < -0.05 ? "charging" : "idle";
   const socPct = fleet.socMean * 100;
 
   return (
@@ -23,6 +25,7 @@ export function KpiStrip() {
       <span className="kpi">
         <span className="kpi-label">fleet battery</span>
         <span className="kpi-value mono">{fleetMw.toFixed(2)} MW</span>
+        <span className="kpi-label">{batteryFlow}</span>
       </span>
       <span className="kpi">
         <span className="kpi-label">mean soc</span>

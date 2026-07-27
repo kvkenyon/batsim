@@ -15,6 +15,7 @@
  *   TICK_SECONDS default 60    (scenario tick length in seconds)
  *   RUN_UNTIL    default 2025-06-15T13:00:00Z (advance the sim here
  *                  before opening the stream; empty string skips)
+ *   READ_TIMEOUT_MS default 600000 (overall capture deadline)
  *
  * Numeric payload fields are rounded (soc 4 decimals, kW 3, price 2)
  * to keep the trace within its size budget; structure is unchanged.
@@ -41,6 +42,7 @@ const DOWNSAMPLE = Number(process.env.DOWNSAMPLE ?? 1);
 const SIM_SPEED = Number(process.env.SIM_SPEED ?? 0);
 const TICK_SECONDS = Number(process.env.TICK_SECONDS ?? 60);
 const RUN_UNTIL = process.env.RUN_UNTIL ?? "2025-06-15T13:00:00Z";
+const READ_TIMEOUT_MS = Number(process.env.READ_TIMEOUT_MS ?? 10 * 60 * 1000);
 
 const BATTERY_MODELS = [
   "tesla.powerwall_3",
@@ -184,8 +186,10 @@ function roundTickPayload(payload) {
 /**
  * Stream SSE from the telemetry endpoint and record TICKS tick events.
  * Writes {"event":"tick", ...payload} lines to `outStream`.
+ * `onSubscribed` runs once the stream is attached, before any read, so
+ * the caller can resume a paused sim with zero ticks lost in between.
  */
-async function recordTicks(outStream) {
+async function recordTicks(outStream, onSubscribed) {
   const res = await fetch(
     `${BATSIM_URL}/v1/telemetry/stream?fields=raw&downsample=${DOWNSAMPLE}`,
     { headers: { accept: "text/event-stream" } },
@@ -193,6 +197,7 @@ async function recordTicks(outStream) {
   if (!res.ok || !res.body) {
     throw new Error(`telemetry stream -> ${res.status}`);
   }
+  if (onSubscribed) await onSubscribed();
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -234,9 +239,30 @@ async function recordTicks(outStream) {
     return recorded >= TICKS;
   };
 
+  const deadline = Date.now() + READ_TIMEOUT_MS;
   let done = false;
   while (!done) {
-    const { value, done: streamDone } = await reader.read();
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new Error(
+        `capture deadline elapsed after ${recorded}/${TICKS} tick events`,
+      );
+    }
+    let timer;
+    const { value, done: streamDone } = await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `capture deadline elapsed after ${recorded}/${TICKS} tick events`,
+              ),
+            ),
+          remaining,
+        );
+      }),
+    ]).finally(() => clearTimeout(timer));
     if (streamDone) break;
     buffer += decoder.decode(value, { stream: true });
     let idx;
@@ -254,7 +280,9 @@ async function recordTicks(outStream) {
   } catch {
     // Connection teardown on an already-stopped server is fine.
   }
-  if (recorded === 0) throw new Error("no tick events recorded");
+  if (recorded < TICKS) {
+    throw new Error(`stream ended after ${recorded} tick events, expected ${TICKS}`);
+  }
   return { recorded, firstTick, lastTick, firstSimTime, lastSimTime };
 }
 
@@ -306,25 +334,27 @@ async function main() {
     const version = await api("GET", "/v1/system/version");
     const fleet = await api("POST", "/v1/fleets", buildFleetManifest());
     log(`fleet ${fleet.id}: ${fleet.home_count} homes`);
-    const scenario = await api("POST", "/v1/scenarios", loadScenario());
+    const scenarioReq = loadScenario();
+    const scenario = await api("POST", "/v1/scenarios", scenarioReq);
     await api("POST", `/v1/scenarios/${scenario.id}:activate`);
     log(`scenario ${scenario.id} active`);
     await api("PUT", "/v1/sim:speed", { multiplier: SIM_SPEED });
     await api("POST", "/v1/sim:start");
+    // Pause before subscribing so no tick elapses between resume and
+    // stream attach; recordTicks resumes once the stream is open.
+    await api("POST", "/v1/sim:pause");
     if (RUN_UNTIL) {
       // run-until only operates on a paused simulation.
-      await api("POST", "/v1/sim:pause");
       await api("POST", "/v1/sim:run-until", { until: RUN_UNTIL });
       const now = await api("GET", "/v1/sim:status");
       log(`advanced to ${now.sim_time} (tick ${now.tick}), opening stream`);
-      await api("POST", "/v1/sim:resume");
     }
 
     // 3. Record the telemetry stream.
     mkdirSync(OUT_DIR, { recursive: true });
     const telemetryPath = path.join(OUT_DIR, "telemetry.jsonl");
     const outStream = createWriteStream(telemetryPath);
-    const stats = await recordTicks(outStream);
+    const stats = await recordTicks(outStream, () => api("POST", "/v1/sim:resume"));
     await new Promise((resolve) => outStream.end(resolve));
     log(`recorded ${stats.recorded} tick events (ticks ${stats.firstTick}..${stats.lastTick})`);
 
@@ -347,9 +377,9 @@ async function main() {
       );
     }
 
-    const scenarioReq = loadScenario();
+    const scenarioName = scenarioReq.name ?? status.active_scenario ?? "recorded demo";
     const entities = {
-      scenarioName: status.active_scenario ?? scenarioReq.name,
+      scenarioName,
       homes,
       fleets: fleetsPage.data ?? [],
       batteries: batteryList,
@@ -364,13 +394,13 @@ async function main() {
       format: "batsim-trace/1",
       recorded_from: { batsim_version: version.version },
       scenario: {
-        name: status.active_scenario ?? scenarioReq.name,
+        name: scenarioName,
         seed: scenarioReq.seed ?? 0,
         tick_seconds: scenarioReq.time?.tick_seconds ?? 1,
       },
       tick_range: [stats.firstTick, stats.lastTick],
       sim_time_range: [stats.firstSimTime, stats.lastSimTime],
-      homes: HOME_COUNT,
+      homes: homes.length,
       events: stats.recorded,
     };
     const manifestPath = path.join(OUT_DIR, "manifest.json");

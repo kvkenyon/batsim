@@ -41,6 +41,38 @@ describe("parseZones", () => {
     expect(north?.anchor).toEqual([-97.4, 32.9]);
     expect(north?.bbox).toEqual([-99.0, 31.6, -96.3, 33.8]);
   });
+
+  it("snaps an anchor that lies outside its polygon to an interior point", () => {
+    const skewed = {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { kind: "zone", zone: "LZ_COAST", label: "Coast", anchor: [-96.3, 28.6] },
+          geometry: {
+            type: "Polygon",
+            coordinates: [[
+              [-97.1, 28.7], [-96.0, 29.1], [-95.8, 29.7], [-97.1, 29.7], [-97.1, 28.7],
+            ]],
+          },
+        },
+      ],
+    };
+    const coast = parseZones(skewed).get("LZ_COAST");
+    if (!coast) throw new Error("zone missing");
+    expect(coast.anchor).not.toEqual([-96.3, 28.6]);
+    // The snapped anchor must seed a real scatter, not a marker stack.
+    const placed = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      const [lng, lat] = homeLngLat(`home_${i}`, coast);
+      placed.add(`${lng},${lat}`);
+      expect(lng).toBeGreaterThanOrEqual(coast.bbox[0]);
+      expect(lng).toBeLessThanOrEqual(coast.bbox[2]);
+      expect(lat).toBeGreaterThanOrEqual(coast.bbox[1]);
+      expect(lat).toBeLessThanOrEqual(coast.bbox[3]);
+    }
+    expect(placed.size).toBeGreaterThan(25);
+  });
 });
 
 describe("homeLngLat", () => {
@@ -94,6 +126,24 @@ describe("layoutNeighborhood", () => {
         const dz = a.z - b.z;
         expect(Math.hypot(dx, dz)).toBeGreaterThan(5);
       }
+    }
+  });
+
+  it("keeps vertical side streets clear of lots and avenue ends", () => {
+    const manyIds = Array.from({ length: 120 }, (_, i) => `home_${String(i).padStart(3, "0")}`);
+    const { parcels, streets } = layoutNeighborhood(manyIds, "seed-1");
+    const vertical = streets.filter((s) => s.ax === s.bx);
+    expect(vertical.length).toBeGreaterThan(0);
+    const lotHalfWidth = 9 / 2;
+    for (const street of vertical) {
+      for (const parcel of parcels) {
+        const crossesRows = parcel.z >= Math.min(street.az, street.bz) && parcel.z <= Math.max(street.az, street.bz);
+        if (crossesRows) {
+          expect(Math.abs(parcel.x - street.ax)).toBeGreaterThan(lotHalfWidth);
+        }
+      }
+      const avenueZ = streets.filter((s) => s.az === s.bz).map((s) => s.az);
+      expect(Math.max(street.az, street.bz)).toBeLessThanOrEqual(Math.max(...avenueZ));
     }
   });
 });
