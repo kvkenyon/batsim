@@ -38,16 +38,15 @@ fn status_doc(state: &AppState, s: &EngineStatus) -> SimStatusDoc {
         achieved_speed: s.achieved_speed,
         lag_ticks: s.lag_ticks,
         queued_commands: s.queued_commands,
-        active_scenario: state
-            .active_scenario
-            .read()
-            .ok()
-            .and_then(|a| a.clone()),
+        active_scenario: state.active_scenario.read().ok().and_then(|a| a.clone()),
     }
 }
 
 async fn engine_status(state: &AppState) -> ApiResult<EngineStatus> {
-    state.engine.call(|tx| EngineMsg::Status { reply: tx }).await
+    state
+        .engine
+        .call(|tx| EngineMsg::Status { reply: tx })
+        .await
 }
 
 /// Map an engine state-machine rejection to the right problem.
@@ -226,7 +225,9 @@ pub async fn run_until(
         .map_err(|e| Problem::validation(format!("until: {e}")))?;
     let cur = engine_status(&state).await?;
     if cur.state == SimState::Running {
-        return Err(Problem::sim_running("pause the simulation before run-until"));
+        return Err(Problem::sim_running(
+            "pause the simulation before run-until",
+        ));
     }
     if cur.state == SimState::Stopped {
         return Err(Problem::sim_not_running(
@@ -244,7 +245,10 @@ pub async fn run_until(
     }
     let outcome = state
         .engine
-        .call(|tx| EngineMsg::RunUntil { unix: until, reply: tx })
+        .call(|tx| EngineMsg::RunUntil {
+            unix: until,
+            reply: tx,
+        })
         .await?
         .map_err(Problem::conflict)?;
     Ok(Json(outcome_doc(&outcome)))

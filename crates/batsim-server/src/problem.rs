@@ -117,8 +117,12 @@ impl Problem {
     /// 400 validation error.
     #[must_use]
     pub fn validation(detail: impl Into<String>) -> Self {
-        Self::new(ProblemCode::ValidationError, StatusCode::BAD_REQUEST, "Validation error")
-            .detail(detail)
+        Self::new(
+            ProblemCode::ValidationError,
+            StatusCode::BAD_REQUEST,
+            "Validation error",
+        )
+        .detail(detail)
     }
 
     /// 404 not found.
@@ -149,8 +153,12 @@ impl Problem {
     /// to be.
     #[must_use]
     pub fn sim_running(detail: impl Into<String>) -> Self {
-        Self::new(ProblemCode::SimRunning, StatusCode::CONFLICT, "Simulation is running")
-            .detail(detail)
+        Self::new(
+            ProblemCode::SimRunning,
+            StatusCode::CONFLICT,
+            "Simulation is running",
+        )
+        .detail(detail)
     }
 
     /// 409: the operation requires a started simulation.
@@ -186,10 +194,8 @@ impl IntoResponse for Problem {
         );
         for (name, value) in headers {
             if let Ok(v) = axum::http::HeaderValue::from_str(value) {
-                resp.headers_mut().insert(
-                    axum::http::header::HeaderName::from_static(name),
-                    v,
-                );
+                resp.headers_mut()
+                    .insert(axum::http::header::HeaderName::from_static(name), v);
             }
         }
         resp

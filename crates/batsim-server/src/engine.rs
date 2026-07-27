@@ -33,7 +33,10 @@ pub fn rfc3339_of(unix: u64) -> String {
     let ts = i64::try_from(unix).unwrap_or(i64::MAX);
     OffsetDateTime::from_unix_timestamp(ts).map_or_else(
         |_| "1970-01-01T00:00:00Z".to_owned(),
-        |t| t.format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned()),
+        |t| {
+            t.format(&Rfc3339)
+                .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned())
+        },
     )
 }
 
@@ -42,7 +45,8 @@ pub fn rfc3339_of(unix: u64) -> String {
 /// # Errors
 /// Returns a message when the input is not RFC 3339.
 pub fn unix_of(ts: &str) -> Result<u64, String> {
-    let t = OffsetDateTime::parse(ts, &Rfc3339).map_err(|e| format!("invalid RFC 3339 time: {e}"))?;
+    let t =
+        OffsetDateTime::parse(ts, &Rfc3339).map_err(|e| format!("invalid RFC 3339 time: {e}"))?;
     u64::try_from(t.unix_timestamp()).map_err(|_| "time must not be before 1970".to_owned())
 }
 
@@ -368,9 +372,7 @@ impl EngineHandle {
         make: impl FnOnce(oneshot::Sender<T>) -> EngineMsg,
     ) -> Result<T, Problem> {
         let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(make(tx))
-            .map_err(|_| Problem::internal())?;
+        self.tx.send(make(tx)).map_err(|_| Problem::internal())?;
         rx.await.map_err(|_| Problem::internal())
     }
 }
@@ -427,9 +429,21 @@ impl Engine {
 
     fn handle(&mut self, msg: EngineMsg) {
         match msg {
-            EngineMsg::Start { reply } => drop(reply.send(self.transition_to(SimState::Running, SimState::Stopped, "simulation can only start from stopped"))),
-            EngineMsg::Pause { reply } => drop(reply.send(self.transition_to(SimState::Paused, SimState::Running, "simulation is not running"))),
-            EngineMsg::Resume { reply } => drop(reply.send(self.transition_to(SimState::Running, SimState::Paused, "simulation is not paused"))),
+            EngineMsg::Start { reply } => drop(reply.send(self.transition_to(
+                SimState::Running,
+                SimState::Stopped,
+                "simulation can only start from stopped",
+            ))),
+            EngineMsg::Pause { reply } => drop(reply.send(self.transition_to(
+                SimState::Paused,
+                SimState::Running,
+                "simulation is not running",
+            ))),
+            EngineMsg::Resume { reply } => drop(reply.send(self.transition_to(
+                SimState::Running,
+                SimState::Paused,
+                "simulation is not paused",
+            ))),
             EngineMsg::Stop { reply } => {
                 let r = if self.state == SimState::Stopped {
                     Err("simulation is already stopped".to_owned())
@@ -589,12 +603,7 @@ impl Engine {
         }
     }
 
-    fn transition_to(
-        &mut self,
-        next: SimState,
-        from: SimState,
-        err: &str,
-    ) -> Result<(), String> {
+    fn transition_to(&mut self, next: SimState, from: SimState, err: &str) -> Result<(), String> {
         if self.state == from {
             self.state = next;
             if next == SimState::Running {
@@ -689,7 +698,13 @@ impl Engine {
         let pending = std::mem::take(&mut self.pending);
         let mut ids: Vec<String> = Vec::new();
         for p in pending {
-            self.record_target(&p.command_id, p.target_pos, TargetStatus::Cancelled, None, None);
+            self.record_target(
+                &p.command_id,
+                p.target_pos,
+                TargetStatus::Cancelled,
+                None,
+                None,
+            );
             if !ids.contains(&p.command_id) {
                 ids.push(p.command_id);
             }
@@ -847,7 +862,10 @@ impl Engine {
         let mut finished: Vec<String> = Vec::new();
         for p in std::mem::take(&mut self.pending) {
             if p.execute_at_tick <= tick {
-                let point = points.iter().find(|(idx, _)| *idx == p.home_idx).map(|(_, pt)| pt);
+                let point = points
+                    .iter()
+                    .find(|(idx, _)| *idx == p.home_idx)
+                    .map(|(_, pt)| pt);
                 let (status, applied_kw) = match (p.requested_kw, point) {
                     (_, None) => (TargetStatus::Timeout, None),
                     (None, Some(_)) => (TargetStatus::Applied, None),

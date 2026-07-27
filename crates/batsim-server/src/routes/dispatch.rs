@@ -24,7 +24,7 @@ use crate::state::AppState;
 
 use super::homes::control_mode_of;
 use super::{
-    body_hash, decode_cursor, encode_cursor, idempotent, idempotency_key, page_ids, principal_of,
+    body_hash, decode_cursor, encode_cursor, idempotency_key, idempotent, page_ids, principal_of,
     Principal, ValidJson, ValidQuery,
 };
 
@@ -33,7 +33,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", post(dispatch))
         .route("/commands", get(list_commands))
-        .route("/commands/{command_id}", get(get_command).delete(cancel_command))
+        .route(
+            "/commands/{command_id}",
+            get(get_command).delete(cancel_command),
+        )
 }
 
 /// Hash a command id to the engine's issuer tag.
@@ -385,10 +388,7 @@ async fn dispatch_execute(
     }
     state
         .engine
-        .call(|tx| EngineMsg::EnqueueDispatch {
-            items,
-            reply: tx,
-        })
+        .call(|tx| EngineMsg::EnqueueDispatch { items, reply: tx })
         .await?;
 
     Ok(DispatchResponse {
@@ -424,9 +424,7 @@ pub async fn list_commands(
     let since_unix = q
         .since
         .as_deref()
-        .map(|s| {
-            crate::engine::unix_of(s).map_err(|e| Problem::validation(format!("since: {e}")))
-        })
+        .map(|s| crate::engine::unix_of(s).map_err(|e| Problem::validation(format!("since: {e}"))))
         .transpose()?;
     let audit = state.audit.read().map_err(|_| Problem::internal())?;
     let mut ids: Vec<String> = audit
@@ -439,9 +437,8 @@ pub async fn list_commands(
                 .is_none_or(|t| r.targets.iter().any(|x| &x.home_id == t))
         })
         .filter(|r| {
-            since_unix.is_none_or(|s| {
-                crate::engine::unix_of(&r.created_at).map_or(true, |c| c >= s)
-            })
+            since_unix
+                .is_none_or(|s| crate::engine::unix_of(&r.created_at).map_or(true, |c| c >= s))
         })
         .map(|r| r.command_id.clone())
         .collect();
@@ -507,7 +504,9 @@ pub async fn cancel_command(
             .ok_or_else(|| Problem::not_found("command", &command_id))?;
         if matches!(
             rec.status,
-            CommandStatus::Completed | CommandStatus::CompletedWithErrors | CommandStatus::Cancelled
+            CommandStatus::Completed
+                | CommandStatus::CompletedWithErrors
+                | CommandStatus::Cancelled
         ) {
             return Err(Problem::conflict(format!(
                 "command {command_id} is already {:?}",

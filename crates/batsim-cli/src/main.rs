@@ -14,7 +14,12 @@ use clap::{Parser, Subcommand};
 #[command(name = "batsimctl", version, about)]
 struct Cli {
     /// Base URL of the simulator.
-    #[arg(long, env = "BATSIM_URL", default_value = "http://127.0.0.1:8080", global = true)]
+    #[arg(
+        long,
+        env = "BATSIM_URL",
+        default_value = "http://127.0.0.1:8080",
+        global = true
+    )]
     url: String,
     /// API key (sent as a bearer token when the server requires auth).
     #[arg(long, env = "BATSIM_API_KEY", global = true)]
@@ -394,7 +399,9 @@ impl Client<'_> {
 fn read_json_arg(arg: &str) -> Result<serde_json::Value> {
     if arg == "-" {
         let mut s = String::new();
-        std::io::stdin().read_to_string(&mut s).context("read stdin")?;
+        std::io::stdin()
+            .read_to_string(&mut s)
+            .context("read stdin")?;
         return serde_json::from_str(&s).context("parse stdin JSON");
     }
     if let Ok(s) = std::fs::read_to_string(arg) {
@@ -472,7 +479,11 @@ fn run(cli: &Cli) -> Result<()> {
                 emit(cli, &http.get(&format!("/v1/homes?{}", q.join("&")))?)
             }
             HomesCmd::Get { id } => emit(cli, &http.get(&format!("/v1/homes/{id}"))?),
-            HomesCmd::Patch { id, mode, reserve_soc } => {
+            HomesCmd::Patch {
+                id,
+                mode,
+                reserve_soc,
+            } => {
                 let mut v = serde_json::Map::new();
                 if let Some(m) = mode {
                     v.insert("mode".into(), serde_json::Value::String(m.clone()));
@@ -485,9 +496,10 @@ fn run(cli: &Cli) -> Result<()> {
                     &http.send("PATCH", &format!("/v1/homes/{id}"), Some(&v.into()), None)?,
                 )
             }
-            HomesCmd::Delete { id } => {
-                emit(cli, &http.send("DELETE", &format!("/v1/homes/{id}"), None, None)?)
-            }
+            HomesCmd::Delete { id } => emit(
+                cli,
+                &http.send("DELETE", &format!("/v1/homes/{id}"), None, None)?,
+            ),
         },
         Cmd::Fleets { cmd } => match cmd {
             FleetsCmd::Create { body } => {
@@ -505,9 +517,10 @@ fn run(cli: &Cli) -> Result<()> {
                     None,
                 )?,
             ),
-            FleetsCmd::Delete { id } => {
-                emit(cli, &http.send("DELETE", &format!("/v1/fleets/{id}"), None, None)?)
-            }
+            FleetsCmd::Delete { id } => emit(
+                cli,
+                &http.send("DELETE", &format!("/v1/fleets/{id}"), None, None)?,
+            ),
             FleetsCmd::Dispatch { id, action } => {
                 let a = read_json_arg(action)?;
                 emit(
@@ -534,7 +547,12 @@ fn run(cli: &Cli) -> Result<()> {
             ),
             ScenariosCmd::Deactivate { id } => emit(
                 cli,
-                &http.send("POST", &format!("/v1/scenarios/{id}:deactivate"), None, None)?,
+                &http.send(
+                    "POST",
+                    &format!("/v1/scenarios/{id}:deactivate"),
+                    None,
+                    None,
+                )?,
             ),
         },
         Cmd::Sim { cmd } => match cmd {
@@ -583,15 +601,23 @@ fn run(cli: &Cli) -> Result<()> {
                 )
             }
             DispatchCmd::Commands { status } => {
-                let q = status.as_ref().map_or(String::new(), |s| format!("?status={s}"));
+                let q = status
+                    .as_ref()
+                    .map_or(String::new(), |s| format!("?status={s}"));
                 emit(cli, &http.get(&format!("/v1/dispatch/commands{q}"))?)
             }
-            DispatchCmd::Get { command_id } => {
-                emit(cli, &http.get(&format!("/v1/dispatch/commands/{command_id}"))?)
-            }
+            DispatchCmd::Get { command_id } => emit(
+                cli,
+                &http.get(&format!("/v1/dispatch/commands/{command_id}"))?,
+            ),
             DispatchCmd::Cancel { command_id } => emit(
                 cli,
-                &http.send("DELETE", &format!("/v1/dispatch/commands/{command_id}"), None, None)?,
+                &http.send(
+                    "DELETE",
+                    &format!("/v1/dispatch/commands/{command_id}"),
+                    None,
+                    None,
+                )?,
             ),
         },
         Cmd::Telemetry { cmd } => match cmd {
@@ -669,18 +695,20 @@ fn run(cli: &Cli) -> Result<()> {
                     .map_or(String::new(), |v| format!("?vendor={v}"));
                 emit(cli, &http.get(&format!("/v1/registry/batteries{q}"))?)
             }
-            RegistryCmd::Battery { model_id } => {
-                emit(cli, &http.get(&format!("/v1/registry/batteries/{model_id}"))?)
-            }
+            RegistryCmd::Battery { model_id } => emit(
+                cli,
+                &http.get(&format!("/v1/registry/batteries/{model_id}"))?,
+            ),
             RegistryCmd::Inverters { vendor } => {
                 let q = vendor
                     .as_ref()
                     .map_or(String::new(), |v| format!("?vendor={v}"));
                 emit(cli, &http.get(&format!("/v1/registry/inverters{q}"))?)
             }
-            RegistryCmd::Inverter { model_id } => {
-                emit(cli, &http.get(&format!("/v1/registry/inverters/{model_id}"))?)
-            }
+            RegistryCmd::Inverter { model_id } => emit(
+                cli,
+                &http.get(&format!("/v1/registry/inverters/{model_id}"))?,
+            ),
             RegistryCmd::Version => emit(cli, &http.get("/v1/registry/version")?),
         },
         Cmd::System { cmd } => match cmd {

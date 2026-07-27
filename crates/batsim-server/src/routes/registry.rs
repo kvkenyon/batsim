@@ -119,7 +119,10 @@ pub async fn list_inverters(
                 .as_ref()
                 .is_none_or(|v| i.vendor.contains(v.as_str()))
         })
-        .filter(|i| q.min_power_kw.is_none_or(|m| i.rated_ac_output_kw.value >= m))
+        .filter(|i| {
+            q.min_power_kw
+                .is_none_or(|m| i.rated_ac_output_kw.value >= m)
+        })
         .map(|i| InverterSummary {
             model_id: i.model_id.clone(),
             vendor: i.vendor.clone(),

@@ -17,8 +17,8 @@ use rand_chacha::ChaCha8Rng;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::model::{
-    ArchetypeEntry, BatterySpec, FleetManifest, HomeTemplate, InverterSpec, LoadSpec,
-    LocationSpec, PvSpec,
+    ArchetypeEntry, BatterySpec, FleetManifest, HomeTemplate, InverterSpec, LoadSpec, LocationSpec,
+    PvSpec,
 };
 use crate::problem::{ApiResult, Problem};
 
@@ -217,21 +217,21 @@ pub fn compose_home(
 
 /// Build the registry composition document for a home plan.
 fn system_doc(registry: &Registry, plan: &HomePlan, home_id: &str) -> ApiResult<serde_json::Value> {
-    let model = registry
-        .battery(&plan.battery.model_id)
-        .ok_or_else(|| {
-            Problem::validation(format!(
-                "unknown battery model `{}`; see /v1/registry/batteries",
-                plan.battery.model_id
-            ))
-        })?;
+    let model = registry.battery(&plan.battery.model_id).ok_or_else(|| {
+        Problem::validation(format!(
+            "unknown battery model `{}`; see /v1/registry/batteries",
+            plan.battery.model_id
+        ))
+    })?;
 
     // Inverters: explicit selection, else the vendor default for
     // DC-coupled hybrids without an integrated inverter.
     let mut inverters = Vec::new();
     if let Some(inv) = &plan.inverter {
         if inv.quantity == 0 || inv.quantity > 16 {
-            return Err(Problem::validation("inverter.quantity must be within 1..=16"));
+            return Err(Problem::validation(
+                "inverter.quantity must be within 1..=16",
+            ));
         }
         if registry.inverter(&inv.model_id).is_none() {
             return Err(Problem::validation(format!(
@@ -241,9 +241,11 @@ fn system_doc(registry: &Registry, plan: &HomePlan, home_id: &str) -> ApiResult<
         }
         inverters.push(serde_json::json!({"model_id": inv.model_id, "quantity": inv.quantity}));
     } else if matches!(model.coupling, Coupling::DCCoupledHybrid) {
-        let compatible = registry
-            .inverters()
-            .find(|i| i.compatible_battery_ids.iter().any(|b| b == &plan.battery.model_id));
+        let compatible = registry.inverters().find(|i| {
+            i.compatible_battery_ids
+                .iter()
+                .any(|b| b == &plan.battery.model_id)
+        });
         if let Some(inv) = compatible {
             inverters.push(serde_json::json!({
                 "model_id": inv.model_id,
@@ -339,7 +341,9 @@ fn validate_template(registry: &Registry, t: &HomeTemplate) -> ApiResult<()> {
     }
     if let Some(inv) = &t.inverter {
         if inv.quantity == 0 || inv.quantity > 16 {
-            return Err(Problem::validation("inverter.quantity must be within 1..=16"));
+            return Err(Problem::validation(
+                "inverter.quantity must be within 1..=16",
+            ));
         }
         if registry.inverter(&inv.model_id).is_none() {
             return Err(Problem::validation(format!(
@@ -457,7 +461,9 @@ pub fn expand_manifest(
             let mut v = Vec::with_capacity(g.ercot_load_zones.len());
             for (z, w) in &g.ercot_load_zones {
                 if zone_lat_lon(z).is_none() {
-                    return Err(Problem::validation(format!("unknown ERCOT load zone `{z}`")));
+                    return Err(Problem::validation(format!(
+                        "unknown ERCOT load zone `{z}`"
+                    )));
                 }
                 if !(w.is_finite() && *w > 0.0) {
                     return Err(Problem::validation("load-zone weights must be positive"));
@@ -531,7 +537,11 @@ pub fn fixed_pv(pv: &PvSpec) -> ApiResult<(f64, f64, f64)> {
     let kw = pv.peak_kw.fixed().ok_or_else(|| {
         Problem::validation("pv.peak_kw must be a fixed value for single-home creation")
     })?;
-    Ok((kw, pv.azimuth_deg.unwrap_or(180.0), pv.tilt_deg.unwrap_or(25.0)))
+    Ok((
+        kw,
+        pv.azimuth_deg.unwrap_or(180.0),
+        pv.tilt_deg.unwrap_or(25.0),
+    ))
 }
 
 /// Content hash of a manifest expansion (canonical JSON of manifest +

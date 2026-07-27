@@ -1,0 +1,16 @@
+{
+  "name": "summer-day",
+  "time": { "start": "2025-06-15T00:00:00Z", "end": "2025-06-16T00:00:00Z" },
+  "prices": {
+    "source": "synthetic",
+    "profile": "summer_peak",
+    "base_price_per_mwh": 45.0,
+    "amplitude_per_mwh": 30.0,
+    "seed": 7
+  },
+  "weather": {
+    "source": "synthetic",
+    "ambient": { "kind": "diurnal", "mean_c": 30.0, "amplitude_c": 6.0 }
+  },
+  "seed": 1337
+}

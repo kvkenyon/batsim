@@ -94,7 +94,8 @@ impl AuditStore {
                 .map(|(i, r)| (r.command_id.clone(), i))
                 .collect();
         }
-        self.by_id.insert(record.command_id.clone(), self.records.len());
+        self.by_id
+            .insert(record.command_id.clone(), self.records.len());
         self.records.push(record);
     }
 

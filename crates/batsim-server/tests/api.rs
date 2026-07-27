@@ -3,7 +3,7 @@
 //! Every endpoint's happy path plus each documented problem type is
 //! exercised through the real router (no mocks).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, unused_variables)]
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -82,7 +82,8 @@ impl App {
     }
 
     async fn get(&self, path: &str) -> (StatusCode, Value) {
-        self.call(Request::get(path).body(Body::empty()).unwrap()).await
+        self.call(Request::get(path).body(Body::empty()).unwrap())
+            .await
     }
 
     async fn post(&self, path: &str, body: &Value) -> (StatusCode, Value) {
@@ -236,7 +237,9 @@ async fn home_crud() {
         .call(
             Request::patch(format!("/v1/homes/{id}"))
                 .header("content-type", "application/json")
-                .body(Body::from(json!({"mode": "backup-only", "reserve_soc": 0.6}).to_string()))
+                .body(Body::from(
+                    json!({"mode": "backup-only", "reserve_soc": 0.6}).to_string(),
+                ))
                 .unwrap(),
         )
         .await;
@@ -292,13 +295,21 @@ async fn fleet_lifecycle() {
 
     // Expand adds homes deterministically.
     let (s, b) = app
-        .post(&format!("/v1/fleets/{fleet_id}:expand"), &json!({"count": 5}))
+        .post(
+            &format!("/v1/fleets/{fleet_id}:expand"),
+            &json!({"count": 5}),
+        )
         .await;
     assert_eq!(s, StatusCode::OK, "{b}");
     assert_eq!(b["home_count"], 15);
 
     // Bad manifests.
-    let (s, b) = app.post("/v1/fleets", &json!({"name": "x", "seed": 1, "archetypes": [], "count": 1})).await;
+    let (s, b) = app
+        .post(
+            "/v1/fleets",
+            &json!({"name": "x", "seed": 1, "archetypes": [], "count": 1}),
+        )
+        .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert_eq!(b["code"], "VALIDATION_ERROR");
     let (s, _) = app.get("/v1/fleets/flt_missing").await;
@@ -334,11 +345,15 @@ async fn scenario_lifecycle() {
 
     // Activation requires a stopped simulation.
     start_paused(&app).await;
-    let (s, b) = app.post(&format!("/v1/scenarios/{scn}:activate"), &Value::Null).await;
+    let (s, b) = app
+        .post(&format!("/v1/scenarios/{scn}:activate"), &Value::Null)
+        .await;
     assert_eq!(s, StatusCode::CONFLICT);
     assert_eq!(b["code"], "SIM_RUNNING");
     let _ = app.post("/v1/sim:stop", &Value::Null).await;
-    let (s, b) = app.post(&format!("/v1/scenarios/{scn}:activate"), &Value::Null).await;
+    let (s, b) = app
+        .post(&format!("/v1/scenarios/{scn}:activate"), &Value::Null)
+        .await;
     assert_eq!(s, StatusCode::OK, "{b}");
     assert_eq!(b["active"], true);
 
@@ -347,10 +362,14 @@ async fn scenario_lifecycle() {
     assert_eq!(b["sim_time"], "2025-06-15T00:00:00Z");
     assert_eq!(b["active_scenario"], scn);
 
-    let (s, _) = app.post(&format!("/v1/scenarios/{scn}:deactivate"), &Value::Null).await;
+    let (s, _) = app
+        .post(&format!("/v1/scenarios/{scn}:deactivate"), &Value::Null)
+        .await;
     assert_eq!(s, StatusCode::OK);
     // Second deactivation conflicts.
-    let (s, b) = app.post(&format!("/v1/scenarios/{scn}:deactivate"), &Value::Null).await;
+    let (s, b) = app
+        .post(&format!("/v1/scenarios/{scn}:deactivate"), &Value::Null)
+        .await;
     assert_eq!(s, StatusCode::CONFLICT);
     assert_eq!(b["code"], "CONFLICT");
 }
@@ -391,20 +410,30 @@ async fn sim_time_control() {
     assert_eq!(b["ticks_executed"], 60);
 
     // Run-until must be in the future.
-    let (s, b) = app.post("/v1/sim:run-until", &json!({"until": "2020-01-01T00:00:00Z"})).await;
+    let (s, b) = app
+        .post(
+            "/v1/sim:run-until",
+            &json!({"until": "2020-01-01T00:00:00Z"}),
+        )
+        .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     let (s, b) = app
-        .post("/v1/sim:run-until", &json!({"until": "2025-01-01T00:10:00Z"}))
+        .post(
+            "/v1/sim:run-until",
+            &json!({"until": "2025-01-01T00:10:00Z"}),
+        )
         .await;
     assert_eq!(s, StatusCode::OK, "{b}");
 
     // Speed validation.
-    let (s, b) = app.call(
-        Request::put("/v1/sim:speed")
-            .header("content-type", "application/json")
-            .body(Body::from(json!({"multiplier": -1.0}).to_string()))
-            .unwrap(),
-    ).await;
+    let (s, b) = app
+        .call(
+            Request::put("/v1/sim:speed")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"multiplier": -1.0}).to_string()))
+                .unwrap(),
+        )
+        .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert_eq!(b["code"], "VALIDATION_ERROR");
 
@@ -421,12 +450,17 @@ async fn dispatch_flow() {
     let fleet_id = b["id"].as_str().unwrap().to_owned();
     let (s, b) = app.post("/v1/scenarios", &scenario_body()).await;
     let scn = b["id"].as_str().unwrap().to_owned();
-    let _ = app.post(&format!("/v1/scenarios/{scn}:activate"), &Value::Null).await;
+    let _ = app
+        .post(&format!("/v1/scenarios/{scn}:activate"), &Value::Null)
+        .await;
     start_paused(&app).await;
 
     // Empty target -> 400.
     let (s, b) = app
-        .post("/v1/dispatch", &json!({"target": {}, "action": {"type": "clear_override"}}))
+        .post(
+            "/v1/dispatch",
+            &json!({"target": {}, "action": {"type": "clear_override"}}),
+        )
         .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 
@@ -468,7 +502,11 @@ async fn dispatch_flow() {
     let (s, b) = app.get("/v1/dispatch/commands/cmd_test_reserve").await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(b["status"], "completed");
-    assert!(b["targets"].as_array().unwrap().iter().all(|t| t["status"] == "applied"));
+    assert!(b["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t["status"] == "applied"));
 
     // Command id dedup: resubmission does not re-enqueue.
     let (s, b) = app
@@ -532,12 +570,7 @@ async fn dispatch_idempotency() {
     let (s, _) = app.call(req("key-1")).await;
     assert_eq!(s, StatusCode::ACCEPTED);
     // Replay with the same body returns the stored response.
-    let resp = app
-        .router
-        .clone()
-        .oneshot(req("key-1"))
-        .await
-        .unwrap();
+    let resp = app.router.clone().oneshot(req("key-1")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
     assert_eq!(resp.headers().get("idempotent-replay").unwrap(), "true");
     // Same key with a different body -> 409 idempotency-key-reuse.
@@ -564,12 +597,16 @@ async fn telemetry_series() {
     let fleet_id = b["id"].as_str().unwrap().to_owned();
     let (s, b) = app.post("/v1/scenarios", &scenario_body()).await;
     let scn = b["id"].as_str().unwrap().to_owned();
-    let _ = app.post(&format!("/v1/scenarios/{scn}:activate"), &Value::Null).await;
+    let _ = app
+        .post(&format!("/v1/scenarios/{scn}:activate"), &Value::Null)
+        .await;
     start_paused(&app).await;
     let (s, _) = app.post("/v1/sim:step", &json!({"ticks": 600})).await;
     assert_eq!(s, StatusCode::OK);
 
-    let (s, b) = app.get(&format!("/v1/homes?fleet_id={fleet_id}&limit=1")).await;
+    let (s, b) = app
+        .get(&format!("/v1/homes?fleet_id={fleet_id}&limit=1"))
+        .await;
     let home_id = b["data"][0]["id"].as_str().unwrap().to_owned();
 
     let (s, b) = app
@@ -584,7 +621,9 @@ async fn telemetry_series() {
 
     // 5-minute buckets land on settlement boundaries.
     let (s, b) = app
-        .get(&format!("/v1/telemetry/homes/{home_id}/series?resolution=5m"))
+        .get(&format!(
+            "/v1/telemetry/homes/{home_id}/series?resolution=5m"
+        ))
         .await;
     assert_eq!(s, StatusCode::OK);
     for t in b["t"].as_array().unwrap() {
@@ -594,7 +633,9 @@ async fn telemetry_series() {
 
     // Unknown field -> 400.
     let (s, b) = app
-        .get(&format!("/v1/telemetry/homes/{home_id}/series?fields=bogus"))
+        .get(&format!(
+            "/v1/telemetry/homes/{home_id}/series?fields=bogus"
+        ))
         .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 

@@ -18,7 +18,7 @@ use crate::problem::{ApiResult, Problem};
 use crate::state::{AppState, FleetEntry, HomeEntry};
 
 use super::{
-    body_hash, decode_cursor, encode_cursor, idempotent, idempotency_key, page_ids, ValidJson,
+    body_hash, decode_cursor, encode_cursor, idempotency_key, idempotent, page_ids, ValidJson,
     ValidQuery,
 };
 
@@ -142,10 +142,7 @@ async fn create_fleet_inner(
     }
     let idxs = state
         .engine
-        .call(|tx| EngineMsg::AddHomes {
-            homes,
-            reply: tx,
-        })
+        .call(|tx| EngineMsg::AddHomes { homes, reply: tx })
         .await?;
     for (entry, idx) in entries.iter_mut().zip(idxs) {
         entry.idx = idx;
@@ -255,7 +252,9 @@ pub async fn get_fleet(
         // would otherwise answer GET with a misleading 404.
         return Err(super::method_not_allowed_problem("POST"));
     }
-    let entry = state.fleet(&id).ok_or_else(|| Problem::not_found("fleet", &id))?;
+    let entry = state
+        .fleet(&id)
+        .ok_or_else(|| Problem::not_found("fleet", &id))?;
     Ok(Json(fleet_doc(&entry)))
 }
 
@@ -286,7 +285,9 @@ async fn expand_fleet_impl(
     id: String,
     req: ExpandFleetRequest,
 ) -> ApiResult<FleetDoc> {
-    let entry = state.fleet(&id).ok_or_else(|| Problem::not_found("fleet", &id))?;
+    let entry = state
+        .fleet(&id)
+        .ok_or_else(|| Problem::not_found("fleet", &id))?;
     let ordinal_base = u64::from(entry.expanded_count);
     let mut manifest = entry.manifest.clone();
     manifest.count = req.count;
@@ -336,10 +337,7 @@ async fn expand_fleet_impl(
     }
     let idxs = state
         .engine
-        .call(|tx| EngineMsg::AddHomes {
-            homes,
-            reply: tx,
-        })
+        .call(|tx| EngineMsg::AddHomes { homes, reply: tx })
         .await?;
     if let Ok(mut fleets) = state.fleets.write() {
         if let Some(f) = fleets.get_mut(&id) {
@@ -378,7 +376,9 @@ pub async fn delete_fleet(
     if id.contains(':') {
         return Err(super::method_not_allowed_problem("POST"));
     }
-    let entry = state.fleet(&id).ok_or_else(|| Problem::not_found("fleet", &id))?;
+    let entry = state
+        .fleet(&id)
+        .ok_or_else(|| Problem::not_found("fleet", &id))?;
     let status = state
         .engine
         .call(|tx| EngineMsg::Status { reply: tx })

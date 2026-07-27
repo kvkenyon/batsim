@@ -51,7 +51,9 @@ pub async fn health(State(state): State<AppState>) -> ApiResult<Json<HealthDoc>>
 pub async fn version(State(state): State<AppState>) -> Json<VersionDoc> {
     Json(VersionDoc {
         version: env!("CARGO_PKG_VERSION").to_owned(),
-        git_sha: option_env!("BATSIM_GIT_SHA").unwrap_or("unknown").to_owned(),
+        git_sha: option_env!("BATSIM_GIT_SHA")
+            .unwrap_or("unknown")
+            .to_owned(),
         registry_version: state.registry.manifest().registry_version.clone(),
         openapi_version: "3.1.0".to_owned(),
     })

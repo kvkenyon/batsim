@@ -142,32 +142,66 @@ struct ApiDoc;
 pub fn build_openapi(registry: &batsim_registry::Registry) -> utoipa::openapi::OpenApi {
     let doc = ApiDoc::openapi();
     let mut value = serde_json::to_value(&doc).unwrap_or_default();
-    let battery_ids: Vec<String> = registry
-        .batteries()
-        .map(|b| b.model_id.clone())
-        .collect();
-    let inverter_ids: Vec<String> = registry
-        .inverters()
-        .map(|i| i.model_id.clone())
-        .collect();
+    patch_enums(&mut value, registry);
+    patch_compound_schemas(&mut value);
+    // utoipa renders u64 as signed int64, which mis-bounds every
+    // unsigned field (seeds, ticks, timeouts). Rewrite them as unsigned.
+    fix_unsigned_integers(&mut value);
+    match serde_json::from_value(value) {
+        Ok(doc) => doc,
+        Err(e) => {
+            debug_assert!(false, "patched OpenAPI must deserialize: {e}");
+            ApiDoc::openapi()
+        }
+    }
+}
+
+/// Replace identifier fields with catalog-driven enums.
+fn patch_enums(value: &mut serde_json::Value, registry: &batsim_registry::Registry) {
+    let battery_ids: Vec<String> = registry.batteries().map(|b| b.model_id.clone()).collect();
+    let inverter_ids: Vec<String> = registry.inverters().map(|i| i.model_id.clone()).collect();
 
     patch(
-        &mut value,
+        value,
         &[
-            ("BatterySpec", "model_id", battery_ids.iter().map(String::as_str).collect()),
-            ("InverterSpec", "model_id", inverter_ids.iter().map(String::as_str).collect()),
+            (
+                "BatterySpec",
+                "model_id",
+                battery_ids.iter().map(String::as_str).collect(),
+            ),
+            (
+                "InverterSpec",
+                "model_id",
+                inverter_ids.iter().map(String::as_str).collect(),
+            ),
             ("LoadSpec", "archetype", crate::compose::ARCHETYPES.to_vec()),
-            ("LocationSpec", "ercot_load_zone", crate::compose::LOAD_ZONES.to_vec()),
+            (
+                "LocationSpec",
+                "ercot_load_zone",
+                crate::compose::LOAD_ZONES.to_vec(),
+            ),
             (
                 "LocationSpec",
                 "climate_zone",
-                ["2A", "3A", "3B", "4A", "gulf_coast", "central", "north", "west"].to_vec(),
+                [
+                    "2A",
+                    "3A",
+                    "3B",
+                    "4A",
+                    "gulf_coast",
+                    "central",
+                    "north",
+                    "west",
+                ]
+                .to_vec(),
             ),
         ],
     );
-    if let Some(target) = value
-        .pointer_mut("/components/schemas/TargetSpec")
-    {
+}
+
+/// Patch schemas whose shape derives cannot express.
+fn patch_compound_schemas(value: &mut serde_json::Value) {
+    if let Some(target) = value.pointer_mut("/components/schemas/TargetSpec") {
         *target = serde_json::json!({
             "description": "Dispatch target set: a fleet id, explicit home ids, or both.",
             "anyOf": [
@@ -214,16 +248,24 @@ pub fn build_openapi(registry: &batsim_registry::Registry) -> utoipa::openapi::O
             ]
         });
     }
-    if let Some(zones) = value.pointer_mut("/components/schemas/GeoSpec/properties/ercot_load_zones") {
+    if let Some(zones) =
+        value.pointer_mut("/components/schemas/GeoSpec/properties/ercot_load_zones")
+    {
         zones["minProperties"] = serde_json::json!(1);
     }
     // Problem documents may carry extension members (RFC 9457).
     if let Some(problem) = value.pointer_mut("/components/schemas/Problem") {
         problem["additionalProperties"] = serde_json::json!(true);
     }
-    // ScenarioDoc flattens the request; the request schema's
-    // additionalProperties: false must not swallow the document fields.
-    let req_schema = value.pointer("/components/schemas/ScenarioRequest").cloned();
+    merge_scenario_doc(value);
+}
+
+/// ScenarioDoc flattens the request; the request schema's
+/// additionalProperties: false must not swallow the document fields.
+fn merge_scenario_doc(value: &mut serde_json::Value) {
+    let req_schema = value
+        .pointer("/components/schemas/ScenarioRequest")
+        .cloned();
     if let (Some(doc_schema), Some(req_schema)) = (
         value.pointer_mut("/components/schemas/ScenarioDoc"),
         req_schema,
@@ -245,16 +287,6 @@ pub fn build_openapi(registry: &batsim_registry::Registry) -> utoipa::openapi::O
         merged["description"] =
             serde_json::json!("Scenario document: the binding plus identity and lifecycle.");
         *doc_schema = merged;
-    }
-    // utoipa renders u64 as signed int64, which mis-bounds every
-    // unsigned field (seeds, ticks, timeouts). Rewrite them as unsigned.
-    fix_unsigned_integers(&mut value);
-    match serde_json::from_value(value) {
-        Ok(doc) => doc,
-        Err(e) => {
-            debug_assert!(false, "patched OpenAPI must deserialize: {e}");
-            ApiDoc::openapi()
-        }
     }
 }
 
@@ -297,7 +329,9 @@ fn fix_unsigned_integers(value: &mut serde_json::Value) {
         serde_json::Value::Object(map) => {
             let integerish = match map.get("type") {
                 Some(serde_json::Value::String(t)) => t == "integer",
-                Some(serde_json::Value::Array(ts)) => ts.iter().any(|t| t.as_str() == Some("integer")),
+                Some(serde_json::Value::Array(ts)) => {
+                    ts.iter().any(|t| t.as_str() == Some("integer"))
+                }
                 _ => false,
             };
             let is_u64_candidate = integerish
@@ -335,9 +369,12 @@ pub fn openapi_document(registry: &batsim_registry::Registry) -> utoipa::openapi
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use utoipa::OpenApi as _;
 
+    /// The generated document must survive a serde roundtrip; the JSON
+    /// patch layer in `build_openapi` depends on that property.
     #[test]
     fn locate_roundtrip_failure() {
         let doc = super::ApiDoc::openapi();

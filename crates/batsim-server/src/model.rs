@@ -102,10 +102,10 @@ impl KwDraw {
             Self::Fixed(v) => *v,
             Self::Range { uniform } => {
                 let width = uniform[1] - uniform[0];
-                if !(width.is_finite() && width > 0.0) {
-                    uniform[0]
-                } else {
+                if width.is_finite() && width > 0.0 {
                     rng.gen_range(uniform[0]..=uniform[1])
+                } else {
+                    uniform[0]
                 }
             }
         }

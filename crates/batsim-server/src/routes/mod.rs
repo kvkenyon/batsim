@@ -115,9 +115,9 @@ where
                 if !v.is_object() && !v.is_null() {
                     return Err(Problem::validation("request body must be a JSON object"));
                 }
-                serde_json::from_value(v)
-                    .map(Self)
-                    .map_err(|e| Problem::validation(format!("Failed to deserialize the JSON body: {e}")))
+                serde_json::from_value(v).map(Self).map_err(|e| {
+                    Problem::validation(format!("Failed to deserialize the JSON body: {e}"))
+                })
             }
             Err(rejection) => Err(Problem::validation(rejection.body_text())),
         }
@@ -172,13 +172,23 @@ pub async fn auth_middleware(
         .or_else(|| req.headers().get("x-api-key").and_then(|v| v.to_str().ok()))
         .map(str::to_owned);
     let Some(key) = key else {
-        return Problem::new(ProblemCode::Unauthorized, StatusCode::UNAUTHORIZED, "Unauthorized")
-            .detail("missing credentials")
-            .into_response();
+        return Problem::new(
+            ProblemCode::Unauthorized,
+            StatusCode::UNAUTHORIZED,
+            "Unauthorized",
+        )
+        .detail("missing credentials")
+        .into_response();
     };
-    if auth.api_keys.iter().any(|k| k.as_bytes().ct_eq(key.as_bytes()).into()) {
-        req.extensions_mut()
-            .insert(Principal(format!("key:{}", crate::config::fingerprint(&key))));
+    if auth
+        .api_keys
+        .iter()
+        .any(|k| k.as_bytes().ct_eq(key.as_bytes()).into())
+    {
+        req.extensions_mut().insert(Principal(format!(
+            "key:{}",
+            crate::config::fingerprint(&key)
+        )));
         return next.run(req).await;
     }
     if auth
@@ -187,17 +197,27 @@ pub async fn auth_middleware(
         .any(|k| k.as_bytes().ct_eq(key.as_bytes()).into())
     {
         if req.method() != Method::GET && req.method() != Method::HEAD {
-            return Problem::new(ProblemCode::Unauthorized, StatusCode::FORBIDDEN, "Forbidden")
-                .detail("read-only key may only call GET/HEAD")
-                .into_response();
+            return Problem::new(
+                ProblemCode::Unauthorized,
+                StatusCode::FORBIDDEN,
+                "Forbidden",
+            )
+            .detail("read-only key may only call GET/HEAD")
+            .into_response();
         }
-        req.extensions_mut()
-            .insert(Principal(format!("ro:{}", crate::config::fingerprint(&key))));
+        req.extensions_mut().insert(Principal(format!(
+            "ro:{}",
+            crate::config::fingerprint(&key)
+        )));
         return next.run(req).await;
     }
-    Problem::new(ProblemCode::Unauthorized, StatusCode::UNAUTHORIZED, "Unauthorized")
-        .detail("invalid credentials")
-        .into_response()
+    Problem::new(
+        ProblemCode::Unauthorized,
+        StatusCode::UNAUTHORIZED,
+        "Unauthorized",
+    )
+    .detail("invalid credentials")
+    .into_response()
 }
 
 /// Extract the principal (middleware always inserts one).
@@ -251,10 +271,8 @@ where
                 Json(rec.body),
             )
                 .into_response();
-            resp.headers_mut().insert(
-                "idempotent-replay",
-                HeaderValue::from_static("true"),
-            );
+            resp.headers_mut()
+                .insert("idempotent-replay", HeaderValue::from_static("true"));
             return Ok(resp);
         }
         return Err(Problem::new(

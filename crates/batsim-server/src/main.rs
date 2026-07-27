@@ -119,7 +119,9 @@ fn main() -> Result<()> {
         scenarios: Arc::new(RwLock::new(std::collections::HashMap::new())),
         active_scenario: Arc::new(RwLock::new(None)),
         audit,
-        idempotency: Arc::new(RwLock::new(IdemStore::new(config.audit.idempotency_ttl_hours))),
+        idempotency: Arc::new(RwLock::new(IdemStore::new(
+            config.audit.idempotency_ttl_hours,
+        ))),
         started: std::time::Instant::now(),
         compose_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
@@ -145,8 +147,8 @@ fn main() -> Result<()> {
 }
 
 fn init_logging(config: &Config) {
-    let filter = EnvFilter::try_new(&config.logging.filter)
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter =
+        EnvFilter::try_new(&config.logging.filter).unwrap_or_else(|_| EnvFilter::new("info"));
     if config.logging.json {
         tracing_subscriber::fmt()
             .json()

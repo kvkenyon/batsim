@@ -18,7 +18,7 @@ use crate::problem::{ApiResult, Problem};
 use crate::state::{AppState, HomeEntry};
 
 use super::{
-    body_hash, decode_cursor, encode_cursor, idempotent, idempotency_key, page_ids, ValidJson,
+    body_hash, decode_cursor, encode_cursor, idempotency_key, idempotent, page_ids, ValidJson,
     ValidQuery,
 };
 
@@ -224,7 +224,11 @@ pub async fn list_homes(
         .read()
         .map_err(|_| Problem::internal())?
         .values()
-        .filter(|h| q.fleet_id.as_ref().is_none_or(|f| h.fleet_id.as_ref() == Some(f)))
+        .filter(|h| {
+            q.fleet_id
+                .as_ref()
+                .is_none_or(|f| h.fleet_id.as_ref() == Some(f))
+        })
         .filter(|h| {
             q.load_zone
                 .as_ref()
@@ -276,7 +280,9 @@ pub async fn get_home(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<HomeDoc>> {
-    let entry = state.home(&id).ok_or_else(|| Problem::not_found("home", &id))?;
+    let entry = state
+        .home(&id)
+        .ok_or_else(|| Problem::not_found("home", &id))?;
     Ok(Json(home_doc(&state, &entry).await?))
 }
 
@@ -299,7 +305,9 @@ pub async fn patch_home(
     Path(id): Path<String>,
     ValidJson(req): ValidJson<PatchHomeRequest>,
 ) -> ApiResult<Json<HomeDoc>> {
-    let entry = state.home(&id).ok_or_else(|| Problem::not_found("home", &id))?;
+    let entry = state
+        .home(&id)
+        .ok_or_else(|| Problem::not_found("home", &id))?;
     if let Some(r) = req.reserve_soc {
         if !(0.0..=1.0).contains(&r) {
             return Err(Problem::validation("reserve_soc must be within 0..=1"));
@@ -343,7 +351,9 @@ pub async fn delete_home(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<OkDoc>> {
-    let entry = state.home(&id).ok_or_else(|| Problem::not_found("home", &id))?;
+    let entry = state
+        .home(&id)
+        .ok_or_else(|| Problem::not_found("home", &id))?;
     let status = state
         .engine
         .call(|tx| EngineMsg::Status { reply: tx })

@@ -106,9 +106,9 @@ impl PriceSource {
                     amplitude: *amplitude_per_mwh,
                 })
             }
-            PriceSourceSpec::Replay { .. } => Err(
-                "price replay is not available yet; use `static` or `synthetic`".to_owned(),
-            ),
+            PriceSourceSpec::Replay { .. } => {
+                Err("price replay is not available yet; use `static` or `synthetic`".to_owned())
+            }
         }
     }
 

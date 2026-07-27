@@ -20,7 +20,7 @@ use crate::state::{AppState, ScenarioEntry};
 
 use super::fleets::now_rfc3339;
 use super::{
-    body_hash, decode_cursor, encode_cursor, idempotent, idempotency_key, page_ids, ValidJson,
+    body_hash, decode_cursor, encode_cursor, idempotency_key, idempotent, page_ids, ValidJson,
     ValidQuery,
 };
 
@@ -70,7 +70,9 @@ fn validate_scenario(req: &ScenarioRequest) -> ApiResult<(u64, u64, u32)> {
     }
     let tick_s = req.time.tick_seconds.unwrap_or(1);
     if !(1..=60).contains(&tick_s) {
-        return Err(Problem::validation("time.tick_seconds must be within 1..=60"));
+        return Err(Problem::validation(
+            "time.tick_seconds must be within 1..=60",
+        ));
     }
     PriceSource::resolve(&req.prices).map_err(Problem::unprocessable)?;
     if matches!(req.weather, Some(WeatherSpec::Replay { .. })) {

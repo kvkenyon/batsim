@@ -10,8 +10,8 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use futures_util::StreamExt;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+use tokio_stream::wrappers::BroadcastStream;
 
 use crate::engine::{EngineMsg, SimEvent, TickEvent};
 use crate::model::{
@@ -75,12 +75,11 @@ fn parse_range(q: &SeriesParams, now_unix: u64) -> ApiResult<(u64, u64)> {
         .map(|s| crate::engine::unix_of(s).map_err(|e| Problem::validation(format!("from: {e}"))))
         .transpose()?
         .unwrap_or(0);
-    let to = q
-        .to
-        .as_deref()
-        .map(|s| crate::engine::unix_of(s).map_err(|e| Problem::validation(format!("to: {e}"))))
-        .transpose()?
-        .unwrap_or(now_unix.saturating_add(1));
+    let to =
+        q.to.as_deref()
+            .map(|s| crate::engine::unix_of(s).map_err(|e| Problem::validation(format!("to: {e}"))))
+            .transpose()?
+            .unwrap_or(now_unix.saturating_add(1));
     if to <= from {
         return Err(Problem::validation("`to` must be after `from`"));
     }
@@ -107,7 +106,9 @@ pub async fn home_series(
     Path(id): Path<String>,
     ValidQuery(q): ValidQuery<SeriesParams>,
 ) -> ApiResult<Json<SeriesResponse>> {
-    let entry = state.home(&id).ok_or_else(|| Problem::not_found("home", &id))?;
+    let entry = state
+        .home(&id)
+        .ok_or_else(|| Problem::not_found("home", &id))?;
     let fields = parse_fields(q.fields.as_deref())?;
     let resolution = q.resolution.unwrap_or(Resolution::M1);
     let status = state
@@ -173,7 +174,9 @@ pub async fn fleet_series(
     Path(id): Path<String>,
     ValidQuery(q): ValidQuery<SeriesParams>,
 ) -> ApiResult<Json<SeriesResponse>> {
-    let fleet = state.fleet(&id).ok_or_else(|| Problem::not_found("fleet", &id))?;
+    let fleet = state
+        .fleet(&id)
+        .ok_or_else(|| Problem::not_found("fleet", &id))?;
     let fields = parse_fields(q.fields.as_deref())?;
     let resolution = q.resolution.unwrap_or(Resolution::M1);
     let agg = q.agg.unwrap_or(FleetAgg::Sum);
@@ -320,7 +323,11 @@ impl StreamFilter {
         let mut fleets: Vec<_> = ev
             .fleets
             .iter()
-            .filter(|f| self.fleet_id.as_ref().is_none_or(|want| &f.fleet_id == want))
+            .filter(|f| {
+                self.fleet_id
+                    .as_ref()
+                    .is_none_or(|want| &f.fleet_id == want)
+            })
             .collect();
         if self.fleet_id.is_some() && fleets.is_empty() {
             fleets = Vec::new();

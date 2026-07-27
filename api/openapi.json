@@ -1,0 +1,4404 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "batsim",
+    "description": "Residential battery fleet simulator: physics-faithful virtual homes behind an OpenAPI-first HTTP API for dispatch-strategy testing (ERCOT).",
+    "license": {
+      "name": "MIT OR Apache-2.0",
+      "identifier": "MIT OR Apache-2.0"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/v1/dispatch": {
+      "post": {
+        "tags": [
+          "dispatch"
+        ],
+        "summary": "Send a command to a home/fleet subset.",
+        "operationId": "dispatch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Command accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown target",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Empty target set",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/dispatch/commands": {
+      "get": {
+        "tags": [
+          "dispatch"
+        ],
+        "summary": "Audit log.",
+        "operationId": "list_commands",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 1000,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Continuation cursor.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$"
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "description": "Filter by target home id.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Filter by rollup status.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CommandStatus"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Only commands accepted at or after this RFC 3339 time.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of commands",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/dispatch/commands/{command_id}": {
+      "get": {
+        "tags": [
+          "dispatch"
+        ],
+        "summary": "Command status and per-target execution detail.",
+        "operationId": "get_command",
+        "parameters": [
+          {
+            "name": "command_id",
+            "in": "path",
+            "description": "Command id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The command",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown command",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "dispatch"
+        ],
+        "summary": "Cancel a command's still-queued targets.",
+        "operationId": "cancel_command",
+        "parameters": [
+          {
+            "name": "command_id",
+            "in": "path",
+            "description": "Command id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Command cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown command",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Command already finished",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fleets": {
+      "get": {
+        "tags": [
+          "fleets"
+        ],
+        "summary": "List fleets.",
+        "operationId": "list_fleets",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (1..=1000, default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 1000,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque continuation cursor from a previous page.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of fleets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "fleets"
+        ],
+        "summary": "Create a fleet from a manifest.",
+        "operationId": "create_fleet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetManifest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Fleet created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Composition rule violation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fleets/{id}": {
+      "get": {
+        "tags": [
+          "fleets"
+        ],
+        "summary": "Get one fleet.",
+        "operationId": "get_fleet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Fleet id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The fleet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown fleet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "fleets"
+        ],
+        "summary": "Delete a fleet and its homes.",
+        "operationId": "delete_fleet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Fleet id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fleet deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown fleet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Simulation is running",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fleets/{id}:dispatch": {
+      "post": {
+        "tags": [
+          "fleets"
+        ],
+        "summary": "Dispatch to every home in a fleet.",
+        "operationId": "dispatch_fleet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Fleet id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetDispatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Command accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown fleet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fleets/{id}:expand": {
+      "post": {
+        "tags": [
+          "fleets"
+        ],
+        "summary": "Expand a fleet from its manifest.",
+        "operationId": "expand_fleet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Fleet id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpandFleetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Expanded fleet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown fleet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Composition rule violation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/homes": {
+      "get": {
+        "tags": [
+          "homes"
+        ],
+        "summary": "List homes.",
+        "operationId": "list_homes",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 1000,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Continuation cursor.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$"
+            }
+          },
+          {
+            "name": "fleet_id",
+            "in": "query",
+            "description": "Restrict to a fleet.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "description": "Restrict to an operating mode.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/OperatingMode"
+            }
+          },
+          {
+            "name": "load_zone",
+            "in": "query",
+            "description": "Restrict to a load zone.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "battery_model",
+            "in": "query",
+            "description": "Restrict to a battery model.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of homes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomesPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "homes"
+        ],
+        "summary": "Create a home.",
+        "operationId": "create_home",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateHomeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Home created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Fleet not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Composition rule violation",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/homes/{id}": {
+      "get": {
+        "tags": [
+          "homes"
+        ],
+        "summary": "Get one home.",
+        "operationId": "get_home",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Home id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The home",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown home",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "homes"
+        ],
+        "summary": "Delete a home.",
+        "operationId": "delete_home",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Home id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Home deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown home",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Simulation is running",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "homes"
+        ],
+        "summary": "Update mutable home configuration.",
+        "operationId": "patch_home",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Home id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchHomeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated home",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown home",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Simulation is running",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/registry/batteries": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "summary": "List battery models.",
+        "operationId": "list_batteries",
+        "parameters": [
+          {
+            "name": "vendor",
+            "in": "query",
+            "description": "Filter by vendor substring.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min_capacity_kwh",
+            "in": "query",
+            "description": "Minimum usable capacity (kWh).",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          {
+            "name": "max_capacity_kwh",
+            "in": "query",
+            "description": "Maximum usable capacity (kWh).",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          {
+            "name": "chemistry",
+            "in": "query",
+            "description": "Filter by chemistry (`LFP`, `NMC`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Battery catalog entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatteryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/registry/batteries/{model_id}": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "summary": "One battery model, full catalog schema.",
+        "operationId": "get_battery",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "description": "Battery model id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The battery model",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "404": {
+            "description": "Unknown model",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/registry/inverters": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "summary": "List inverter models.",
+        "operationId": "list_inverters",
+        "parameters": [
+          {
+            "name": "vendor",
+            "in": "query",
+            "description": "Filter by vendor substring.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min_power_kw",
+            "in": "query",
+            "description": "Minimum rated power (kW).",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Inverter catalog entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InverterList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/registry/inverters/{model_id}": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "summary": "One inverter model, full catalog schema.",
+        "operationId": "get_inverter",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "description": "Inverter model id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The inverter model",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "404": {
+            "description": "Unknown model",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/registry/version": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "summary": "Catalog version and integrity hash.",
+        "operationId": "catalog_version",
+        "responses": {
+          "200": {
+            "description": "Catalog version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryVersionDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/scenarios": {
+      "get": {
+        "tags": [
+          "scenarios"
+        ],
+        "summary": "List scenarios.",
+        "operationId": "list_scenarios",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (1..=1000, default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 1000,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque continuation cursor from a previous page.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of scenarios",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenariosPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "scenarios"
+        ],
+        "summary": "Create a scenario.",
+        "operationId": "create_scenario",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Scenario created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unavailable data source",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/scenarios/{id}": {
+      "get": {
+        "tags": [
+          "scenarios"
+        ],
+        "summary": "Get one scenario.",
+        "operationId": "get_scenario",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Scenario id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The scenario",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown scenario",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/scenarios/{id}:activate": {
+      "post": {
+        "tags": [
+          "scenarios"
+        ],
+        "summary": "Activate a scenario (requires a stopped simulation).",
+        "operationId": "activate_scenario",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Scenario id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Activated scenario",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown scenario",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Simulation is not stopped",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unavailable data source",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/scenarios/{id}:deactivate": {
+      "post": {
+        "tags": [
+          "scenarios"
+        ],
+        "summary": "Deactivate the active scenario.",
+        "operationId": "deactivate_scenario",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Scenario id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scenario deactivated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown scenario",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Simulation is not stopped or scenario not active",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sim:pause": {
+      "post": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Pause at a tick boundary.",
+        "operationId": "pause",
+        "responses": {
+          "200": {
+            "description": "Simulation paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimStatusDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Illegal transition",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sim:resume": {
+      "post": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Resume from paused.",
+        "operationId": "resume",
+        "responses": {
+          "200": {
+            "description": "Simulation resumed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimStatusDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Illegal transition",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sim:run-until": {
+      "post": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Advance to a target simulation time synchronously while paused.",
+        "operationId": "run_until",
+        "parameters": [
+          {
+            "name": "allow_large",
+            "in": "query",
+            "description": "Permit advances beyond one simulation day.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunUntilRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Advanced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Simulation is not paused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sim:speed": {
+      "put": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Change the speed multiplier.",
+        "operationId": "set_speed",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Speed updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimStatusDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sim:start": {
+      "post": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Begin ticking.",
+        "operationId": "start",
+        "responses": {
+          "200": {
+            "description": "Simulation started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimStatusDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Illegal transition",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sim:status": {
+      "get": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Simulation status.",
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimStatusDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sim:step": {
+      "post": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Advance N ticks synchronously while paused.",
+        "operationId": "step",
+        "parameters": [
+          {
+            "name": "allow_large",
+            "in": "query",
+            "description": "Permit advances beyond one simulation day.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Advanced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Simulation is not paused",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sim:stop": {
+      "post": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Stop (state retained).",
+        "operationId": "stop",
+        "responses": {
+          "200": {
+            "description": "Simulation stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimStatusDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Illegal transition",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/system/config": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Effective configuration with secrets redacted.",
+        "operationId": "config",
+        "responses": {
+          "200": {
+            "description": "Redacted effective configuration",
+            "content": {
+              "application/json": {}
+            }
+          }
+        }
+      }
+    },
+    "/v1/system/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Liveness/readiness.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Server is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/system/version": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Build and catalog versions.",
+        "operationId": "version",
+        "responses": {
+          "200": {
+            "description": "Version information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/telemetry/fleets/{id}/series": {
+      "get": {
+        "tags": [
+          "telemetry"
+        ],
+        "summary": "Aggregated series for a fleet.",
+        "operationId": "fleet_series",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Fleet id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma-separated field list (see the field allow-list).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Range start, sim time (RFC 3339). Default: earliest retained.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Range end, sim time (RFC 3339). Default: latest retained.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Bucket resolution (default 1m).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Resolution"
+            }
+          },
+          {
+            "name": "agg",
+            "in": "query",
+            "description": "Fleet bucket aggregation (fleet series only; default sum).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/FleetAgg"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Columnar series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown fleet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/telemetry/homes/{id}/series": {
+      "get": {
+        "tags": [
+          "telemetry"
+        ],
+        "summary": "Historical series for one home.",
+        "operationId": "home_series",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Home id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "Comma-separated field list (see the field allow-list).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Range start, sim time (RFC 3339). Default: earliest retained.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Range end, sim time (RFC 3339). Default: latest retained.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Bucket resolution (default 1m).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Resolution"
+            }
+          },
+          {
+            "name": "agg",
+            "in": "query",
+            "description": "Fleet bucket aggregation (fleet series only; default sum).",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/FleetAgg"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Columnar series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown home",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/telemetry/stream": {
+      "get": {
+        "tags": [
+          "telemetry"
+        ],
+        "summary": "SSE live stream.",
+        "operationId": "sse_stream",
+        "parameters": [
+          {
+            "name": "fleet_id",
+            "in": "query",
+            "description": "Restrict to a fleet.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "home_ids",
+            "in": "query",
+            "description": "Restrict to specific homes (repeatable; at most 500).",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "`aggregate` for fleet rollups, `raw` for per-home vectors.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "downsample",
+            "in": "query",
+            "description": "Stream at most one event per N ticks (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 18446744073709551615,
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/event-stream of tick and dispatch events"
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown fleet or home",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Raw stream too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/telemetry/ws": {
+      "get": {
+        "tags": [
+          "telemetry"
+        ],
+        "summary": "WebSocket live stream (same messages as SSE; subprotocol\n`batsim.v1+json`).",
+        "operationId": "ws_stream",
+        "parameters": [
+          {
+            "name": "fleet_id",
+            "in": "query",
+            "description": "Restrict to a fleet.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "home_ids",
+            "in": "query",
+            "description": "Restrict to specific homes (repeatable; at most 500).",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "description": "`aggregate` for fleet rollups, `raw` for per-home vectors.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "downsample",
+            "in": "query",
+            "description": "Stream at most one event per N ticks (default 1).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 18446744073709551615,
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "WebSocket upgrade; JSON tick and dispatch messages"
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown fleet or home",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Raw stream too large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ActionSpec": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Charge at a fixed power.",
+            "required": [
+              "kw",
+              "type"
+            ],
+            "properties": {
+              "duration_s": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Hold duration in seconds; the home returns to\nself-consumption afterwards. Omit to hold indefinitely.",
+                "maximum": 18446744073709551615,
+                "minimum": 0
+              },
+              "kw": {
+                "type": "number",
+                "format": "double",
+                "description": "Charge power in kW (> 0).",
+                "exclusiveMinimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "charge_to"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Discharge at a fixed power.",
+            "required": [
+              "kw",
+              "type"
+            ],
+            "properties": {
+              "duration_s": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Hold duration in seconds; the home returns to\nself-consumption afterwards. Omit to hold indefinitely.",
+                "maximum": 18446744073709551615,
+                "minimum": 0
+              },
+              "kw": {
+                "type": "number",
+                "format": "double",
+                "description": "Discharge power in kW (> 0).",
+                "exclusiveMinimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "discharge_to"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Set the backup reserve floor.",
+            "required": [
+              "soc",
+              "type"
+            ],
+            "properties": {
+              "soc": {
+                "type": "number",
+                "format": "double",
+                "description": "Reserve as a fraction of usable energy (0..1).",
+                "maximum": 1,
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "set_reserve_soc"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Switch operating mode.",
+            "required": [
+              "mode",
+              "type"
+            ],
+            "properties": {
+              "mode": {
+                "$ref": "#/components/schemas/OperatingMode",
+                "description": "The new mode."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "set_mode"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Curtail PV output.",
+            "required": [
+              "pct",
+              "type"
+            ],
+            "properties": {
+              "pct": {
+                "type": "number",
+                "format": "double",
+                "description": "Curtailed fraction of output in percent (0..100).",
+                "maximum": 100,
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "curtail_pv"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Clear all overrides: self-consumption mode, no setpoint, no\ncurtailment.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clear_override"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "The dispatch action. Closed union, discriminated by `type`."
+      },
+      "AmbientSpec": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Constant temperature.",
+            "required": [
+              "c",
+              "kind"
+            ],
+            "properties": {
+              "c": {
+                "type": "number",
+                "format": "double",
+                "description": "Temperature in deg C."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "constant"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Diurnal sinusoid peaking mid-afternoon.",
+            "required": [
+              "mean_c",
+              "amplitude_c",
+              "kind"
+            ],
+            "properties": {
+              "amplitude_c": {
+                "type": "number",
+                "format": "double",
+                "description": "Half peak-to-peak swing in deg C."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "diurnal"
+                ]
+              },
+              "mean_c": {
+                "type": "number",
+                "format": "double",
+                "description": "Daily mean temperature in deg C."
+              }
+            }
+          }
+        ],
+        "description": "Ambient temperature feed selection."
+      },
+      "ArchetypeEntry": {
+        "type": "object",
+        "description": "One weighted archetype entry in a fleet manifest.",
+        "required": [
+          "weight",
+          "template"
+        ],
+        "properties": {
+          "template": {
+            "$ref": "#/components/schemas/HomeTemplate",
+            "description": "Home template for this archetype."
+          },
+          "weight": {
+            "type": "number",
+            "format": "double",
+            "description": "Relative weight (need not sum to 1).",
+            "exclusiveMinimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "BatteryList": {
+        "type": "object",
+        "description": "Battery list response.",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatterySummary"
+            },
+            "description": "Entries."
+          }
+        }
+      },
+      "BatterySpec": {
+        "type": "object",
+        "description": "Battery selection for a home.",
+        "required": [
+          "model_id",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of units (>= 1).",
+            "maximum": 16,
+            "minimum": 1
+          },
+          "model_id": {
+            "type": "string",
+            "description": "Battery model id from the device catalog.",
+            "enum": [
+              "enphase.iq_battery_10",
+              "enphase.iq_battery_10c",
+              "enphase.iq_battery_5p",
+              "solaredge.home_battery_400v",
+              "sonnen.ecolinx",
+              "sonnen.sonnenbatterie_10_ac",
+              "sonnen.sonnenbatterie_10_hybrid",
+              "sonnen.sonnencore_plus",
+              "tesla.powerwall_2",
+              "tesla.powerwall_3",
+              "tesla.pw3_expansion_pack"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "BatterySummary": {
+        "type": "object",
+        "description": "Battery catalog summary.",
+        "required": [
+          "model_id",
+          "vendor",
+          "display_name",
+          "chemistry",
+          "coupling",
+          "usable_energy_kwh",
+          "continuous_charge_power_kw",
+          "continuous_discharge_power_kw"
+        ],
+        "properties": {
+          "chemistry": {
+            "type": "string",
+            "description": "Cell chemistry."
+          },
+          "continuous_charge_power_kw": {
+            "type": "number",
+            "format": "double",
+            "description": "Continuous charge power in kW."
+          },
+          "continuous_discharge_power_kw": {
+            "type": "number",
+            "format": "double",
+            "description": "Continuous discharge power in kW."
+          },
+          "coupling": {
+            "type": "string",
+            "description": "Coupling topology."
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "model_id": {
+            "type": "string",
+            "description": "Model id."
+          },
+          "usable_energy_kwh": {
+            "type": "number",
+            "format": "double",
+            "description": "Usable energy in kWh."
+          },
+          "vendor": {
+            "type": "string",
+            "description": "Vendor name."
+          }
+        }
+      },
+      "CommandDoc": {
+        "type": "object",
+        "description": "Audit-log command record.",
+        "required": [
+          "command_id",
+          "status",
+          "created_at",
+          "principal",
+          "request_hash",
+          "request",
+          "targets"
+        ],
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "description": "Command id."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "Wall-clock acceptance time."
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Idempotency key, when supplied."
+          },
+          "principal": {
+            "type": "string",
+            "description": "Requesting principal."
+          },
+          "request": {
+            "$ref": "#/components/schemas/DispatchRequest",
+            "description": "The original request."
+          },
+          "request_hash": {
+            "type": "string",
+            "description": "SHA-256 of the canonical request body."
+          },
+          "status": {
+            "$ref": "#/components/schemas/CommandStatus",
+            "description": "Rollup status."
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TargetExecution"
+            },
+            "description": "Per-target execution detail."
+          }
+        }
+      },
+      "CommandStatus": {
+        "type": "string",
+        "description": "Command rollup status.",
+        "enum": [
+          "queued",
+          "in_flight",
+          "completed",
+          "completed_with_errors",
+          "cancelled"
+        ]
+      },
+      "CommandsPage": {
+        "type": "object",
+        "description": "Page of command records.",
+        "required": [
+          "data",
+          "page"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommandDoc"
+            },
+            "description": "Commands."
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Pagination."
+          }
+        }
+      },
+      "CreateHomeRequest": {
+        "type": "object",
+        "description": "Create-home request.",
+        "required": [
+          "battery",
+          "load",
+          "location"
+        ],
+        "properties": {
+          "battery": {
+            "$ref": "#/components/schemas/BatterySpec",
+            "description": "Battery selection."
+          },
+          "fleet_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fleet to attach the home to (must exist when given)."
+          },
+          "initial_soc": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Initial state of charge (fraction of usable; default 0.5).",
+            "maximum": 1,
+            "minimum": 0
+          },
+          "inverter": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InverterSpec",
+                "description": "Inverter selection (optional; vendor default composed when\nomitted)."
+              }
+            ]
+          },
+          "load": {
+            "$ref": "#/components/schemas/LoadSpec",
+            "description": "Household load."
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationSpec",
+            "description": "Siting."
+          },
+          "pv": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PvSpec",
+                "description": "PV array (optional)."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "DispatchRequest": {
+        "type": "object",
+        "description": "Dispatch request.",
+        "required": [
+          "target",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ActionSpec",
+            "description": "Action."
+          },
+          "command_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Client-supplied command id (ULID/uuid). Retries with the same id\nare deduplicated before enqueue. Server-assigned when omitted."
+          },
+          "execution": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ExecutionSpec",
+                "description": "Execution shaping."
+              }
+            ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/TargetSpec",
+            "description": "Target set."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DispatchResponse": {
+        "type": "object",
+        "description": "Dispatch acceptance response.",
+        "required": [
+          "command_id",
+          "accepted",
+          "targets",
+          "status",
+          "status_url"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "description": "Always true for a 202 response."
+          },
+          "command_id": {
+            "type": "string",
+            "description": "The command id (echoed or server-assigned)."
+          },
+          "status": {
+            "$ref": "#/components/schemas/CommandStatus",
+            "description": "Rollup status at response time."
+          },
+          "status_url": {
+            "type": "string",
+            "description": "Poll URL for execution detail."
+          },
+          "targets": {
+            "type": "integer",
+            "description": "Number of homes targeted.",
+            "minimum": 0
+          }
+        }
+      },
+      "ExecutionSpec": {
+        "type": "object",
+        "description": "Execution shaping for a command.",
+        "properties": {
+          "latency_ms": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LatencySpec",
+                "description": "Per-device execution latency; each home draws its own delay,\nmimicking a vendor cloud API. Default uniform 250..2000 ms."
+              }
+            ]
+          },
+          "ramp": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RampStyle",
+                "description": "Ramp style; only `immediate` is supported."
+              }
+            ]
+          },
+          "timeout_s": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Per-device timeout in seconds (default 30).",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExpandFleetRequest": {
+        "type": "object",
+        "description": "Fleet expansion request.",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Additional homes to create from the fleet's manifest.",
+            "maximum": 10000,
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "FleetAgg": {
+        "type": "string",
+        "description": "Fleet aggregation across homes per bucket.",
+        "enum": [
+          "sum",
+          "mean",
+          "p95"
+        ]
+      },
+      "FleetDispatchRequest": {
+        "type": "object",
+        "description": "Fleet dispatch body: a dispatch request without the target.",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ActionSpec",
+            "description": "Action."
+          },
+          "command_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Client-supplied command id."
+          },
+          "execution": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ExecutionSpec",
+                "description": "Execution shaping."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "FleetDoc": {
+        "type": "object",
+        "description": "Fleet document.",
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "home_count",
+          "expansion_hash",
+          "manifest"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "Wall-clock creation time."
+          },
+          "expansion_hash": {
+            "type": "string",
+            "description": "Content hash of the expansion (verification of determinism)."
+          },
+          "home_count": {
+            "type": "integer",
+            "description": "Current number of homes.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Fleet id."
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/FleetManifest",
+            "description": "The manifest the fleet was created from."
+          },
+          "name": {
+            "type": "string",
+            "description": "Fleet name."
+          }
+        }
+      },
+      "FleetManifest": {
+        "type": "object",
+        "description": "Fleet manifest: archetype x count x load-zone distribution.",
+        "required": [
+          "name",
+          "seed",
+          "archetypes",
+          "count"
+        ],
+        "properties": {
+          "archetypes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArchetypeEntry"
+            },
+            "description": "Weighted home templates.",
+            "minItems": 1
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of homes to create.",
+            "maximum": 10000,
+            "minimum": 1
+          },
+          "geo": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GeoSpec",
+                "description": "Load-zone distribution (default: all `LZ_NORTH`)."
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Fleet name."
+          },
+          "seed": {
+            "type": "integer",
+            "description": "Expansion seed; re-applying the same manifest yields identical\nhomes.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "FleetsPage": {
+        "type": "object",
+        "description": "Page of fleets.",
+        "required": [
+          "data",
+          "page"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetDoc"
+            },
+            "description": "Fleets."
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Pagination."
+          }
+        }
+      },
+      "GeoSpec": {
+        "type": "object",
+        "description": "Geographic distribution.",
+        "required": [
+          "ercot_load_zones"
+        ],
+        "properties": {
+          "ercot_load_zones": {
+            "type": "object",
+            "description": "Load-zone weights, e.g. `{ \"LZ_NORTH\": 0.6, \"LZ_HOUSTON\": 0.4 }`.",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "minProperties": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "HealthDoc": {
+        "type": "object",
+        "description": "Health document.",
+        "required": [
+          "status",
+          "sim_state",
+          "uptime_s",
+          "version"
+        ],
+        "properties": {
+          "sim_state": {
+            "$ref": "#/components/schemas/SimState",
+            "description": "Simulation run state."
+          },
+          "status": {
+            "type": "string",
+            "description": "`ok` when the server is ready."
+          },
+          "uptime_s": {
+            "type": "integer",
+            "description": "Wall-clock uptime in seconds.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          },
+          "version": {
+            "type": "string",
+            "description": "Server version."
+          }
+        }
+      },
+      "HomeConfigDoc": {
+        "type": "object",
+        "description": "Echo of a home's configuration as validated and defaulted.",
+        "required": [
+          "battery",
+          "load_archetype",
+          "ercot_load_zone"
+        ],
+        "properties": {
+          "battery": {
+            "$ref": "#/components/schemas/BatterySpec",
+            "description": "Battery selection."
+          },
+          "controller_model_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Composed controller model id, when any."
+          },
+          "ercot_load_zone": {
+            "type": "string",
+            "description": "ERCOT load zone."
+          },
+          "fleet_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fleet membership, if any."
+          },
+          "inverter_model_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Composed inverter model id, when any."
+          },
+          "load_archetype": {
+            "type": "string",
+            "description": "Load archetype."
+          },
+          "pv_peak_kw": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Resolved PV peak in kW, when PV is present."
+          }
+        }
+      },
+      "HomeDoc": {
+        "type": "object",
+        "description": "Home document.",
+        "required": [
+          "id",
+          "config",
+          "state",
+          "created_at"
+        ],
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/HomeConfigDoc",
+            "description": "Validated configuration."
+          },
+          "created_at": {
+            "type": "string",
+            "description": "Wall-clock creation time."
+          },
+          "id": {
+            "type": "string",
+            "description": "Home id."
+          },
+          "state": {
+            "$ref": "#/components/schemas/HomeStateDoc",
+            "description": "Live state."
+          }
+        }
+      },
+      "HomeStateDoc": {
+        "type": "object",
+        "description": "Live home state.",
+        "required": [
+          "soc",
+          "mode",
+          "battery_power_kw",
+          "pv_power_kw",
+          "load_power_kw",
+          "grid_power_kw",
+          "sim_time",
+          "pv_curtail_frac",
+          "manual_setpoint_kw"
+        ],
+        "properties": {
+          "battery_power_kw": {
+            "type": "number",
+            "format": "double",
+            "description": "Battery-system AC power (kW; + discharge)."
+          },
+          "grid_power_kw": {
+            "type": "number",
+            "format": "double",
+            "description": "Grid exchange (kW; + import)."
+          },
+          "load_power_kw": {
+            "type": "number",
+            "format": "double",
+            "description": "Load power (kW)."
+          },
+          "manual_setpoint_kw": {
+            "type": "number",
+            "format": "double",
+            "description": "Manual-mode setpoint (kW; + discharge)."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/OperatingMode",
+            "description": "Active operating mode."
+          },
+          "pv_curtail_frac": {
+            "type": "number",
+            "format": "double",
+            "description": "Active PV curtailment fraction (0..1)."
+          },
+          "pv_power_kw": {
+            "type": "number",
+            "format": "double",
+            "description": "PV AC power (kW)."
+          },
+          "sim_time": {
+            "type": "string",
+            "description": "Simulation time of the state."
+          },
+          "soc": {
+            "type": "number",
+            "format": "double",
+            "description": "Mean state of charge across battery units."
+          }
+        }
+      },
+      "HomeTemplate": {
+        "type": "object",
+        "description": "A fleet-manifest home template.",
+        "required": [
+          "battery",
+          "load"
+        ],
+        "properties": {
+          "battery": {
+            "$ref": "#/components/schemas/BatterySpec",
+            "description": "Battery selection."
+          },
+          "initial_soc": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Initial state of charge (default 0.5).",
+            "maximum": 1,
+            "minimum": 0
+          },
+          "inverter": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InverterSpec",
+                "description": "Inverter selection (optional)."
+              }
+            ]
+          },
+          "load": {
+            "$ref": "#/components/schemas/LoadSpec",
+            "description": "Household load."
+          },
+          "pv": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PvSpec",
+                "description": "PV array (optional; `peak_kw` may be a uniform range)."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "HomesPage": {
+        "type": "object",
+        "description": "Page of homes.",
+        "required": [
+          "data",
+          "page"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HomeDoc"
+            },
+            "description": "Homes."
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Pagination."
+          }
+        }
+      },
+      "InverterList": {
+        "type": "object",
+        "description": "Inverter list response.",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InverterSummary"
+            },
+            "description": "Entries."
+          }
+        }
+      },
+      "InverterSpec": {
+        "type": "object",
+        "description": "Inverter selection; omitted means \"compose the vendor default\".",
+        "required": [
+          "model_id"
+        ],
+        "properties": {
+          "model_id": {
+            "type": "string",
+            "description": "Inverter model id from the device catalog.",
+            "enum": [
+              "enphase.iq8d_micro",
+              "generic.string_pv_8kw",
+              "solaredge.home_hub_hd_wave",
+              "sonnen.hybrid_inverter_8kw",
+              "tesla.pw3_integrated_hybrid"
+            ]
+          },
+          "quantity": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of units (>= 1).",
+            "maximum": 16,
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "InverterSummary": {
+        "type": "object",
+        "description": "Inverter catalog summary.",
+        "required": [
+          "model_id",
+          "vendor",
+          "display_name",
+          "topology",
+          "rated_ac_output_kw"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "model_id": {
+            "type": "string",
+            "description": "Model id."
+          },
+          "rated_ac_output_kw": {
+            "type": "number",
+            "format": "double",
+            "description": "Rated continuous AC output in kW."
+          },
+          "topology": {
+            "type": "string",
+            "description": "Topology classification."
+          },
+          "vendor": {
+            "type": "string",
+            "description": "Vendor name."
+          }
+        }
+      },
+      "KwDraw": {
+        "anyOf": [
+          {
+            "type": "number",
+            "maximum": 100,
+            "exclusiveMinimum": 0
+          },
+          {
+            "type": "object",
+            "required": [
+              "uniform"
+            ],
+            "properties": {
+              "uniform": {
+                "type": "array",
+                "items": {
+                  "type": "number",
+                  "maximum": 100,
+                  "exclusiveMinimum": 0
+                },
+                "maxItems": 2,
+                "minItems": 2
+              }
+            }
+          }
+        ],
+        "description": "A fixed value in kW, or a uniform range over (0, 100]."
+      },
+      "LatencySpec": {
+        "oneOf": [
+          {
+            "type": "integer",
+            "description": "Fixed latency in milliseconds.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          },
+          {
+            "type": "object",
+            "description": "Uniform draw over `[min, max]` milliseconds.",
+            "required": [
+              "uniform"
+            ],
+            "properties": {
+              "uniform": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "maximum": 18446744073709551615,
+                  "minimum": 0
+                },
+                "description": "Inclusive bounds.",
+                "maxItems": 2,
+                "minItems": 2
+              }
+            }
+          }
+        ],
+        "description": "Latency model for per-device execution."
+      },
+      "LoadSpec": {
+        "type": "object",
+        "description": "Household load selection.",
+        "required": [
+          "archetype"
+        ],
+        "properties": {
+          "annual_kwh": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Target annual consumption in kWh; scales the archetype's floor\narea heuristically when present.",
+            "exclusiveMinimum": 0
+          },
+          "archetype": {
+            "type": "string",
+            "description": "Home archetype name: `sfh_family`, `sfh_family_ev`,\n`sfh_empty_nester`, `sfh_pool`, `townhome`, `apartment`.",
+            "enum": [
+              "sfh_family",
+              "sfh_family_ev",
+              "sfh_empty_nester",
+              "sfh_pool",
+              "townhome",
+              "apartment"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "LocationSpec": {
+        "type": "object",
+        "description": "Home siting.",
+        "required": [
+          "ercot_load_zone"
+        ],
+        "properties": {
+          "climate_zone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Climate zone: IECC-style (`2A`, `3A`, `3B`, `4A`) or a Texas zone\nname (`gulf_coast`, `central`, `north`, `west`). Default `central`.",
+                "enum": [
+                  "2A",
+                  "3A",
+                  "3B",
+                  "4A",
+                  "gulf_coast",
+                  "central",
+                  "north",
+                  "west"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ercot_load_zone": {
+            "type": "string",
+            "description": "ERCOT load zone, e.g. `LZ_NORTH`, `LZ_HOUSTON`, `LZ_WEST`.",
+            "enum": [
+              "LZ_NORTH",
+              "LZ_NORTH_C",
+              "LZ_HOUSTON",
+              "LZ_COAST",
+              "LZ_SOUTH",
+              "LZ_SOUTH_C",
+              "LZ_SOUTHERN",
+              "LZ_AUSTIN",
+              "LZ_WEST",
+              "LZ_FAR_WEST",
+              "LZ_EAST"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "OkDoc": {
+        "type": "object",
+        "description": "Empty success body for action endpoints with nothing to return.",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Always true."
+          }
+        }
+      },
+      "OperatingMode": {
+        "type": "string",
+        "description": "Operating modes a home can be commanded into.",
+        "enum": [
+          "self-consumption",
+          "backup-only",
+          "time-of-use",
+          "grid-services"
+        ]
+      },
+      "OutageSpec": {
+        "type": "object",
+        "description": "A scheduled outage window. Recorded with the scenario; outage physics\n(grid loss, islanding) is applied once the resilience milestone ships.",
+        "required": [
+          "start",
+          "end"
+        ],
+        "properties": {
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Outage end (RFC 3339 UTC)."
+          },
+          "load_zones": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Affected load zones (empty = everywhere)."
+          },
+          "probability": {
+            "type": "number",
+            "format": "double",
+            "description": "Per-home probability of being affected."
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Outage start (RFC 3339 UTC)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PageInfo": {
+        "type": "object",
+        "description": "Cursor pagination envelope.",
+        "required": [
+          "has_more"
+        ],
+        "properties": {
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether more results exist."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque cursor for the next page; null when exhausted."
+          }
+        }
+      },
+      "PatchHomeRequest": {
+        "type": "object",
+        "description": "Mutable home configuration.",
+        "properties": {
+          "mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OperatingMode",
+                "description": "New operating mode."
+              }
+            ]
+          },
+          "reserve_soc": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "New backup reserve floor (fraction of usable).",
+            "maximum": 1,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "PriceSourceSpec": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A single flat price for the whole run.",
+            "required": [
+              "price_per_mwh",
+              "source"
+            ],
+            "properties": {
+              "price_per_mwh": {
+                "type": "number",
+                "format": "double",
+                "description": "Price in $/MWh applied at every tick."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "static"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A deterministic synthetic profile.",
+            "required": [
+              "profile",
+              "source"
+            ],
+            "properties": {
+              "amplitude_per_mwh": {
+                "type": "number",
+                "format": "double",
+                "description": "Peak-to-mean swing amplitude in $/MWh."
+              },
+              "base_price_per_mwh": {
+                "type": "number",
+                "format": "double",
+                "description": "Mean price in $/MWh."
+              },
+              "profile": {
+                "$ref": "#/components/schemas/SyntheticProfile",
+                "description": "Profile shape."
+              },
+              "seed": {
+                "type": "integer",
+                "description": "Seed reserved for stochastic profile extensions.",
+                "maximum": 18446744073709551615,
+                "minimum": 0
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "synthetic"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Historical replay. Not available yet; activating a scenario with\nthis source fails validation until replay data support lands.",
+            "required": [
+              "source"
+            ],
+            "properties": {
+              "date_range": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": false,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "description": "Inclusive date range (ISO 8601 dates) to replay."
+              },
+              "market": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Market (only the real-time market is modeled)."
+              },
+              "settlement_point": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Settlement point / hub."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "replay"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Where settlement prices come from for a scenario."
+      },
+      "Problem": {
+        "type": "object",
+        "description": "RFC 9457 problem document; the only error body the API emits.",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ProblemCode",
+            "description": "Stable machine-readable code."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Specifics of this occurrence."
+          },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The request path that produced the problem."
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HTTP status code.",
+            "minimum": 0
+          },
+          "title": {
+            "type": "string",
+            "description": "Short human-readable summary."
+          },
+          "trace_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Request correlation id (echoed as `X-Request-Id`)."
+          },
+          "type": {
+            "type": "string",
+            "description": "Problem type URN."
+          }
+        },
+        "additionalProperties": true
+      },
+      "ProblemCode": {
+        "type": "string",
+        "description": "Stable machine-readable error codes.",
+        "enum": [
+          "VALIDATION_ERROR",
+          "UNAUTHORIZED",
+          "NOT_FOUND",
+          "CONFLICT",
+          "UNPROCESSABLE",
+          "SIM_RUNNING",
+          "SIM_NOT_RUNNING",
+          "IDEMPOTENCY_KEY_REUSE",
+          "INTERNAL"
+        ]
+      },
+      "PvSpec": {
+        "type": "object",
+        "description": "PV array selection.",
+        "required": [
+          "peak_kw"
+        ],
+        "properties": {
+          "azimuth_deg": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Azimuth in degrees (180 = south); default 180."
+          },
+          "peak_kw": {
+            "$ref": "#/components/schemas/KwDraw",
+            "description": "Array DC nameplate in kW (a fixed value, or a uniform range in\nfleet templates)."
+          },
+          "tilt_deg": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Tilt in degrees; default 25."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RampStyle": {
+        "type": "string",
+        "description": "Ramp styles for power commands.",
+        "enum": [
+          "immediate"
+        ]
+      },
+      "RegistryVersionDoc": {
+        "type": "object",
+        "description": "Catalog version document.",
+        "required": [
+          "registry_version",
+          "schema_version",
+          "catalog_sha256",
+          "batteries",
+          "inverters"
+        ],
+        "properties": {
+          "batteries": {
+            "type": "integer",
+            "description": "Number of battery entries.",
+            "minimum": 0
+          },
+          "catalog_sha256": {
+            "type": "string",
+            "description": "Catalog integrity hash."
+          },
+          "inverters": {
+            "type": "integer",
+            "description": "Number of inverter entries.",
+            "minimum": 0
+          },
+          "registry_version": {
+            "type": "string",
+            "description": "Registry semantic version."
+          },
+          "schema_version": {
+            "type": "string",
+            "description": "Registry JSON schema version."
+          }
+        }
+      },
+      "Resolution": {
+        "type": "string",
+        "description": "Series resolution.",
+        "enum": [
+          "1s",
+          "1m",
+          "5m",
+          "15m",
+          "1h"
+        ]
+      },
+      "RunUntilRequest": {
+        "type": "object",
+        "description": "Run-until request.",
+        "required": [
+          "until"
+        ],
+        "properties": {
+          "until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Target simulation time (RFC 3339 UTC)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScenarioDoc": {
+        "type": "object",
+        "description": "Scenario document: the binding plus identity and lifecycle.",
+        "required": [
+          "name",
+          "time",
+          "prices",
+          "seed",
+          "id",
+          "created_at",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "Scenario name."
+          },
+          "outages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutageSpec"
+            },
+            "description": "Scheduled outages."
+          },
+          "prices": {
+            "$ref": "#/components/schemas/PriceSourceSpec",
+            "description": "Price binding."
+          },
+          "seed": {
+            "type": "integer",
+            "description": "Scenario seed; governs every random draw during the run.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          },
+          "time": {
+            "$ref": "#/components/schemas/ScenarioTime",
+            "description": "Time binding."
+          },
+          "weather": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeatherSpec",
+                "description": "Weather binding (default: synthetic 25 C constant)."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScenarioRequest": {
+        "type": "object",
+        "description": "Scenario creation request (and stored document).",
+        "required": [
+          "name",
+          "time",
+          "prices",
+          "seed"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Scenario name."
+          },
+          "outages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutageSpec"
+            },
+            "description": "Scheduled outages."
+          },
+          "prices": {
+            "$ref": "#/components/schemas/PriceSourceSpec",
+            "description": "Price binding."
+          },
+          "seed": {
+            "type": "integer",
+            "description": "Scenario seed; governs every random draw during the run.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          },
+          "time": {
+            "$ref": "#/components/schemas/ScenarioTime",
+            "description": "Time binding."
+          },
+          "weather": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeatherSpec",
+                "description": "Weather binding (default: synthetic 25 C constant)."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScenarioTime": {
+        "type": "object",
+        "description": "Scenario time binding.",
+        "required": [
+          "start",
+          "end"
+        ],
+        "properties": {
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Run end (RFC 3339 UTC)."
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Run start (RFC 3339 UTC; must be 5-minute aligned)."
+          },
+          "tick_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Tick length in seconds (default 1).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScenariosPage": {
+        "type": "object",
+        "description": "Page of scenarios.",
+        "required": [
+          "data",
+          "page"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScenarioDoc"
+            },
+            "description": "Scenarios."
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Pagination."
+          }
+        }
+      },
+      "SeriesResponse": {
+        "type": "object",
+        "description": "Columnar series response.",
+        "required": [
+          "resolution",
+          "fields",
+          "t",
+          "v"
+        ],
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Column names."
+          },
+          "fleet_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fleet id (fleet series)."
+          },
+          "home_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Home id (home series)."
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/Resolution",
+            "description": "Bucket resolution."
+          },
+          "t": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Bucket start timestamps (RFC 3339 UTC)."
+          },
+          "v": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              }
+            },
+            "description": "Values: `v[row][column]`, aligned with `t` and `fields`."
+          }
+        }
+      },
+      "SimState": {
+        "type": "string",
+        "description": "Simulation run state.",
+        "enum": [
+          "stopped",
+          "running",
+          "paused"
+        ]
+      },
+      "SimStatusDoc": {
+        "type": "object",
+        "description": "Simulation status.",
+        "required": [
+          "state",
+          "sim_time",
+          "tick",
+          "speed",
+          "achieved_speed",
+          "lag_ticks",
+          "queued_commands"
+        ],
+        "properties": {
+          "achieved_speed": {
+            "type": "number",
+            "format": "double",
+            "description": "Measured speed over the recent window."
+          },
+          "active_scenario": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Id of the active scenario, if any."
+          },
+          "lag_ticks": {
+            "type": "integer",
+            "description": "Ticks the scheduler is behind (must return to 0 after bursts).",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          },
+          "queued_commands": {
+            "type": "integer",
+            "description": "Commands waiting in per-home queues.",
+            "minimum": 0
+          },
+          "sim_time": {
+            "type": "string",
+            "description": "Current simulation time (RFC 3339 UTC)."
+          },
+          "speed": {
+            "type": "number",
+            "format": "double",
+            "description": "Configured speed multiplier (0 = as fast as possible)."
+          },
+          "state": {
+            "$ref": "#/components/schemas/SimState",
+            "description": "Run state."
+          },
+          "tick": {
+            "type": "integer",
+            "description": "Current tick index.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          }
+        }
+      },
+      "SpeedRequest": {
+        "type": "object",
+        "description": "Speed change request.",
+        "required": [
+          "multiplier"
+        ],
+        "properties": {
+          "multiplier": {
+            "type": "number",
+            "format": "double",
+            "description": "Sim-seconds per wall-second; 0 = as fast as possible.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "StepRequest": {
+        "type": "object",
+        "description": "Synchronous step request.",
+        "required": [
+          "ticks"
+        ],
+        "properties": {
+          "ticks": {
+            "type": "integer",
+            "description": "Ticks to advance (at most 86400 unless `allow_large=true`).",
+            "maximum": 18446744073709551615,
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "StepResponse": {
+        "type": "object",
+        "description": "Synchronous step / run-until response.",
+        "required": [
+          "sim_time",
+          "tick",
+          "ticks_executed",
+          "wall_ms"
+        ],
+        "properties": {
+          "sim_time": {
+            "type": "string",
+            "description": "Simulation time reached."
+          },
+          "tick": {
+            "type": "integer",
+            "description": "Tick index reached.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          },
+          "ticks_executed": {
+            "type": "integer",
+            "description": "Ticks executed.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          },
+          "wall_ms": {
+            "type": "integer",
+            "description": "Wall-clock milliseconds taken.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          }
+        }
+      },
+      "SyntheticProfile": {
+        "type": "string",
+        "description": "Synthetic price profile shapes.",
+        "enum": [
+          "flat",
+          "summer_peak"
+        ]
+      },
+      "TargetExecution": {
+        "type": "object",
+        "description": "Per-target execution record.",
+        "required": [
+          "home_id",
+          "latency_ms"
+        ],
+        "properties": {
+          "applied_kw": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Applied power in kW measured at execution."
+          },
+          "executed_at_sim_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Simulation time of execution."
+          },
+          "home_id": {
+            "type": "string",
+            "description": "Home id."
+          },
+          "latency_ms": {
+            "type": "integer",
+            "description": "Assigned execution latency in milliseconds.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          },
+          "requested_kw": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Requested power in kW for power actions."
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TargetStatus",
+                "description": "Execution status; null while still queued."
+              }
+            ]
+          }
+        }
+      },
+      "TargetFilter": {
+        "type": "object",
+        "description": "Target filter within a fleet.",
+        "properties": {
+          "mode": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/OperatingMode"
+            },
+            "description": "Only homes in one of these modes."
+          },
+          "soc_gt": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Only homes with SOC strictly above this fraction.",
+            "maximum": 1,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "TargetSpec": {
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "fleet_id"
+            ],
+            "properties": {
+              "filter": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "fleet_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "home_ids": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sample_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "home_ids"
+            ],
+            "properties": {
+              "filter": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "fleet_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "home_ids": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sample_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Dispatch target set: a fleet id, explicit home ids, or both."
+      },
+      "TargetStatus": {
+        "type": "string",
+        "description": "Per-target status.",
+        "enum": [
+          "applied",
+          "partial",
+          "rejected",
+          "timeout",
+          "cancelled"
+        ]
+      },
+      "VersionDoc": {
+        "type": "object",
+        "description": "Version document.",
+        "required": [
+          "version",
+          "git_sha",
+          "registry_version",
+          "openapi_version"
+        ],
+        "properties": {
+          "git_sha": {
+            "type": "string",
+            "description": "Build git SHA (when available)."
+          },
+          "openapi_version": {
+            "type": "string",
+            "description": "OpenAPI version served."
+          },
+          "registry_version": {
+            "type": "string",
+            "description": "Registry version in use."
+          },
+          "version": {
+            "type": "string",
+            "description": "Server version."
+          }
+        }
+      },
+      "WeatherSpec": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Deterministic synthetic ambient feed.",
+            "required": [
+              "ambient",
+              "source"
+            ],
+            "properties": {
+              "ambient": {
+                "$ref": "#/components/schemas/AmbientSpec",
+                "description": "The ambient feed."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "synthetic"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Historical weather replay. Not available yet.",
+            "required": [
+              "source"
+            ],
+            "properties": {
+              "dataset": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Dataset name (reserved)."
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "replay"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Weather binding."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "registry",
+      "description": "Device catalog"
+    },
+    {
+      "name": "homes",
+      "description": "Simulated home CRUD"
+    },
+    {
+      "name": "fleets",
+      "description": "Bulk fleet composition"
+    },
+    {
+      "name": "scenarios",
+      "description": "Simulation run bindings"
+    },
+    {
+      "name": "sim",
+      "description": "Virtual time control"
+    },
+    {
+      "name": "dispatch",
+      "description": "Fleet control commands"
+    },
+    {
+      "name": "telemetry",
+      "description": "History and live streams"
+    },
+    {
+      "name": "system",
+      "description": "Server introspection"
+    }
+  ]
+}

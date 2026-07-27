@@ -192,7 +192,12 @@ impl Config {
     pub fn redacted(&self) -> Self {
         let mut out = self.clone();
         out.auth.api_keys = self.auth.api_keys.iter().map(|k| fingerprint(k)).collect();
-        out.auth.read_only_keys = self.auth.read_only_keys.iter().map(|k| fingerprint(k)).collect();
+        out.auth.read_only_keys = self
+            .auth
+            .read_only_keys
+            .iter()
+            .map(|k| fingerprint(k))
+            .collect();
         out
     }
 }
