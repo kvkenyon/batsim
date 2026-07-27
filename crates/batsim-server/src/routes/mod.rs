@@ -25,7 +25,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::engine::general_purpose::{GeneralPurpose, URL_SAFE_NO_PAD};
 use base64::Engine as _;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -78,14 +78,18 @@ pub fn build_router(state: AppState) -> Router {
         .without_v07_checks()
         .nest("/v1", v1)
         .route("/openapi.yaml", get(serve_openapi_yaml))
-        .merge(SwaggerUi::new("/docs").url("/openapi.json", crate::openapi_document()))
+        .merge(
+            SwaggerUi::new("/docs").url("/openapi.json", crate::openapi_document(&state.registry)),
+        )
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 
-async fn serve_openapi_yaml() -> Response {
-    match crate::openapi_document().to_yaml() {
+async fn serve_openapi_yaml(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Response {
+    match crate::openapi_document(&state.registry).to_yaml() {
         Ok(s) => ([(CONTENT_TYPE, "application/yaml")], s).into_response(),
         Err(_) => Problem::internal().into_response(),
     }
@@ -94,6 +98,8 @@ async fn serve_openapi_yaml() -> Response {
 // ---------- extractors ----------
 
 /// JSON body extractor that maps every rejection to a 400 problem.
+/// Bodies must be JSON objects: serde otherwise accepts positional
+/// arrays for structs, which no endpoint here intends.
 pub struct ValidJson<T>(pub T);
 
 impl<S, T> FromRequest<S> for ValidJson<T>
@@ -104,8 +110,15 @@ where
     type Rejection = Problem;
 
     async fn from_request(req: HttpRequest<Body>, state: &S) -> Result<Self, Self::Rejection> {
-        match Json::<T>::from_request(req, state).await {
-            Ok(Json(v)) => Ok(Self(v)),
+        match Json::<serde_json::Value>::from_request(req, state).await {
+            Ok(Json(v)) => {
+                if !v.is_object() && !v.is_null() {
+                    return Err(Problem::validation("request body must be a JSON object"));
+                }
+                serde_json::from_value(v)
+                    .map(Self)
+                    .map_err(|e| Problem::validation(format!("Failed to deserialize the JSON body: {e}")))
+            }
             Err(rejection) => Err(Problem::validation(rejection.body_text())),
         }
     }
@@ -276,7 +289,26 @@ pub fn idempotency_key(headers: &HeaderMap) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// 405 problem with the RFC 9110 `Allow` header.
+#[must_use]
+pub fn method_not_allowed_problem(allow: &'static str) -> Problem {
+    let mut p = Problem::new(
+        ProblemCode::NotFound,
+        StatusCode::METHOD_NOT_ALLOWED,
+        "Method not allowed",
+    );
+    p.headers = vec![("allow", allow)];
+    p
+}
+
 // ---------- pagination ----------
+
+/// Lenient base64url decoder for cursors: any alphabet string whose
+/// length is not 1 mod 4 decodes; trailing bits are not inspected.
+const CURSOR_ENGINE: GeneralPurpose = GeneralPurpose::new(
+    &base64::alphabet::URL_SAFE,
+    base64::engine::general_purpose::NO_PAD.with_decode_allow_trailing_bits(true),
+);
 
 /// Encode a cursor (opaque, base64url).
 #[must_use]
@@ -284,22 +316,25 @@ pub fn encode_cursor(id: &str) -> String {
     URL_SAFE_NO_PAD.encode(id.as_bytes())
 }
 
-/// Decode a cursor.
+/// Decode a cursor to its raw bytes. Any base64url-decodable value is a
+/// well-formed (if meaningless) cursor; anything else is a 400.
 ///
 /// # Errors
-/// [`Problem::validation`] on malformed input.
-pub fn decode_cursor(cursor: &str) -> ApiResult<String> {
-    let bytes = URL_SAFE_NO_PAD
+/// [`Problem::validation`] on non-base64url input.
+pub fn decode_cursor(cursor: &str) -> ApiResult<Vec<u8>> {
+    CURSOR_ENGINE
         .decode(cursor.as_bytes())
-        .map_err(|_| Problem::validation("malformed cursor"))?;
-    String::from_utf8(bytes).map_err(|_| Problem::validation("malformed cursor"))
+        .map_err(|_| Problem::validation("malformed cursor"))
 }
 
-/// Page a sorted (by id) id list: entries strictly after the cursor.
+/// Page a sorted (by id) id list: entries strictly after the cursor
+/// (byte-wise comparison).
 #[must_use]
-pub fn page_ids(ids: &[String], cursor: Option<&str>, limit: usize) -> (Vec<String>, bool) {
+pub fn page_ids(ids: &[String], cursor: Option<&[u8]>, limit: usize) -> (Vec<String>, bool) {
     let start = cursor.map_or(0, |c| {
-        ids.iter().position(|i| i.as_str() > c).unwrap_or(ids.len())
+        ids.iter()
+            .position(|i| i.as_bytes() > c)
+            .unwrap_or(ids.len())
     });
     let end = (start + limit).min(ids.len());
     (ids[start..end].to_vec(), end < ids.len())

@@ -23,11 +23,14 @@ pub struct PageInfo {
 
 /// Pagination query parameters shared by list endpoints.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct PageParams {
     /// Page size (1..=1000, default 100).
+    #[param(minimum = 1, maximum = 1000)]
     pub limit: Option<u32>,
     /// Opaque continuation cursor from a previous page.
+    #[param(pattern = "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$")]
     pub cursor: Option<String>,
 }
 
@@ -55,6 +58,7 @@ pub struct BatterySpec {
     /// Battery model id from the device catalog.
     pub model_id: String,
     /// Number of units (>= 1).
+    #[schema(minimum = 1, maximum = 16)]
     pub count: u32,
 }
 
@@ -65,6 +69,7 @@ pub struct InverterSpec {
     /// Inverter model id from the device catalog.
     pub model_id: String,
     /// Number of units (>= 1).
+    #[schema(minimum = 1, maximum = 16)]
     #[serde(default = "one")]
     pub quantity: u32,
 }
@@ -82,18 +87,27 @@ pub enum KwDraw {
     /// Uniform draw over `[min, max]` kW.
     Range {
         /// Inclusive range bounds.
+        #[schema(min_items = 2, max_items = 2)]
         uniform: [f64; 2],
     },
 }
 
 impl KwDraw {
     /// Resolve to a fixed value, drawing in the range if needed.
+    /// Ranges are validated before drawing; this never panics.
     #[must_use]
     pub fn resolve(&self, rng: &mut rand_chacha::ChaCha8Rng) -> f64 {
         use rand::Rng;
         match self {
             Self::Fixed(v) => *v,
-            Self::Range { uniform } => rng.gen_range(uniform[0]..=uniform[1]),
+            Self::Range { uniform } => {
+                let width = uniform[1] - uniform[0];
+                if !(width.is_finite() && width > 0.0) {
+                    uniform[0]
+                } else {
+                    rng.gen_range(uniform[0]..=uniform[1])
+                }
+            }
         }
     }
 
@@ -129,6 +143,7 @@ pub struct LoadSpec {
     pub archetype: String,
     /// Target annual consumption in kWh; scales the archetype's floor
     /// area heuristically when present.
+    #[schema(exclusive_minimum = 0.0)]
     pub annual_kwh: Option<f64>,
 }
 
@@ -178,6 +193,7 @@ pub struct CreateHomeRequest {
     /// Siting.
     pub location: LocationSpec,
     /// Initial state of charge (fraction of usable; default 0.5).
+    #[schema(minimum = 0.0, maximum = 1.0)]
     pub initial_soc: Option<f64>,
 }
 
@@ -252,16 +268,20 @@ pub struct PatchHomeRequest {
     /// New operating mode.
     pub mode: Option<OperatingMode>,
     /// New backup reserve floor (fraction of usable).
+    #[schema(minimum = 0.0, maximum = 1.0)]
     pub reserve_soc: Option<f64>,
 }
 
 /// Home list filters.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct HomeListParams {
     /// Page size.
+    #[param(minimum = 1, maximum = 1000)]
     pub limit: Option<u32>,
     /// Continuation cursor.
+    #[param(pattern = "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$")]
     pub cursor: Option<String>,
     /// Restrict to a fleet.
     pub fleet_id: Option<String>,
@@ -280,6 +300,7 @@ pub struct HomeListParams {
 #[serde(deny_unknown_fields)]
 pub struct ArchetypeEntry {
     /// Relative weight (need not sum to 1).
+    #[schema(exclusive_minimum = 0.0)]
     pub weight: f64,
     /// Home template for this archetype.
     pub template: HomeTemplate,
@@ -298,6 +319,7 @@ pub struct HomeTemplate {
     /// Household load.
     pub load: LoadSpec,
     /// Initial state of charge (default 0.5).
+    #[schema(minimum = 0.0, maximum = 1.0)]
     pub initial_soc: Option<f64>,
 }
 
@@ -319,10 +341,12 @@ pub struct FleetManifest {
     /// homes.
     pub seed: u64,
     /// Weighted home templates.
+    #[schema(min_items = 1)]
     pub archetypes: Vec<ArchetypeEntry>,
     /// Load-zone distribution (default: all `LZ_NORTH`).
     pub geo: Option<GeoSpec>,
     /// Number of homes to create.
+    #[schema(minimum = 1, maximum = 10000)]
     pub count: u32,
 }
 
@@ -357,6 +381,7 @@ pub struct FleetsPage {
 #[serde(deny_unknown_fields)]
 pub struct ExpandFleetRequest {
     /// Additional homes to create from the fleet's manifest.
+    #[schema(minimum = 1, maximum = 10000)]
     pub count: u32,
 }
 
@@ -367,8 +392,10 @@ pub struct ExpandFleetRequest {
 #[serde(deny_unknown_fields)]
 pub struct ScenarioTime {
     /// Run start (RFC 3339 UTC; must be 5-minute aligned).
+    #[schema(format = "date-time")]
     pub start: String,
     /// Run end (RFC 3339 UTC).
+    #[schema(format = "date-time")]
     pub end: String,
     /// Tick length in seconds (default 1).
     pub tick_seconds: Option<u32>,
@@ -414,8 +441,10 @@ pub enum WeatherSpec {
 #[serde(deny_unknown_fields)]
 pub struct OutageSpec {
     /// Outage start (RFC 3339 UTC).
+    #[schema(format = "date-time")]
     pub start: String,
     /// Outage end (RFC 3339 UTC).
+    #[schema(format = "date-time")]
     pub end: String,
     /// Affected load zones (empty = everywhere).
     #[serde(default)]
@@ -511,6 +540,7 @@ pub struct SimStatusDoc {
 #[serde(deny_unknown_fields)]
 pub struct StepRequest {
     /// Ticks to advance (at most 86400 unless `allow_large=true`).
+    #[schema(minimum = 1)]
     pub ticks: u64,
 }
 
@@ -532,6 +562,7 @@ pub struct StepResponse {
 #[serde(deny_unknown_fields)]
 pub struct RunUntilRequest {
     /// Target simulation time (RFC 3339 UTC).
+    #[schema(format = "date-time")]
     pub until: String,
 }
 
@@ -540,6 +571,7 @@ pub struct RunUntilRequest {
 #[serde(deny_unknown_fields)]
 pub struct SpeedRequest {
     /// Sim-seconds per wall-second; 0 = as fast as possible.
+    #[schema(minimum = 0.0)]
     pub multiplier: f64,
 }
 
@@ -554,6 +586,7 @@ pub enum LatencySpec {
     /// Uniform draw over `[min, max]` milliseconds.
     Range {
         /// Inclusive bounds.
+        #[schema(min_items = 2, max_items = 2)]
         uniform: [u64; 2],
     },
 }
@@ -565,6 +598,7 @@ pub struct TargetFilter {
     /// Only homes in one of these modes.
     pub mode: Option<Vec<OperatingMode>>,
     /// Only homes with SOC strictly above this fraction.
+    #[schema(minimum = 0.0, maximum = 1.0)]
     pub soc_gt: Option<f64>,
 }
 
@@ -579,6 +613,7 @@ pub struct TargetSpec {
     /// Filter within the resolved set.
     pub filter: Option<TargetFilter>,
     /// Deterministic random sub-sample percentage (0..100].
+    #[schema(exclusive_minimum = 0.0, maximum = 100.0)]
     pub sample_pct: Option<f64>,
 }
 
@@ -589,6 +624,7 @@ pub enum ActionSpec {
     /// Charge at a fixed power.
     ChargeTo {
         /// Charge power in kW (> 0).
+        #[schema(exclusive_minimum = 0.0)]
         kw: f64,
         /// Hold duration in seconds; the home returns to
         /// self-consumption afterwards. Omit to hold indefinitely.
@@ -597,6 +633,7 @@ pub enum ActionSpec {
     /// Discharge at a fixed power.
     DischargeTo {
         /// Discharge power in kW (> 0).
+        #[schema(exclusive_minimum = 0.0)]
         kw: f64,
         /// Hold duration in seconds; the home returns to
         /// self-consumption afterwards. Omit to hold indefinitely.
@@ -605,6 +642,7 @@ pub enum ActionSpec {
     /// Set the backup reserve floor.
     SetReserveSoc {
         /// Reserve as a fraction of usable energy (0..1).
+        #[schema(minimum = 0.0, maximum = 1.0)]
         soc: f64,
     },
     /// Switch operating mode.
@@ -615,6 +653,7 @@ pub enum ActionSpec {
     /// Curtail PV output.
     CurtailPv {
         /// Curtailed fraction of output in percent (0..100).
+        #[schema(minimum = 0.0, maximum = 100.0)]
         pct: f64,
     },
     /// Clear all overrides: self-consumption mode, no setpoint, no
@@ -754,17 +793,21 @@ pub struct CommandsPage {
 
 /// Command audit-log filters.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct CommandListParams {
     /// Page size.
+    #[param(minimum = 1, maximum = 1000)]
     pub limit: Option<u32>,
     /// Continuation cursor.
+    #[param(pattern = "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$")]
     pub cursor: Option<String>,
     /// Filter by target home id.
     pub target: Option<String>,
     /// Filter by rollup status.
     pub status: Option<CommandStatus>,
     /// Only commands accepted at or after this RFC 3339 time.
+    #[param(format = "date-time")]
     pub since: Option<String>,
 }
 
@@ -829,13 +872,16 @@ pub enum FleetAgg {
 
 /// Series query parameters.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct SeriesParams {
     /// Comma-separated field list (see the field allow-list).
     pub fields: Option<String>,
     /// Range start, sim time (RFC 3339). Default: earliest retained.
+    #[param(format = "date-time")]
     pub from: Option<String>,
     /// Range end, sim time (RFC 3339). Default: latest retained.
+    #[param(format = "date-time")]
     pub to: Option<String>,
     /// Bucket resolution (default 1m).
     pub resolution: Option<Resolution>,
@@ -864,6 +910,7 @@ pub struct SeriesResponse {
 
 /// Live-stream query parameters.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct StreamParams {
     /// Restrict to a fleet.
@@ -916,6 +963,7 @@ pub struct InverterSummary {
 
 /// Battery list filters.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct BatteryListParams {
     /// Filter by vendor substring.
@@ -930,6 +978,7 @@ pub struct BatteryListParams {
 
 /// Inverter list filters.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct InverterListParams {
     /// Filter by vendor substring.

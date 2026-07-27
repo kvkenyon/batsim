@@ -65,7 +65,7 @@ fn transition_error(msg: String, current: SimState) -> Problem {
     path = "/v1/sim:start",
     responses(
         (status = 200, description = "Simulation started", body = SimStatusDoc),
-        (status = 409, description = "Illegal transition", body = crate::problem::Problem),
+        (status = 409, description = "Illegal transition", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "sim"
 )]
@@ -84,7 +84,7 @@ pub async fn start(State(state): State<AppState>) -> ApiResult<Json<SimStatusDoc
     path = "/v1/sim:pause",
     responses(
         (status = 200, description = "Simulation paused", body = SimStatusDoc),
-        (status = 409, description = "Illegal transition", body = crate::problem::Problem),
+        (status = 409, description = "Illegal transition", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "sim"
 )]
@@ -104,7 +104,7 @@ pub async fn pause(State(state): State<AppState>) -> ApiResult<Json<SimStatusDoc
     path = "/v1/sim:resume",
     responses(
         (status = 200, description = "Simulation resumed", body = SimStatusDoc),
-        (status = 409, description = "Illegal transition", body = crate::problem::Problem),
+        (status = 409, description = "Illegal transition", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "sim"
 )]
@@ -124,7 +124,7 @@ pub async fn resume(State(state): State<AppState>) -> ApiResult<Json<SimStatusDo
     path = "/v1/sim:stop",
     responses(
         (status = 200, description = "Simulation stopped", body = SimStatusDoc),
-        (status = 409, description = "Illegal transition", body = crate::problem::Problem),
+        (status = 409, description = "Illegal transition", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "sim"
 )]
@@ -140,6 +140,7 @@ pub async fn stop(State(state): State<AppState>) -> ApiResult<Json<SimStatusDoc>
 
 /// `allow_large` query flag shared by step and run-until.
 #[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct AllowLarge {
     /// Permit advances beyond one simulation day.
@@ -165,8 +166,8 @@ fn outcome_doc(o: &StepOutcome) -> StepResponse {
     request_body = StepRequest,
     responses(
         (status = 200, description = "Advanced", body = StepResponse),
-        (status = 400, description = "Validation error", body = crate::problem::Problem),
-        (status = 409, description = "Simulation is not paused", body = crate::problem::Problem),
+        (status = 400, description = "Validation error", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Simulation is not paused", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "sim"
 )]
@@ -211,8 +212,8 @@ pub async fn step(
     request_body = RunUntilRequest,
     responses(
         (status = 200, description = "Advanced", body = StepResponse),
-        (status = 400, description = "Validation error", body = crate::problem::Problem),
-        (status = 409, description = "Simulation is not paused", body = crate::problem::Problem),
+        (status = 400, description = "Validation error", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Simulation is not paused", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "sim"
 )]
@@ -256,7 +257,7 @@ pub async fn run_until(
     request_body = SpeedRequest,
     responses(
         (status = 200, description = "Speed updated", body = SimStatusDoc),
-        (status = 400, description = "Validation error", body = crate::problem::Problem),
+        (status = 400, description = "Validation error", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "sim"
 )]

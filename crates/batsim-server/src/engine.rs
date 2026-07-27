@@ -409,7 +409,14 @@ impl Engine {
         if self.speed <= 0.0 {
             return Duration::ZERO;
         }
-        Duration::from_secs_f64(f64::from(self.world.clock().dt_s()) / self.speed)
+        let secs = f64::from(self.world.clock().dt_s()) / self.speed;
+        // Extreme multipliers are legal inputs: vanishingly small speeds
+        // mean "barely ever tick" (clamped, not infinite) and huge speeds
+        // approach unbounded.
+        if !secs.is_finite() {
+            return Duration::from_secs(3600);
+        }
+        Duration::from_secs_f64(secs.clamp(0.0, 3600.0))
     }
 
     fn reset_pacing(&mut self) {
@@ -871,7 +878,7 @@ impl Engine {
                 if !finished.contains(&p.command_id) {
                     finished.push(p.command_id);
                 }
-            } else if p.execute_at_tick + p.timeout_ticks < tick {
+            } else if p.execute_at_tick.saturating_add(p.timeout_ticks) < tick {
                 self.record_target(
                     &p.command_id,
                     p.target_pos,

@@ -52,7 +52,20 @@ fn latency_ms(spec: Option<&ExecutionSpec>, command_id: &str, home_id: &str) -> 
     match spec.and_then(|e| e.latency_ms) {
         None => rng.gen_range(250..=2000),
         Some(LatencySpec::Fixed(ms)) => ms,
-        Some(LatencySpec::Range { uniform }) => rng.gen_range(uniform[0]..=uniform[1]),
+        Some(LatencySpec::Range { uniform }) => {
+            // `low..=u64::MAX` overflows the inclusive sampler's width
+            // computation; shrink only that edge.
+            if uniform[0] >= uniform[1] {
+                uniform[0]
+            } else {
+                let hi = if uniform[1] == u64::MAX {
+                    uniform[1] - 1
+                } else {
+                    uniform[1]
+                };
+                rng.gen_range(uniform[0]..=hi)
+            }
+        }
     }
 }
 
@@ -178,7 +191,7 @@ fn actions_for(
         tag,
     };
     let revert_at = |ticks_from_now: u64, action| ScheduledDispatch {
-        execute_at_tick: execute_at_tick + ticks_from_now,
+        execute_at_tick: execute_at_tick.saturating_add(ticks_from_now),
         action,
         tag,
     };
@@ -231,9 +244,10 @@ fn actions_for(
     request_body = DispatchRequest,
     responses(
         (status = 202, description = "Command accepted", body = DispatchResponse),
-        (status = 400, description = "Validation error", body = crate::problem::Problem),
-        (status = 404, description = "Unknown target", body = crate::problem::Problem),
-        (status = 409, description = "Idempotency conflict", body = crate::problem::Problem),
+        (status = 400, description = "Validation error", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Unknown target", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Idempotency conflict", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "Empty target set", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "dispatch"
 )]
@@ -305,6 +319,13 @@ async fn dispatch_execute(
     if let Some(pct) = req.target.sample_pct {
         if !(pct.is_finite() && (0.0..=100.0).contains(&pct) && pct > 0.0) {
             return Err(Problem::validation("sample_pct must be within (0, 100]"));
+        }
+    }
+    if let Some(filter) = &req.target.filter {
+        if let Some(floor) = filter.soc_gt {
+            if !(0.0..=1.0).contains(&floor) {
+                return Err(Problem::validation("filter.soc_gt must be within 0..=1"));
+            }
         }
     }
 
@@ -386,7 +407,7 @@ async fn dispatch_execute(
     params(CommandListParams),
     responses(
         (status = 200, description = "Page of commands", body = CommandsPage),
-        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem),
+        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "dispatch"
 )]
@@ -448,7 +469,7 @@ pub async fn list_commands(
     params(("command_id" = String, Path, description = "Command id")),
     responses(
         (status = 200, description = "The command", body = CommandDoc),
-        (status = 404, description = "Unknown command", body = crate::problem::Problem),
+        (status = 404, description = "Unknown command", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "dispatch"
 )]
@@ -470,8 +491,8 @@ pub async fn get_command(
     params(("command_id" = String, Path, description = "Command id")),
     responses(
         (status = 200, description = "Command cancelled", body = OkDoc),
-        (status = 404, description = "Unknown command", body = crate::problem::Problem),
-        (status = 409, description = "Command already finished", body = crate::problem::Problem),
+        (status = 404, description = "Unknown command", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Command already finished", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "dispatch"
 )]

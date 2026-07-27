@@ -225,6 +225,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "sha2",
  "subtle",
  "thiserror",

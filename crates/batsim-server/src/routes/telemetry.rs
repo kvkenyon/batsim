@@ -97,8 +97,8 @@ fn parse_range(q: &SeriesParams, now_unix: u64) -> ApiResult<(u64, u64)> {
     ),
     responses(
         (status = 200, description = "Columnar series", body = SeriesResponse),
-        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem),
-        (status = 404, description = "Unknown home", body = crate::problem::Problem),
+        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Unknown home", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "telemetry"
 )]
@@ -163,8 +163,8 @@ fn percentile(sorted: &mut [f64], p: f64) -> f64 {
     ),
     responses(
         (status = 200, description = "Columnar series", body = SeriesResponse),
-        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem),
-        (status = 404, description = "Unknown fleet", body = crate::problem::Problem),
+        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Unknown fleet", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "telemetry"
 )]
@@ -356,9 +356,9 @@ impl StreamFilter {
     params(StreamParams),
     responses(
         (status = 200, description = "text/event-stream of tick and dispatch events"),
-        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem),
-        (status = 404, description = "Unknown fleet or home", body = crate::problem::Problem),
-        (status = 422, description = "Raw stream too large", body = crate::problem::Problem),
+        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Unknown fleet or home", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "Raw stream too large", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "telemetry"
 )]
@@ -419,9 +419,9 @@ pub async fn sse_stream(
     params(StreamParams),
     responses(
         (status = 101, description = "WebSocket upgrade; JSON tick and dispatch messages"),
-        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem),
-        (status = 404, description = "Unknown fleet or home", body = crate::problem::Problem),
-        (status = 422, description = "Raw stream too large", body = crate::problem::Problem),
+        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Unknown fleet or home", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "Raw stream too large", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "telemetry"
 )]

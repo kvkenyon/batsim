@@ -94,10 +94,10 @@ pub async fn home_doc(state: &AppState, entry: &HomeEntry) -> ApiResult<HomeDoc>
     request_body = CreateHomeRequest,
     responses(
         (status = 201, description = "Home created", body = HomeDoc),
-        (status = 400, description = "Validation error", body = crate::problem::Problem),
-        (status = 404, description = "Fleet not found", body = crate::problem::Problem),
-        (status = 409, description = "Idempotency conflict", body = crate::problem::Problem),
-        (status = 422, description = "Composition rule violation", body = crate::problem::Problem),
+        (status = 400, description = "Validation error", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Fleet not found", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Idempotency conflict", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "Composition rule violation", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "homes"
 )]
@@ -205,7 +205,7 @@ async fn create_home_inner(state: &AppState, req: &CreateHomeRequest) -> ApiResu
     params(HomeListParams),
     responses(
         (status = 200, description = "Page of homes", body = HomesPage),
-        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem),
+        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "homes"
 )]
@@ -268,7 +268,7 @@ pub async fn list_homes(
     params(("id" = String, Path, description = "Home id")),
     responses(
         (status = 200, description = "The home", body = HomeDoc),
-        (status = 404, description = "Unknown home", body = crate::problem::Problem),
+        (status = 404, description = "Unknown home", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "homes"
 )]
@@ -288,9 +288,9 @@ pub async fn get_home(
     request_body = PatchHomeRequest,
     responses(
         (status = 200, description = "Updated home", body = HomeDoc),
-        (status = 400, description = "Validation error", body = crate::problem::Problem),
-        (status = 404, description = "Unknown home", body = crate::problem::Problem),
-        (status = 409, description = "Simulation is running", body = crate::problem::Problem),
+        (status = 400, description = "Validation error", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Unknown home", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Simulation is running", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "homes"
 )]
@@ -334,8 +334,8 @@ pub async fn patch_home(
     params(("id" = String, Path, description = "Home id")),
     responses(
         (status = 200, description = "Home deleted", body = OkDoc),
-        (status = 404, description = "Unknown home", body = crate::problem::Problem),
-        (status = 409, description = "Simulation is running", body = crate::problem::Problem),
+        (status = 404, description = "Unknown home", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Simulation is running", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "homes"
 )]

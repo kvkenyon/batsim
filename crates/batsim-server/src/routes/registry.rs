@@ -30,7 +30,7 @@ pub fn router() -> Router<AppState> {
     params(BatteryListParams),
     responses(
         (status = 200, description = "Battery catalog entries", body = BatteryList),
-        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem),
+        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "registry"
 )]
@@ -80,7 +80,7 @@ pub async fn list_batteries(
     params(("model_id" = String, Path, description = "Battery model id")),
     responses(
         (status = 200, description = "The battery model", content_type = "application/json"),
-        (status = 404, description = "Unknown model", body = crate::problem::Problem),
+        (status = 404, description = "Unknown model", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "registry"
 )]
@@ -103,7 +103,7 @@ pub async fn get_battery(
     params(InverterListParams),
     responses(
         (status = 200, description = "Inverter catalog entries", body = InverterList),
-        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem),
+        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "registry"
 )]
@@ -138,7 +138,7 @@ pub async fn list_inverters(
     params(("model_id" = String, Path, description = "Inverter model id")),
     responses(
         (status = 200, description = "The inverter model", content_type = "application/json"),
-        (status = 404, description = "Unknown model", body = crate::problem::Problem),
+        (status = 404, description = "Unknown model", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "registry"
 )]

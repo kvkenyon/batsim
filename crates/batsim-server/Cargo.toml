@@ -43,6 +43,7 @@ xxhash-rust.workspace = true
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+serde_path_to_error = "0.1"
 
 [lints]
 workspace = true

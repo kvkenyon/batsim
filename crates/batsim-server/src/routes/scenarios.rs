@@ -41,7 +41,8 @@ pub async fn scenario_action(
     Path(rest): Path<String>,
 ) -> ApiResult<Response> {
     let Some((id, action)) = rest.rsplit_once(':') else {
-        return Err(Problem::not_found("route", &rest));
+        // POST on a bare scenario id is not an operation.
+        return Err(super::method_not_allowed_problem("GET"));
     };
     match action {
         "activate" => activate_impl(state, id)
@@ -103,9 +104,9 @@ fn ambient_of(req: &ScenarioRequest) -> AmbientFeed {
     request_body = ScenarioRequest,
     responses(
         (status = 201, description = "Scenario created", body = ScenarioDoc),
-        (status = 400, description = "Validation error", body = crate::problem::Problem),
-        (status = 409, description = "Idempotency conflict", body = crate::problem::Problem),
-        (status = 422, description = "Unavailable data source", body = crate::problem::Problem),
+        (status = 400, description = "Validation error", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Idempotency conflict", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "Unavailable data source", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "scenarios"
 )]
@@ -168,7 +169,7 @@ fn scenario_doc(state: &AppState, entry: &ScenarioEntry) -> ScenarioDoc {
     params(PageParams),
     responses(
         (status = 200, description = "Page of scenarios", body = ScenariosPage),
-        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem),
+        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "scenarios"
 )]
@@ -209,7 +210,7 @@ pub async fn list_scenarios(
     params(("id" = String, Path, description = "Scenario id")),
     responses(
         (status = 200, description = "The scenario", body = ScenarioDoc),
-        (status = 404, description = "Unknown scenario", body = crate::problem::Problem),
+        (status = 404, description = "Unknown scenario", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "scenarios"
 )]
@@ -217,6 +218,11 @@ pub async fn get_scenario(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<ScenarioDoc>> {
+    if id.contains(':') {
+        // Action-suffixed paths are POST-only; the router's catch-all
+        // would otherwise answer GET with a misleading 404.
+        return Err(super::method_not_allowed_problem("POST"));
+    }
     let entry = state
         .scenario(&id)
         .ok_or_else(|| Problem::not_found("scenario", &id))?;
@@ -230,9 +236,9 @@ pub async fn get_scenario(
     params(("id" = String, Path, description = "Scenario id")),
     responses(
         (status = 200, description = "Activated scenario", body = ScenarioDoc),
-        (status = 404, description = "Unknown scenario", body = crate::problem::Problem),
-        (status = 409, description = "Simulation is not stopped", body = crate::problem::Problem),
-        (status = 422, description = "Unavailable data source", body = crate::problem::Problem),
+        (status = 404, description = "Unknown scenario", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Simulation is not stopped", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "Unavailable data source", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "scenarios"
 )]
@@ -283,8 +289,8 @@ async fn activate_impl(state: AppState, id: &str) -> ApiResult<ScenarioDoc> {
     params(("id" = String, Path, description = "Scenario id")),
     responses(
         (status = 200, description = "Scenario deactivated", body = OkDoc),
-        (status = 404, description = "Unknown scenario", body = crate::problem::Problem),
-        (status = 409, description = "Simulation is not stopped or scenario not active", body = crate::problem::Problem),
+        (status = 404, description = "Unknown scenario", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Simulation is not stopped or scenario not active", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "scenarios"
 )]

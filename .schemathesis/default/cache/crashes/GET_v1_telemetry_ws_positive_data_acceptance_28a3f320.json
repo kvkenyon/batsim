@@ -1,0 +1,105 @@
+{
+  "operation": "GET /v1/telemetry/ws",
+  "method": "GET",
+  "path_template": "/v1/telemetry/ws",
+  "fingerprint": "28a3f320",
+  "case_id": "n2NLId",
+  "code_sample": "curl -X GET http://127.0.0.1:18080/v1/telemetry/ws",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:18080/v1/telemetry/ws",
+      "url_template": "http://127.0.0.1:18080/v1/telemetry/ws",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "n2NLId"
+      },
+      "response": {
+        "status_code": 400,
+        "headers": {
+          "content-type": "text/plain; charset=utf-8",
+          "vary": "origin, access-control-request-method, access-control-request-headers",
+          "access-control-allow-origin": "*",
+          "content-length": "43",
+          "date": "Mon, 27 Jul 2026 02:32:34 GMT"
+        },
+        "body": "Connection header did not include 'upgrade'"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "positive_data_acceptance",
+          "status": "failure",
+          "message": "API rejected schema-compliant request\n\nValid data should have been accepted\nExpected: 2xx, 401, 403, 404, 409, 5xx"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 1.5875091776251793e-05,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive"
+        },
+        "phase": {
+          "name": "coverage",
+          "data": {
+            "type": "CoveragePhaseData",
+            "description": "Value null value",
+            "location": null,
+            "parameter": "downsample",
+            "parameter_location": "PATH",
+            "scenario": "null_value"
+          }
+        },
+        "pool_draws": [
+          {
+            "location": "path",
+            "parameter_name": "fleet_id",
+            "resource_name": "FleetDoc",
+            "resource_field": "id",
+            "source_operation": "GET /v1/homes",
+            "source_status": 200
+          }
+        ],
+        "pool_misses": [
+          [
+            "path",
+            "home_ids"
+          ]
+        ],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {
+          "PATH": {
+            "fleet_id": "0",
+            "home_ids": [
+              "0"
+            ],
+            "fields": "0",
+            "downsample": null
+          }
+        }
+      },
+      "path": "/v1/telemetry/ws",
+      "path_parameters": {
+        "fleet_id": "0",
+        "home_ids": "0",
+        "fields": "0",
+        "downsample": "null"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

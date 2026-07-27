@@ -12,7 +12,6 @@ use batsim_core::load::{
 use batsim_core::topology::{build_devices, HomeBuildConfig, PvSiteConfig};
 use batsim_registry::types::Coupling;
 use batsim_registry::{HomeSystem, Registry};
-use rand::Rng;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use xxhash_rust::xxh3::xxh3_64;
@@ -116,6 +115,22 @@ fn climate_zone(s: Option<&str>) -> ApiResult<TxClimateZone> {
     }
 }
 
+/// ERCOT load zones accepted by the API, with representative site
+/// coordinates.
+pub const LOAD_ZONES: &[&str] = &[
+    "LZ_NORTH",
+    "LZ_NORTH_C",
+    "LZ_HOUSTON",
+    "LZ_COAST",
+    "LZ_SOUTH",
+    "LZ_SOUTH_C",
+    "LZ_SOUTHERN",
+    "LZ_AUSTIN",
+    "LZ_WEST",
+    "LZ_FAR_WEST",
+    "LZ_EAST",
+];
+
 /// Approximate site coordinates per ERCOT load zone.
 fn zone_lat_lon(zone: &str) -> Option<(f64, f64)> {
     Some(match zone {
@@ -145,8 +160,8 @@ pub fn compose_home(
     master_seed: u64,
     home_idx: u64,
 ) -> ApiResult<Home> {
-    if plan.battery.count == 0 {
-        return Err(Problem::validation("battery.count must be >= 1"));
+    if plan.battery.count == 0 || plan.battery.count > 16 {
+        return Err(Problem::validation("battery.count must be within 1..=16"));
     }
     if !(0.0..=1.0).contains(&plan.initial_soc) {
         return Err(Problem::validation("initial_soc must be within 0..=1"));
@@ -215,6 +230,9 @@ fn system_doc(registry: &Registry, plan: &HomePlan, home_id: &str) -> ApiResult<
     // DC-coupled hybrids without an integrated inverter.
     let mut inverters = Vec::new();
     if let Some(inv) = &plan.inverter {
+        if inv.quantity == 0 || inv.quantity > 16 {
+            return Err(Problem::validation("inverter.quantity must be within 1..=16"));
+        }
         if registry.inverter(&inv.model_id).is_none() {
             return Err(Problem::validation(format!(
                 "unknown inverter model `{}`",
@@ -307,6 +325,77 @@ fn pv_doc(
     }))
 }
 
+/// Validate a manifest template up front, so a fleet never expands
+/// with an entry no home could compose from.
+fn validate_template(registry: &Registry, t: &HomeTemplate) -> ApiResult<()> {
+    if t.battery.count == 0 || t.battery.count > 16 {
+        return Err(Problem::validation("battery.count must be within 1..=16"));
+    }
+    if registry.battery(&t.battery.model_id).is_none() {
+        return Err(Problem::validation(format!(
+            "unknown battery model `{}`",
+            t.battery.model_id
+        )));
+    }
+    if let Some(inv) = &t.inverter {
+        if inv.quantity == 0 || inv.quantity > 16 {
+            return Err(Problem::validation("inverter.quantity must be within 1..=16"));
+        }
+        if registry.inverter(&inv.model_id).is_none() {
+            return Err(Problem::validation(format!(
+                "unknown inverter model `{}`",
+                inv.model_id
+            )));
+        }
+    }
+    if archetype_load(&t.load.archetype).is_none() {
+        return Err(Problem::validation(format!(
+            "unknown load archetype `{}` (expected one of: {})",
+            t.load.archetype,
+            ARCHETYPES.join(", ")
+        )));
+    }
+    if let Some(soc) = t.initial_soc {
+        if !(0.0..=1.0).contains(&soc) {
+            return Err(Problem::validation("initial_soc must be within 0..=1"));
+        }
+    }
+    if let Some(pv) = &t.pv {
+        match pv.peak_kw {
+            crate::model::KwDraw::Fixed(kw) => {
+                if !(kw.is_finite() && kw > 0.0 && kw <= 100.0) {
+                    return Err(Problem::validation(
+                        "pv.peak_kw must be finite and within (0, 100]",
+                    ));
+                }
+            }
+            crate::model::KwDraw::Range { uniform } => {
+                let ok = uniform[0].is_finite()
+                    && uniform[1].is_finite()
+                    && uniform[0] > 0.0
+                    && uniform[0] <= uniform[1]
+                    && uniform[1] <= 100.0;
+                if !ok {
+                    return Err(Problem::validation(
+                        "pv.peak_kw uniform bounds must be finite, ordered, and within (0, 100]",
+                    ));
+                }
+            }
+        }
+        if let Some(tilt) = pv.tilt_deg {
+            if !(tilt.is_finite() && (0.0..=90.0).contains(&tilt)) {
+                return Err(Problem::validation("pv.tilt_deg must be within 0..=90"));
+            }
+        }
+        if let Some(az) = pv.azimuth_deg {
+            if !(az.is_finite() && (0.0..360.0).contains(&az)) {
+                return Err(Problem::validation("pv.azimuth_deg must be within 0..360"));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Per-home deterministic RNG stream for fleet expansion draws.
 #[must_use]
 pub fn expansion_rng(seed: u64, ordinal: u64) -> ChaCha8Rng {
@@ -317,17 +406,31 @@ pub fn expansion_rng(seed: u64, ordinal: u64) -> ChaCha8Rng {
     ChaCha8Rng::seed_from_u64(xxh3_64(&key))
 }
 
+/// A uniform fraction in `[0, total)` drawn without float samplers
+/// (which panic on degenerate ranges from untrusted manifests).
+fn draw_frac(rng: &mut ChaCha8Rng, total: f64) -> f64 {
+    use rand::Rng;
+    // 53-bit mantissa fraction; never empty, never non-finite.
+    #[allow(clippy::cast_precision_loss)]
+    let frac = (rng.gen::<u64>() >> 11) as f64 / 9_007_199_254_740_992.0;
+    frac * total
+}
+
 /// A fully expanded set of home plans for a manifest (deterministic).
 ///
 /// # Errors
 /// [`Problem::validation`] on malformed manifests (bad weights, empty
-/// archetypes, zero count).
-pub fn expand_manifest(manifest: &FleetManifest, ordinal_base: u64) -> ApiResult<Vec<HomePlan>> {
+/// archetypes, zero count, templates no home could compose from).
+pub fn expand_manifest(
+    registry: &Registry,
+    manifest: &FleetManifest,
+    ordinal_base: u64,
+) -> ApiResult<Vec<HomePlan>> {
     if manifest.count == 0 {
         return Err(Problem::validation("count must be >= 1"));
     }
-    if manifest.count > 100_000 {
-        return Err(Problem::validation("count must be <= 100000 per request"));
+    if manifest.count > 10_000 {
+        return Err(Problem::validation("count must be <= 10000 per request"));
     }
     if manifest.archetypes.is_empty() {
         return Err(Problem::validation("archetypes must not be empty"));
@@ -337,9 +440,13 @@ pub fn expand_manifest(manifest: &FleetManifest, ordinal_base: u64) -> ApiResult
         if !(a.weight.is_finite() && a.weight > 0.0) {
             return Err(Problem::validation("archetype weights must be positive"));
         }
+        validate_template(registry, &a.template)?;
         weights.push(a.weight);
     }
     let total_w: f64 = weights.iter().sum();
+    if !total_w.is_finite() {
+        return Err(Problem::validation("archetype weights overflow"));
+    }
 
     let zones: Vec<(String, f64)> = match &manifest.geo {
         None => vec![("LZ_NORTH".to_owned(), 1.0)],
@@ -361,11 +468,14 @@ pub fn expand_manifest(manifest: &FleetManifest, ordinal_base: u64) -> ApiResult
         }
     };
     let total_z: f64 = zones.iter().map(|(_, w)| w).sum();
+    if !total_z.is_finite() {
+        return Err(Problem::validation("load-zone weights overflow"));
+    }
 
     let mut plans = Vec::with_capacity(manifest.count as usize);
     for i in 0..u64::from(manifest.count) {
         let mut rng = expansion_rng(manifest.seed, ordinal_base + i);
-        let pick: f64 = rng.gen_range(0.0..total_w);
+        let pick = draw_frac(&mut rng, total_w);
         let mut acc = 0.0;
         let mut chosen: &ArchetypeEntry = &manifest.archetypes[0];
         for (entry, w) in manifest.archetypes.iter().zip(&weights) {
@@ -375,7 +485,7 @@ pub fn expand_manifest(manifest: &FleetManifest, ordinal_base: u64) -> ApiResult
                 break;
             }
         }
-        let zpick: f64 = rng.gen_range(0.0..total_z);
+        let zpick = draw_frac(&mut rng, total_z);
         let mut zacc = 0.0;
         let mut zone = &zones[0].0;
         for (z, w) in &zones {

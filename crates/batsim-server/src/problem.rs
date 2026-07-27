@@ -82,7 +82,12 @@ pub struct Problem {
     pub trace_id: Option<String>,
     /// Extension members (e.g. per-target rejection detail).
     #[serde(flatten)]
+    #[schema(ignore)]
     pub extra: serde_json::Map<String, serde_json::Value>,
+    /// Extra response headers (not serialized into the body).
+    #[serde(skip)]
+    #[schema(ignore)]
+    pub headers: Vec<(&'static str, &'static str)>,
 }
 
 impl Problem {
@@ -98,6 +103,7 @@ impl Problem {
             code,
             trace_id: None,
             extra: serde_json::Map::new(),
+            headers: Vec::new(),
         }
     }
 
@@ -172,11 +178,20 @@ impl Problem {
 impl IntoResponse for Problem {
     fn into_response(self) -> Response {
         let status = StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let headers = self.headers.clone();
         let mut resp = (status, Json(self)).into_response();
         resp.headers_mut().insert(
             axum::http::header::CONTENT_TYPE,
             axum::http::HeaderValue::from_static("application/problem+json"),
         );
+        for (name, value) in headers {
+            if let Ok(v) = axum::http::HeaderValue::from_str(value) {
+                resp.headers_mut().insert(
+                    axum::http::header::HeaderName::from_static(name),
+                    v,
+                );
+            }
+        }
         resp
     }
 }

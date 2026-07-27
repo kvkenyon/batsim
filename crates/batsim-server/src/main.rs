@@ -47,7 +47,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.dump_openapi {
-        let doc = batsim_server::openapi_document();
+        let registry = Registry::load(cli.registry_dir.as_deref()).context("load registry")?;
+        let doc = batsim_server::openapi_document(&registry);
         let json = serde_json::to_string_pretty(&doc).context("serialize OpenAPI")?;
         println!("{json}");
         return Ok(());

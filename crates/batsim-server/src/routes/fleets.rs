@@ -45,7 +45,8 @@ pub async fn fleet_action(
     body: axum::body::Bytes,
 ) -> ApiResult<Response> {
     let Some((id, action)) = rest.rsplit_once(':') else {
-        return Err(Problem::not_found("route", &rest));
+        // POST on a bare fleet id is not an operation.
+        return Err(super::method_not_allowed_problem("GET, DELETE"));
     };
     match action {
         "expand" => {
@@ -71,9 +72,9 @@ pub async fn fleet_action(
     request_body = FleetManifest,
     responses(
         (status = 201, description = "Fleet created", body = FleetDoc),
-        (status = 400, description = "Validation error", body = crate::problem::Problem),
-        (status = 409, description = "Idempotency conflict", body = crate::problem::Problem),
-        (status = 422, description = "Composition rule violation", body = crate::problem::Problem),
+        (status = 400, description = "Validation error", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Idempotency conflict", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "Composition rule violation", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "fleets"
 )]
@@ -99,7 +100,7 @@ async fn create_fleet_inner(
     manifest: &FleetManifest,
     ordinal_base: u64,
 ) -> ApiResult<FleetDoc> {
-    let plans = expand_manifest(manifest, ordinal_base)?;
+    let plans = expand_manifest(&state.registry, manifest, ordinal_base)?;
     let fleet_id = ids::new_id(ids::FLEET);
     let _compose_guard = state.compose_lock.lock().await;
     let status = state
@@ -200,7 +201,7 @@ pub fn fleet_doc(entry: &FleetEntry) -> FleetDoc {
     params(PageParams),
     responses(
         (status = 200, description = "Page of fleets", body = FleetsPage),
-        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem),
+        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "fleets"
 )]
@@ -241,7 +242,7 @@ pub async fn list_fleets(
     params(("id" = String, Path, description = "Fleet id")),
     responses(
         (status = 200, description = "The fleet", body = FleetDoc),
-        (status = 404, description = "Unknown fleet", body = crate::problem::Problem),
+        (status = 404, description = "Unknown fleet", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "fleets"
 )]
@@ -249,6 +250,11 @@ pub async fn get_fleet(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<FleetDoc>> {
+    if id.contains(':') {
+        // Action-suffixed paths are POST-only; the router's catch-all
+        // would otherwise answer GET with a misleading 404.
+        return Err(super::method_not_allowed_problem("POST"));
+    }
     let entry = state.fleet(&id).ok_or_else(|| Problem::not_found("fleet", &id))?;
     Ok(Json(fleet_doc(&entry)))
 }
@@ -261,9 +267,9 @@ pub async fn get_fleet(
     request_body = ExpandFleetRequest,
     responses(
         (status = 200, description = "Expanded fleet", body = FleetDoc),
-        (status = 400, description = "Validation error", body = crate::problem::Problem),
-        (status = 404, description = "Unknown fleet", body = crate::problem::Problem),
-        (status = 422, description = "Composition rule violation", body = crate::problem::Problem),
+        (status = 400, description = "Validation error", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Unknown fleet", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 422, description = "Composition rule violation", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "fleets"
 )]
@@ -287,7 +293,7 @@ async fn expand_fleet_impl(
     // Reuse the creation path against a scratch fleet, then fold the
     // new homes into this one. The manifest+seed+ordinal chain keeps
     // the expansion deterministic.
-    let plans = expand_manifest(&manifest, ordinal_base)?;
+    let plans = expand_manifest(&state.registry, &manifest, ordinal_base)?;
     let _compose_guard = state.compose_lock.lock().await;
     let status = state
         .engine
@@ -360,8 +366,8 @@ async fn expand_fleet_impl(
     params(("id" = String, Path, description = "Fleet id")),
     responses(
         (status = 200, description = "Fleet deleted", body = OkDoc),
-        (status = 404, description = "Unknown fleet", body = crate::problem::Problem),
-        (status = 409, description = "Simulation is running", body = crate::problem::Problem),
+        (status = 404, description = "Unknown fleet", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Simulation is running", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "fleets"
 )]
@@ -369,6 +375,9 @@ pub async fn delete_fleet(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<OkDoc>> {
+    if id.contains(':') {
+        return Err(super::method_not_allowed_problem("POST"));
+    }
     let entry = state.fleet(&id).ok_or_else(|| Problem::not_found("fleet", &id))?;
     let status = state
         .engine
@@ -422,9 +431,9 @@ pub struct FleetDispatchRequest {
     request_body = FleetDispatchRequest,
     responses(
         (status = 202, description = "Command accepted", body = DispatchResponse),
-        (status = 400, description = "Validation error", body = crate::problem::Problem),
-        (status = 404, description = "Unknown fleet", body = crate::problem::Problem),
-        (status = 409, description = "Idempotency conflict", body = crate::problem::Problem),
+        (status = 400, description = "Validation error", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 404, description = "Unknown fleet", body = crate::problem::Problem, content_type = "application/problem+json"),
+        (status = 409, description = "Idempotency conflict", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "fleets"
 )]
