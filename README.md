@@ -130,7 +130,37 @@ streams and an upgrade handshake, not request/response pairs.
 - `crates/batsim-registry` — embedded, integrity-checked device catalog.
 - `crates/batsim-server` — axum shell, OpenAPI assembly, engine thread.
 - `crates/batsim-cli` — `batsimctl` admin CLI.
+- `web/` — 3D fleet console (React + TypeScript, MapLibre + three.js).
 - `registry/` — catalog JSON (batteries, inverters, controllers, PV).
 - `api/openapi.json` — vendored API document (CI-checked).
 - `examples/python-e2e/` — generated-client end-to-end drive.
 - `docs/residential-battery-fleet-simulator-spec.md` — the build brief.
+
+## Web console
+
+The `web/` app is a pure client of the HTTP API: a MapLibre map of the
+ERCOT territory with lensable fleet markers, a three.js street-level
+neighborhood driven by live telemetry, and a click-to-inspect panel for
+any home. Its TypeScript API types are generated from the vendored
+OpenAPI document with one command (run from `web/`):
+
+```bash
+npm run gen:client        # openapi-typescript ../api/openapi.json
+```
+
+Regenerate whenever `api/openapi.json` changes; the generated file is
+checked in and never hand-edited. Development workflow:
+
+```bash
+cd web
+npm ci
+npm run dev               # proxies /v1 to localhost:8080
+npm test                  # unit tests
+npm run build             # typecheck + production bundle
+npm run test:e2e          # headless demo-mode smoke test
+```
+
+With no server running the console boots into a demo mode that replays a
+recorded telemetry trace (bundled under `web/public/traces/demo/`) through
+the same ingest pipeline as live data; `?demo=1` forces it. Re-record the
+trace against a fresh world with `npm run record:demo`.
