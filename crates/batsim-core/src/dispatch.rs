@@ -37,6 +37,9 @@ pub enum DispatchAction {
     SetManualSetpoint(f64),
     /// Set the user backup-reserve floor (fraction of usable).
     SetReserve(f64),
+    /// Set the PV curtailment fraction (0 = full output, 1 = fully
+    /// curtailed; lossless at the MPPT).
+    SetPvCurtail(f64),
 }
 
 /// A scheduled dispatch command: applied when the engine reaches
@@ -48,4 +51,8 @@ pub struct ScheduledDispatch {
     pub execute_at_tick: u64,
     /// The action to apply.
     pub action: DispatchAction,
+    /// Opaque issuer tag (0 = untagged). Lets an issuer retract its own
+    /// still-queued commands without disturbing anyone else's.
+    #[serde(default)]
+    pub tag: u64,
 }

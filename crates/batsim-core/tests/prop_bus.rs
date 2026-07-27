@@ -190,6 +190,7 @@ fn materialize(script: &[(u64, Cmd)], max_dis_w: f64, max_chg_w: f64) -> Vec<Sch
             ScheduledDispatch {
                 execute_at_tick,
                 action,
+                tag: 0,
             }
         })
         .collect()

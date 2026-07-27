@@ -26,6 +26,10 @@ pub struct Home {
     devices: HomeDevices,
     mode: ControlMode,
     manual_setpoint_w: f64,
+    #[serde(default)]
+    pv_curtail_frac: f64,
+    #[serde(default)]
+    retired: bool,
     dispatch_queue: Vec<ScheduledDispatch>,
     meters: HomeMeters,
     record_truth: bool,
@@ -60,6 +64,8 @@ impl Home {
             devices,
             mode: ControlMode::SelfConsumption,
             manual_setpoint_w: 0.0,
+            pv_curtail_frac: 0.0,
+            retired: false,
             dispatch_queue: Vec::new(),
             meters: HomeMeters::default(),
             record_truth,
@@ -78,6 +84,32 @@ impl Home {
         self.dispatch_queue.insert(at, cmd);
     }
 
+    /// Retract every still-queued command carrying `tag`; returns the
+    /// number removed. Already-applied commands are untouched.
+    pub fn cancel_tagged(&mut self, tag: u64) -> usize {
+        let before = self.dispatch_queue.len();
+        self.dispatch_queue.retain(|c| c.tag != tag);
+        before - self.dispatch_queue.len()
+    }
+
+    /// Number of commands still queued.
+    #[must_use]
+    pub fn queued_len(&self) -> usize {
+        self.dispatch_queue.len()
+    }
+
+    /// The active control mode.
+    #[must_use]
+    pub const fn mode(&self) -> ControlMode {
+        self.mode
+    }
+
+    /// The manual-mode setpoint (W; + discharge).
+    #[must_use]
+    pub const fn manual_setpoint_w(&self) -> f64 {
+        self.manual_setpoint_w
+    }
+
     /// Set the control mode immediately (synchronous API path for tests).
     pub fn set_mode(&mut self, mode: ControlMode) {
         self.mode = mode;
@@ -93,6 +125,32 @@ impl Home {
         for unit in &mut self.devices.batteries {
             unit.set_reserve_frac(frac);
         }
+    }
+
+    /// Set the PV curtailment fraction (0 = full output, 1 = fully
+    /// curtailed). Curtailment is lossless: the array simply produces
+    /// less, as an MPPT moving off its maximum-power point.
+    pub fn set_pv_curtail_frac(&mut self, frac: f64) {
+        self.pv_curtail_frac = frac.clamp(0.0, 1.0);
+    }
+
+    /// The active PV curtailment fraction.
+    #[must_use]
+    pub fn pv_curtail_frac(&self) -> f64 {
+        self.pv_curtail_frac
+    }
+
+    /// Retire or un-retire the home. A retired home keeps its arena slot
+    /// (indices key every RNG substream, so removal would re-key the
+    /// whole fleet) but skips all physics and telemetry.
+    pub fn set_retired(&mut self, retired: bool) {
+        self.retired = retired;
+    }
+
+    /// Whether the home is retired.
+    #[must_use]
+    pub fn is_retired(&self) -> bool {
+        self.retired
     }
 
     /// The home's meters.
@@ -133,8 +191,12 @@ impl Home {
         &self.truth
     }
 
-    /// Execute one tick of the per-tick pipeline.
+    /// Execute one tick of the per-tick pipeline. Retired homes hold
+    /// their state untouched so fleet edits never perturb neighbors.
     pub fn step(&mut self, tick: u64, unix_time_s: u64, dt_s: u32, t_amb_c: f64) {
+        if self.retired {
+            return;
+        }
         self.apply_due_dispatches(tick);
         let exo = self.stages_load_pv(tick, unix_time_s, dt_s, t_amb_c);
         let p_batt_ac_set = self.stage_dispatch(&exo);
@@ -155,6 +217,7 @@ impl Home {
                 DispatchAction::SetMode(mode) => self.mode = mode,
                 DispatchAction::SetManualSetpoint(p) => self.manual_setpoint_w = p,
                 DispatchAction::SetReserve(frac) => self.set_reserve_frac(frac),
+                DispatchAction::SetPvCurtail(frac) => self.set_pv_curtail_frac(frac),
             }
         }
     }
@@ -173,7 +236,8 @@ impl Home {
             .devices
             .pv
             .as_mut()
-            .map_or(0.0, |pv| pv.dc_power_w(unix_time_s, tick, dt_s, t_amb_c));
+            .map_or(0.0, |pv| pv.dc_power_w(unix_time_s, tick, dt_s, t_amb_c))
+            * (1.0 - self.pv_curtail_frac);
         // Dedicated string inverter: PV converts here (the string-
         // inverter loss point) and never touches the battery path.
         // Hybrid: PV DC lands on the bus and converts in stage 6.
@@ -196,7 +260,7 @@ impl Home {
     /// Stage 4: compute the battery-system AC-boundary setpoint from the
     /// active control mode (W; + discharge).
     fn stage_dispatch(&self, exo: &Exogenous) -> f64 {
-        match self.mode {
+        let out = match self.mode {
             ControlMode::Idle => 0.0,
             ControlMode::Manual => self.manual_setpoint_w,
             ControlMode::SelfConsumption => {
@@ -231,7 +295,8 @@ impl Home {
                     0.0
                 }
             }
-        }
+        };
+        out
     }
 
     /// Stage 5: split the setpoint across ALL units in one AC-boundary
