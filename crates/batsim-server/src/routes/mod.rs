@@ -288,6 +288,10 @@ where
             "a request with this idempotency key is still executing; retry once it completes",
         )),
         crate::state::IdemReservation::Reserved => {
+            let guard = IdemAbortGuard {
+                store: state.idempotency.clone(),
+                key: key.to_owned(),
+            };
             let produced = produce().await;
             let mut store = state.idempotency.write().map_err(|_| Problem::internal())?;
             match produced {
@@ -303,13 +307,33 @@ where
                         },
                     );
                     drop(store);
+                    drop(guard);
                     Ok((status, Json(body)).into_response())
                 }
                 Err(e) => {
                     store.abort(key);
+                    drop(store);
+                    drop(guard);
                     Err(e)
                 }
             }
+        }
+    }
+}
+
+/// Releases an idempotency reservation on drop; `complete`/`abort`
+/// already ran, so the drop-time abort is a no-op on every path except
+/// early return or task cancellation, where it prevents a permanently
+/// stuck key.
+struct IdemAbortGuard {
+    store: std::sync::Arc<std::sync::RwLock<crate::state::IdemStore>>,
+    key: String,
+}
+
+impl Drop for IdemAbortGuard {
+    fn drop(&mut self) {
+        if let Ok(mut store) = self.store.write() {
+            store.abort(&self.key);
         }
     }
 }

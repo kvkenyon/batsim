@@ -913,10 +913,10 @@ pub struct SeriesResponse {
 #[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct StreamParams {
-    /// Restrict to a fleet.
+    /// Restrict to a fleet. Mutually exclusive with `home_ids`.
     pub fleet_id: Option<String>,
     /// Restrict to specific homes (comma-separated; at most 500; raw
-    /// streams only).
+    /// streams only). Mutually exclusive with `fleet_id`.
     pub home_ids: Option<String>,
     /// `aggregate` for fleet rollups, `raw` for per-home vectors.
     pub fields: Option<String>,

@@ -307,6 +307,11 @@ impl StreamFilter {
             })
             .unwrap_or_default();
         if !requested.is_empty() {
+            if q.fleet_id.is_some() {
+                return Err(Problem::validation(
+                    "fleet_id and home_ids are mutually exclusive; send one or the other, not both",
+                ));
+            }
             if !raw {
                 return Err(Problem::validation(
                     "home_ids applies to raw streams only; add `fields=raw`",
