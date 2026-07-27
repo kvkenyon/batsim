@@ -13,10 +13,10 @@ export const HOUSE_DEPTH_M = 11;
 export const HOUSE_WALL_H_M = 5;
 export const HOUSE_ROOF_H_M = 2.6;
 
-/** Ring hovers roughly 4 m above the roof peak of a nominal house. */
-export const RING_ALTITUDE_M = HOUSE_WALL_H_M + HOUSE_ROOF_H_M + 4;
+/** Ring hovers just above the roof peak of a nominal house. */
+export const RING_ALTITUDE_M = HOUSE_WALL_H_M + HOUSE_ROOF_H_M + 1.8;
 export const RING_INNER_M = 3.2;
-export const RING_OUTER_M = 4.0;
+export const RING_OUTER_M = 5.0;
 export const RING_THETA_SEGMENTS = 24;
 
 export const STREET_WIDTH_M = 10;
@@ -89,6 +89,32 @@ export function createPoleGeometry(): THREE.CylinderGeometry {
   const geometry = new THREE.CylinderGeometry(0.14, 0.2, POLE_HEIGHT_M, 8);
   geometry.translate(0, POLE_HEIGHT_M / 2, 0);
   return geometry;
+}
+
+export const BADGE_ALTITUDE_M = RING_ALTITUDE_M + 2.8;
+export const BADGE_SIZE_M = 1.1;
+
+/**
+ * Per-home state badge: a flat triangle (charge = up, discharge = down,
+ * idle = diamond, reserve breach = red triangle). Flat in local XY; the
+ * instance transform billboards it upright and rotates for direction.
+ */
+export function createBadgeGeometry(): THREE.BufferGeometry {
+  const s = BADGE_SIZE_M;
+  const positions = new Float32Array([0, s, 0, -s * 0.87, -s * 0.5, 0, s * 0.87, -s * 0.5, 0]);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), 3));
+  return geometry;
+}
+
+/** Window-glow quad on the street-facing wall of one house. */
+export const WINDOW_WIDTH_M = HOUSE_WIDTH_M * 0.72;
+export const WINDOW_HEIGHT_M = HOUSE_WALL_H_M * 0.5;
+export const WINDOW_Y_M = HOUSE_WALL_H_M * 0.45;
+
+export function createWindowGeometry(): THREE.PlaneGeometry {
+  return new THREE.PlaneGeometry(WINDOW_WIDTH_M, WINDOW_HEIGHT_M);
 }
 
 export interface StreetSegment {

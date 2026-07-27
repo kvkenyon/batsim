@@ -17,6 +17,7 @@ import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
 import { MapControls } from "@react-three/drei";
 import * as THREE from "three";
 import { layoutNeighborhood } from "../procgen/placement";
+import { dayArc } from "../state/dayArc";
 import type { LiveBuffers } from "../state/live";
 import { useAppStore } from "../state/store";
 import { TOKENS } from "../tokens/tokens";
@@ -78,6 +79,36 @@ function StratumHandoff({ controlsRef }: { controlsRef: RefObject<MapControlsRef
     }
   });
   return null;
+}
+
+/**
+ * Binds the scene's light rig, sky, and window glow to the simulated
+ * time of day. Recomputed a few times a second from the live-buffer
+ * clock; at high replay speeds the whole neighborhood time-lapses.
+ */
+function DayArcRig({ live, world }: { live: LiveBuffers; world: NeighborhoodWorld }) {
+  const hemiRef = useRef<THREE.HemisphereLight>(null);
+  const sunRef = useRef<THREE.DirectionalLight>(null);
+  const lastUpdate = useRef(0);
+  useFrame(({ scene, clock }) => {
+    if (clock.elapsedTime - lastUpdate.current < 0.25) return;
+    lastUpdate.current = clock.elapsedTime;
+    const arc = dayArc(live.simTimeMs > 0 ? live.simTimeMs : Date.now());
+    if (hemiRef.current) hemiRef.current.intensity = arc.hemiIntensity;
+    if (sunRef.current) {
+      sunRef.current.intensity = arc.sunIntensity;
+      sunRef.current.color.set(arc.sunColor);
+    }
+    if (scene.background instanceof THREE.Color) scene.background.set(arc.skyColor);
+    if (scene.fog instanceof THREE.Fog) scene.fog.color.set(arc.skyColor);
+    world.setDarkness(arc.darkness);
+  });
+  return (
+    <>
+      <hemisphereLight ref={hemiRef} args={[TOKENS.textPrimary, TOKENS.bgDeep, 0.9]} />
+      <directionalLight ref={sunRef} color="#F2E8D5" intensity={2.2} position={[240, 320, 160]} />
+    </>
+  );
 }
 
 /** Ground-level amber ring marking the selected home's parcel. */
@@ -170,10 +201,9 @@ export default function NeighborhoodView({ live, active }: NeighborhoodViewProps
     >
       <color attach="background" args={[TOKENS.bgBase]} />
       <fog attach="fog" args={[TOKENS.bgDeep, fogNear, fogFar]} />
-      <hemisphereLight args={[TOKENS.textPrimary, TOKENS.bgDeep, 0.9]} />
-      <directionalLight color="#F0DDB8" intensity={2.2} position={[240, 320, 160]} />
       {world !== null ? (
         <>
+          <DayArcRig live={live} world={world} />
           <primitive object={world.groundMesh} onClick={handleGroundClick} />
           <primitive
             object={world.houseMesh}

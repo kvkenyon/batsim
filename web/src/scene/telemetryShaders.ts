@@ -113,6 +113,70 @@ export function createSocRingMaterial(): THREE.ShaderMaterial {
   });
 }
 
+/**
+ * Window glow: one quad per house on the street-facing wall. A per-home
+ * load attribute gates how many window panes are lit; a global darkness
+ * uniform fades the whole effect in at dusk and out at dawn, so the
+ * street lights up exactly when the simulated sun goes down.
+ */
+const WINDOW_VERTEX = /* glsl */ `
+attribute float glow;
+
+varying float vGlow;
+varying vec2 vUv;
+
+void main() {
+  vGlow = glow;
+  vUv = uv;
+  vec4 localPosition = vec4(position, 1.0);
+  #ifdef USE_INSTANCING
+    localPosition = instanceMatrix * localPosition;
+  #endif
+  gl_Position = projectionMatrix * modelViewMatrix * localPosition;
+}
+`;
+
+const WINDOW_FRAGMENT = /* glsl */ `
+uniform float uDarkness;
+uniform vec3 uColor;
+
+varying float vGlow;
+varying vec2 vUv;
+
+void main() {
+  // Two panes per quad; pane brightness jitters with the home's load.
+  float pane = step(0.08, vUv.x) * step(vUv.x, 0.44) + step(0.56, vUv.x) * step(vUv.x, 0.92);
+  float vertical = step(0.15, vUv.y) * step(vUv.y, 0.85);
+  float mask = pane * vertical;
+  if (mask < 0.5) discard;
+  float lit = uDarkness * clamp(vGlow, 0.0, 1.0);
+  if (lit < 0.03) discard;
+  gl_FragColor = vec4(uColor, lit * 0.85);
+}
+`;
+
+export interface WindowMaterialHandle {
+  material: THREE.ShaderMaterial;
+  /** 0 = day (windows dark), 1 = night (windows fully lit by load). */
+  uDarkness: { value: number };
+}
+
+export function createWindowMaterial(): WindowMaterialHandle {
+  const uDarkness = { value: 0 };
+  const material = new THREE.ShaderMaterial({
+    vertexShader: WINDOW_VERTEX,
+    fragmentShader: WINDOW_FRAGMENT,
+    uniforms: {
+      uDarkness,
+      uColor: { value: new THREE.Vector3(...hexToSrgbFloats("#E8C07A")) },
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  return { material, uDarkness };
+}
+
 export interface FlowMaterialHandle {
   material: THREE.ShaderMaterial;
   /** Seconds; advanced every rendered frame so dots animate smoothly. */
@@ -132,7 +196,7 @@ export function createFlowMaterial(): FlowMaterialHandle {
     fragmentShader: FLOW_FRAGMENT,
     uniforms: {
       uTime,
-      uSizePx: { value: 6.0 },
+      uSizePx: { value: 7.0 },
       uExportColor: { value: new THREE.Vector3(...hexToSrgbFloats(TOKENS.energyExport)) },
       uChargeColor: { value: new THREE.Vector3(...hexToSrgbFloats(TOKENS.energyCharge)) },
       uIdleColor: { value: new THREE.Vector3(...hexToSrgbFloats(TOKENS.slateLine)) },

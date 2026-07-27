@@ -7,6 +7,7 @@
 
 import { createBatsimApi, type BatsimApi, type BatterySummary, type HomeDoc } from "../api/client";
 import { homeLngLat, parseZones, type ZoneFeature } from "../procgen/placement";
+import { createLiveController, createReplayController, setController, type SimController } from "./controls";
 import { createIngest } from "./ingest";
 import { createLiveBuffers, type LiveBuffers } from "./live";
 import { setRuntime } from "./runtime";
@@ -90,6 +91,9 @@ function buildHomeMeta(bundle: EntitiesBundle): Record<string, HomeMeta> {
       fleetId: home.config.fleet_id ?? null,
       batteryModelId: modelId,
       batteryDisplayName: summary?.display_name ?? modelId,
+      vendor: summary?.vendor ?? "",
+      chemistry: summary?.chemistry ?? "",
+      coupling: summary?.coupling ?? "",
       batteryCount: home.config.battery.count,
       usableEnergyKwh: summary?.usable_energy_kwh ?? catalogNumber(detail, "usable_energy_kwh") ?? 0,
       reserveFloorFrac: numberAt(detail ?? {}, ["soc_window", "reserve_floor_frac"]) ?? 0,
@@ -115,6 +119,8 @@ function assignPositions(
     live.slotOf.set(home.id, slot);
     live.lng[slot] = lng;
     live.lat[slot] = lat;
+    live.anchorLng[slot] = zone?.anchor[0] ?? fallback[0];
+    live.anchorLat[slot] = zone?.anchor[1] ?? fallback[1];
     live.soc[slot] = home.state.soc;
     live.batteryKw[slot] = home.state.battery_power_kw;
     live.pvKw[slot] = home.state.pv_power_kw;
@@ -190,14 +196,27 @@ async function runBootstrap(options: { forceDemo?: boolean; apiBase?: string }):
   });
 
   const ingest = createIngest(live);
-  const transport: TelemetryTransport = isLive
-    ? new SseTransport({ baseUrl: apiBase, raw: true })
-    : new ReplayTransport({ traceUrl: DEMO_TRACE_URL, speed: 120, loop: true });
+  let transport: TelemetryTransport;
+  let controller: SimController;
+  if (isLive) {
+    transport = new SseTransport({ baseUrl: apiBase, raw: true });
+    controller = createLiveController(api, bundle.homes[0]?.config.fleet_id ?? null);
+  } else {
+    const replay = new ReplayTransport({ traceUrl: DEMO_TRACE_URL, speed: 60, loop: true });
+    transport = replay;
+    controller = createReplayController(replay);
+  }
   void transport.start({
     onEvent: ingest.handleEvent,
-    onOpen: () => store.setState({ lastError: null }),
+    onOpen: () =>
+      store.setState({
+        lastError: null,
+        canReplayDispatch:
+          transport instanceof ReplayTransport ? transport.hasDispatch : false,
+      }),
     onError: (message) => store.setState({ lastError: message }),
   });
+  setController(controller);
 
   const result = { live, transport };
   setRuntime(result);

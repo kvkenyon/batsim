@@ -109,17 +109,33 @@ interface RecordedLine {
   [key: string]: unknown;
 }
 
+/** Price level treated as a jump-worthy price event during replay. */
+const PRICE_EVENT_USD = 75;
+
 /**
  * Replays a recorded trace through the same parser as live data. Lines
  * are indexed once, then emitted on a wall-clock schedule derived from
- * the sim-time gap between consecutive tick frames.
+ * the sim-time gap between consecutive tick frames. The transport is a
+ * full tape deck: pause/resume, live speed changes, and seek jumps to
+ * the next recorded price event or fleet dispatch.
  */
 export class ReplayTransport implements TelemetryTransport {
   readonly kind = "replay" as const;
   private timer: number | null = null;
   private stopped = false;
+  private paused = false;
+  private speed: number;
+  private lines: RecordedLine[] = [];
+  private index = 0;
+  private lastSimMs: number | null = null;
+  private lastWallMs: number | null = null;
+  private handlers: TransportHandlers | null = null;
+  /** True when the trace carries at least one dispatch event. */
+  hasDispatch = false;
 
-  constructor(private readonly options: ReplayTransportOptions) {}
+  constructor(private readonly options: ReplayTransportOptions) {
+    this.speed = options.speed ?? 60;
+  }
 
   async start(handlers: TransportHandlers): Promise<void> {
     this.stopped = false;
@@ -154,42 +170,14 @@ export class ReplayTransport implements TelemetryTransport {
       handlers.onError("trace is empty");
       return;
     }
+    this.lines = lines;
+    this.index = 0;
+    this.lastSimMs = null;
+    this.lastWallMs = null;
+    this.hasDispatch = lines.some((l) => l.event === "dispatch");
+    this.handlers = handlers;
     handlers.onOpen();
-
-    const speed = this.options.speed ?? 60;
-    const loop = this.options.loop ?? true;
-    let index = 0;
-    let lastSimMs: number | null = null;
-    let lastWallMs: number | null = null;
-
-    const emitNext = () => {
-      if (this.stopped) return;
-      if (index >= lines.length) {
-        if (!loop) return;
-        index = 0;
-        lastSimMs = null;
-        lastWallMs = null;
-      }
-      const line = lines[index];
-      index += 1;
-      if (!line) return;
-      const { event, ...payload } = line;
-      handlers.onEvent(event, payload);
-
-      const simMs = typeof payload.sim_time === "string" ? Date.parse(payload.sim_time) : NaN;
-      const now = performance.now();
-      let delayMs = 1000 / 30;
-      if (Number.isFinite(simMs) && lastSimMs !== null && lastWallMs !== null) {
-        const simDelta = Math.max(0, simMs - lastSimMs);
-        delayMs = Math.min(5000, Math.max(1, simDelta / speed));
-      }
-      if (Number.isFinite(simMs)) {
-        lastSimMs = simMs;
-        lastWallMs = now;
-      }
-      this.timer = window.setTimeout(emitNext, delayMs);
-    };
-    emitNext();
+    this.scheduleNext(0);
   }
 
   stop(): void {
@@ -198,5 +186,126 @@ export class ReplayTransport implements TelemetryTransport {
       window.clearTimeout(this.timer);
       this.timer = null;
     }
+  }
+
+  pause(): void {
+    this.paused = true;
+    if (this.timer !== null) {
+      window.clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+
+  resume(): void {
+    if (!this.paused || this.stopped || this.lines.length === 0) return;
+    this.paused = false;
+    this.lastWallMs = null;
+    this.scheduleNext(0);
+  }
+
+  setSpeed(speed: number): void {
+    if (speed > 0) this.speed = speed;
+  }
+
+  /** Seek to just before the next recorded dispatch command. */
+  jumpToNextDispatch(): boolean {
+    const found = this.seekForward((line) => line.event === "dispatch");
+    return found;
+  }
+
+  /** Seek to the first tick at or after a sim time (epoch ms). */
+  seekToSimTime(targetMs: number): boolean {
+    return this.seekForward((line) => {
+      if (line.event !== "tick") return false;
+      const sim = typeof line.sim_time === "string" ? Date.parse(line.sim_time) : NaN;
+      return Number.isFinite(sim) && sim >= targetMs;
+    });
+  }
+
+  /** Seek to just before the next tick that crosses into high price. */
+  jumpToNextPriceEvent(): boolean {
+    let prev = this.currentPrice();
+    return this.seekForward((line) => {
+      if (line.event !== "tick") return false;
+      const price = typeof line.price_rtm === "number" ? line.price_rtm : NaN;
+      const crosses = Number.isFinite(price) && prev < PRICE_EVENT_USD && price >= PRICE_EVENT_USD;
+      if (Number.isFinite(price)) prev = price;
+      return crosses;
+    });
+  }
+
+  private currentPrice(): number {
+    for (let i = this.index - 1; i >= 0; i--) {
+      const line = this.lines[i];
+      if (line?.event === "tick" && typeof line.price_rtm === "number") {
+        return line.price_rtm;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * Scan forward (wrapping once) for a line matching `pred`, then back
+   * up a few ticks so the replay lands with context before the event.
+   */
+  private seekForward(pred: (line: RecordedLine) => boolean): boolean {
+    const n = this.lines.length;
+    if (n === 0) return false;
+    for (let step = 1; step <= n; step++) {
+      const i = (this.index + step) % n;
+      const line = this.lines[i];
+      if (line && pred(line)) {
+        // Land a handful of ticks ahead of the hit so the build-up shows.
+        let back = i;
+        for (let k = 0; k < 3; k++) {
+          const candidate = (back - 1 + n) % n;
+          if (this.lines[candidate]?.event !== "tick") break;
+          back = candidate;
+        }
+        this.index = back;
+        this.lastSimMs = null;
+        this.lastWallMs = null;
+        if (!this.paused) this.scheduleNext(0);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private scheduleNext(delayMs: number): void {
+    if (this.stopped || this.paused) return;
+    if (this.timer !== null) window.clearTimeout(this.timer);
+    this.timer = window.setTimeout(() => this.emitNext(), delayMs);
+  }
+
+  private emitNext(): void {
+    if (this.stopped || this.paused) return;
+    const handlers = this.handlers;
+    if (!handlers) return;
+    const loop = this.options.loop ?? true;
+    if (this.index >= this.lines.length) {
+      if (!loop) return;
+      this.index = 0;
+      this.lastSimMs = null;
+      this.lastWallMs = null;
+    }
+    const line = this.lines[this.index];
+    this.index += 1;
+    if (!line) return;
+    const { event, ...payload } = line;
+    handlers.onEvent(event, payload);
+
+    const simMs = typeof payload.sim_time === "string" ? Date.parse(payload.sim_time) : NaN;
+    const now = performance.now();
+    let delayMs = 1000 / 30;
+    if (Number.isFinite(simMs) && this.lastSimMs !== null && this.lastWallMs !== null) {
+      const simDelta = Math.max(0, simMs - this.lastSimMs);
+      delayMs = Math.min(5000, Math.max(1, simDelta / this.speed));
+    }
+    if (Number.isFinite(simMs)) {
+      this.lastSimMs = simMs;
+      this.lastWallMs = now;
+    }
+    this.scheduleNext(delayMs);
   }
 }

@@ -1,9 +1,11 @@
 /**
- * Map stratum: the whole-fleet view. A tile-less MapLibre map renders the
- * Texas state polygon and load-zone boundaries from bundled GeoJSON, plus
- * one circle marker per home. Marker color follows the active lens; live
- * telemetry is read imperatively from the live buffers at a low cadence and
- * pushed into the GeoJSON source, never through React state.
+ * Map stratum: the whole-fleet view. CartoDB Dark Matter vector-derived
+ * raster tiles carry the real geography; ERCOT load-zone polygons from
+ * the bundled GeoJSON sit on top as a subtle overlay with hover
+ * highlighting; one crisp dot per home is lensed by SOC or price, with a
+ * soft glow at high zoom. A canvas overlay animates service-line flow
+ * and dispatch ripples on top. Live telemetry is read imperatively from
+ * the live buffers at a low cadence, never through React state.
  */
 
 import type { Feature, FeatureCollection, MultiPolygon, Point, Polygon } from "geojson";
@@ -20,9 +22,11 @@ import maplibregl, {
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef } from "react";
 
+import { dayArc } from "../state/dayArc";
 import type { LiveBuffers } from "../state/live";
 import { useAppStore, type Lens } from "../state/store";
-import { TOKENS, priceColor, socColor } from "../tokens/tokens";
+import { TOKENS, priceColor, priceMarkerColor, socColor } from "../tokens/tokens";
+import { MapFlowOverlay } from "./flowOverlay";
 
 export interface MapViewProps {
   live: LiveBuffers;
@@ -33,6 +37,9 @@ const ZONES_URL = "geo/texas-zones.json";
 /** Glyph PBFs for the zone-label symbol layer, vendored for offline use. */
 const GLYPHS_URL = "fonts/{fontstack}/{range}.pbf";
 const LABEL_FONT = ["open-sans-semibold"];
+/** Free dark basemap, no API key; degrades to the bare background offline. */
+const BASEMAP_TILES = ["https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"];
+const BASEMAP_ATTRIBUTION = "© OpenStreetMap contributors © CARTO";
 
 const TEXAS_BOUNDS: LngLatBoundsLike = [
   [-106.7, 25.9],
@@ -50,22 +57,28 @@ const NEIGHBORHOOD_RADIUS_DEG = 0.6;
 /** Telemetry push cadence for marker and zone tints. */
 const TELEMETRY_PUSH_MS = 500;
 
+const SOURCE_BASEMAP = "basemap";
 const SOURCE_STATE = "texas-state";
 const SOURCE_ZONES = "texas-zones";
 const SOURCE_ZONE_LABELS = "texas-zone-labels";
 const SOURCE_HOMES = "homes";
 
+const LAYER_BASEMAP = "basemap";
 const LAYER_STATE_FILL = "state-fill";
 const LAYER_STATE_OUTLINE = "state-outline";
 const LAYER_ZONES_FILL = "zones-fill";
+const LAYER_ZONES_FILL_HOVER = "zones-fill-hover";
 const LAYER_ZONES_OUTLINE = "zones-outline";
+const LAYER_ZONES_OUTLINE_HOVER = "zones-outline-hover";
 const LAYER_ZONES_LABEL = "zones-label";
+const LAYER_HOMES_GLOW = "homes-glow";
 const LAYER_HOMES = "homes";
 const LAYER_HOMES_SELECTED = "homes-selected";
 
 type ZoneGeometry = Polygon | MultiPolygon;
 
 const EMPTY_FC: FeatureCollection = { type: "FeatureCollection", features: [] };
+const NO_ZONE: FilterSpecification = ["==", ["get", "zone"], ""];
 
 /** One point feature per home, colored for the given lens. */
 function buildHomesCollection(live: LiveBuffers, lens: Lens): FeatureCollection<Point> {
@@ -129,6 +142,7 @@ function splitZones(fc: FeatureCollection): {
 
 export default function MapView({ live, active }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const veilRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
@@ -146,7 +160,7 @@ export default function MapView({ live, active }: MapViewProps) {
 
     const style: StyleSpecification = {
       version: 8,
-      name: "batsim-offline",
+      name: "batsim-dark",
       glyphs: GLYPHS_URL,
       sources: {},
       layers: [
@@ -165,24 +179,41 @@ export default function MapView({ live, active }: MapViewProps) {
       maxBounds: PAN_BOUNDS,
       minZoom: 4,
       maxZoom: 15.5,
-      attributionControl: false,
+      attributionControl: { compact: true },
       cooperativeGestures: false,
     });
     mapRef.current = map;
     // Ops/e2e handle for driving the map from the console.
     (window as unknown as { __batsimMap?: MaplibreMap }).__batsimMap = map;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    // Double-click is the dive gesture; zoom-on-double-click would fight it.
+    map.doubleClickZoom.disable();
 
-    /** Zone tint for the active lens: price-colored under price, neutral under soc. */
+    const overlay = new MapFlowOverlay(container);
+    overlay.attach(map, live);
+    overlay.start();
+
+    /** Zone styling for the active lens: the fill stays a quiet neutral;
+     * the price lens speaks through the boundary color, not a flood fill. */
     const applyZoneTint = (lens: Lens) => {
       if (!map.getLayer(LAYER_ZONES_FILL)) return;
-      if (lens === "price") {
-        map.setPaintProperty(LAYER_ZONES_FILL, "fill-color", priceColor(live.priceRtm));
-        map.setPaintProperty(LAYER_ZONES_FILL, "fill-opacity", 0.35);
-      } else {
-        map.setPaintProperty(LAYER_ZONES_FILL, "fill-color", TOKENS.terrainBase);
-        map.setPaintProperty(LAYER_ZONES_FILL, "fill-opacity", 0.12);
-      }
+      map.setPaintProperty(LAYER_ZONES_FILL, "fill-color", TOKENS.terrainBase);
+      map.setPaintProperty(LAYER_ZONES_FILL, "fill-opacity", 0.16);
+      map.setPaintProperty(
+        LAYER_ZONES_OUTLINE,
+        "line-color",
+        lens === "price" ? priceColor(live.priceRtm) : TOKENS.hairline,
+      );
+      map.setPaintProperty(LAYER_ZONES_OUTLINE, "line-width", lens === "price" ? 1.5 : 0.75);
+    };
+
+    /** Simulated-time-of-day veil over the whole map. */
+    const applyDayVeil = () => {
+      const veil = veilRef.current;
+      if (!veil) return;
+      const arc = dayArc(live.simTimeMs > 0 ? live.simTimeMs : Date.now());
+      veil.style.opacity = arc.veilOpacity.toFixed(3);
+      veil.style.backgroundColor = arc.veilColor;
     };
 
     /** Push the latest committed telemetry frame into the map. */
@@ -199,7 +230,8 @@ export default function MapView({ live, active }: MapViewProps) {
         );
       }
       if (lensRef.current === "price") {
-        map.setPaintProperty(LAYER_HOMES, "circle-color", priceColor(live.priceRtm));
+        map.setPaintProperty(LAYER_HOMES, "circle-color", priceMarkerColor(live.priceRtm));
+        map.setPaintProperty(LAYER_HOMES_GLOW, "circle-color", priceMarkerColor(live.priceRtm));
       }
       applyZoneTint(lensRef.current);
     };
@@ -219,11 +251,65 @@ export default function MapView({ live, active }: MapViewProps) {
       map.on("mouseleave", LAYER_HOMES, () => {
         map.getCanvas().style.cursor = "";
       });
+
+      // Zone hover highlighting: a brightened fill + outline pair filtered
+      // to the zone under the pointer.
+      let hoveredZone = "";
+      map.on("mousemove", LAYER_ZONES_FILL, (e) => {
+        const zone: unknown = e.features?.[0]?.properties?.zone;
+        const next = typeof zone === "string" ? zone : "";
+        if (next === hoveredZone) return;
+        hoveredZone = next;
+        const filter: FilterSpecification = ["==", ["get", "zone"], hoveredZone];
+        map.setFilter(LAYER_ZONES_FILL_HOVER, filter);
+        map.setFilter(LAYER_ZONES_OUTLINE_HOVER, filter);
+      });
+      map.on("mouseleave", LAYER_ZONES_FILL, () => {
+        hoveredZone = "";
+        map.setFilter(LAYER_ZONES_FILL_HOVER, NO_ZONE);
+        map.setFilter(LAYER_ZONES_OUTLINE_HOVER, NO_ZONE);
+      });
+
+      // Click a zone to frame it; double-click anywhere dives into the
+      // street-level stratum. The zoom crossing below stays as an ambient
+      // path, never the only one.
+      map.on("click", LAYER_ZONES_FILL, (e) => {
+        if (e.defaultPrevented) return;
+        const feature = e.features?.[0];
+        if (!feature) return;
+        const geometry = feature.geometry;
+        const coords =
+          geometry.type === "Polygon" ? coordsOf(geometry.coordinates) : geometry.type === "MultiPolygon" ? coordsOf(geometry.coordinates[0] ?? []) : null;
+        if (!coords) return;
+        let west = Infinity;
+        let south = Infinity;
+        let east = -Infinity;
+        let north = -Infinity;
+        for (const [lng, lat] of coords) {
+          if (lng < west) west = lng;
+          if (lat < south) south = lat;
+          if (lng > east) east = lng;
+          if (lat > north) north = lat;
+        }
+        map.fitBounds(
+          [
+            [west, south],
+            [east, north],
+          ],
+          { padding: 64, duration: 650 },
+        );
+      });
+      map.on("dblclick", (e) => {
+        e.preventDefault();
+        useAppStore.getState().setStratum("neighborhood");
+      });
+
       // Handoff is armed while zoomed out below the threshold and consumed
       // when it fires; re-entering the map stratum at a high zoom does not
       // immediately bounce back to the street level.
       let handoffArmed = map.getZoom() < NEIGHBORHOOD_ZOOM;
       map.on("moveend", () => {
+        useAppStore.setState({ mapZoom: map.getZoom() });
         if (map.getZoom() < NEIGHBORHOOD_ZOOM) {
           handoffArmed = true;
           return;
@@ -247,16 +333,32 @@ export default function MapView({ live, active }: MapViewProps) {
       const { state, zones, labels } = splitZones(zonesFc);
       const lens = lensRef.current;
 
+      map.addSource(SOURCE_BASEMAP, {
+        type: "raster",
+        tiles: BASEMAP_TILES,
+        tileSize: 256,
+        attribution: BASEMAP_ATTRIBUTION,
+      });
       map.addSource(SOURCE_STATE, { type: "geojson", data: state });
       map.addSource(SOURCE_ZONES, { type: "geojson", data: zones });
       map.addSource(SOURCE_ZONE_LABELS, { type: "geojson", data: labels });
       map.addSource(SOURCE_HOMES, { type: "geojson", data: buildHomesCollection(live, lens) });
 
+      const basemap: maplibregl.RasterLayerSpecification = {
+        id: LAYER_BASEMAP,
+        type: "raster",
+        source: SOURCE_BASEMAP,
+        paint: {
+          "raster-opacity": 0.96,
+          "raster-contrast": 0.18,
+          "raster-brightness-min": 0.12,
+        },
+      };
       const stateFill: FillLayerSpecification = {
         id: LAYER_STATE_FILL,
         type: "fill",
         source: SOURCE_STATE,
-        paint: { "fill-color": TOKENS.terrainBase, "fill-opacity": 0.16 },
+        paint: { "fill-color": TOKENS.terrainBase, "fill-opacity": 0.1 },
       };
       const stateOutline: LineLayerSpecification = {
         id: LAYER_STATE_OUTLINE,
@@ -268,16 +370,30 @@ export default function MapView({ live, active }: MapViewProps) {
         id: LAYER_ZONES_FILL,
         type: "fill",
         source: SOURCE_ZONES,
-        paint:
-          lens === "price"
-            ? { "fill-color": priceColor(live.priceRtm), "fill-opacity": 0.35 }
-            : { "fill-color": TOKENS.terrainBase, "fill-opacity": 0.12 },
+        paint: { "fill-color": TOKENS.terrainBase, "fill-opacity": 0.16 },
+      };
+      const zonesFillHover: FillLayerSpecification = {
+        id: LAYER_ZONES_FILL_HOVER,
+        type: "fill",
+        source: SOURCE_ZONES,
+        filter: NO_ZONE,
+        paint: { "fill-color": TOKENS.textPrimary, "fill-opacity": 0.08 },
       };
       const zonesOutline: LineLayerSpecification = {
         id: LAYER_ZONES_OUTLINE,
         type: "line",
         source: SOURCE_ZONES,
-        paint: { "line-color": TOKENS.hairline, "line-width": 0.75, "line-opacity": 0.8 },
+        paint:
+          lens === "price"
+            ? { "line-color": priceColor(live.priceRtm), "line-width": 1.5, "line-opacity": 0.95 }
+            : { "line-color": TOKENS.hairline, "line-width": 0.75, "line-opacity": 0.9 },
+      };
+      const zonesOutlineHover: LineLayerSpecification = {
+        id: LAYER_ZONES_OUTLINE_HOVER,
+        type: "line",
+        source: SOURCE_ZONES,
+        filter: NO_ZONE,
+        paint: { "line-color": TOKENS.textSecondary, "line-width": 1.75, "line-opacity": 0.95 },
       };
       const zonesLabel: SymbolLayerSpecification = {
         id: LAYER_ZONES_LABEL,
@@ -292,7 +408,18 @@ export default function MapView({ live, active }: MapViewProps) {
         paint: {
           "text-color": TOKENS.textSecondary,
           "text-halo-color": TOKENS.bgBase,
-          "text-halo-width": 1,
+          "text-halo-width": 1.25,
+        },
+      };
+      const homesGlow: CircleLayerSpecification = {
+        id: LAYER_HOMES_GLOW,
+        type: "circle",
+        source: SOURCE_HOMES,
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 4, 13, 16],
+          "circle-color": lens === "soc" ? ["get", "color"] : priceMarkerColor(live.priceRtm),
+          "circle-blur": 1,
+          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 8, 0, 10.5, 0.45],
         },
       };
       const homes: CircleLayerSpecification = {
@@ -301,9 +428,9 @@ export default function MapView({ live, active }: MapViewProps) {
         source: SOURCE_HOMES,
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 2.5, 12, 6.5],
-          "circle-color": lens === "soc" ? ["get", "color"] : priceColor(live.priceRtm),
-          "circle-opacity": 0.9,
-          "circle-stroke-color": TOKENS.hairline,
+          "circle-color": lens === "soc" ? ["get", "color"] : priceMarkerColor(live.priceRtm),
+          "circle-opacity": 0.92,
+          "circle-stroke-color": TOKENS.bgDeep,
           "circle-stroke-width": 1,
         },
       };
@@ -320,11 +447,15 @@ export default function MapView({ live, active }: MapViewProps) {
         },
       };
 
+      map.addLayer(basemap);
       map.addLayer(stateFill);
       map.addLayer(stateOutline);
       map.addLayer(zonesFill);
+      map.addLayer(zonesFillHover);
       map.addLayer(zonesOutline);
+      map.addLayer(zonesOutlineHover);
       map.addLayer(zonesLabel);
+      map.addLayer(homesGlow);
       map.addLayer(homes);
       map.addLayer(homesSelected);
 
@@ -351,6 +482,7 @@ export default function MapView({ live, active }: MapViewProps) {
     const timer = window.setInterval(() => {
       if (!activeRef.current) return;
       pushTelemetry(false);
+      applyDayVeil();
     }, TELEMETRY_PUSH_MS);
 
     const unsubscribe = useAppStore.subscribe((state, prev) => {
@@ -358,9 +490,11 @@ export default function MapView({ live, active }: MapViewProps) {
         lensRef.current = state.lens;
         if (map.getLayer(LAYER_HOMES)) {
           if (state.lens === "price") {
-            map.setPaintProperty(LAYER_HOMES, "circle-color", priceColor(live.priceRtm));
+            map.setPaintProperty(LAYER_HOMES, "circle-color", priceMarkerColor(live.priceRtm));
+            map.setPaintProperty(LAYER_HOMES_GLOW, "circle-color", priceMarkerColor(live.priceRtm));
           } else {
             map.setPaintProperty(LAYER_HOMES, "circle-color", ["get", "color"]);
+            map.setPaintProperty(LAYER_HOMES_GLOW, "circle-color", ["get", "color"]);
           }
         }
         pushTelemetry(true);
@@ -369,6 +503,9 @@ export default function MapView({ live, active }: MapViewProps) {
         const filter: FilterSpecification = ["==", ["get", "id"], state.selectedHomeId ?? ""];
         map.setFilter(LAYER_HOMES_SELECTED, filter);
       }
+      if (state.dispatchWave !== prev.dispatchWave) {
+        overlay.triggerDispatchWave();
+      }
     });
 
     return () => {
@@ -376,6 +513,7 @@ export default function MapView({ live, active }: MapViewProps) {
       abort.abort();
       window.clearInterval(timer);
       unsubscribe();
+      overlay.detach();
       mapRef.current = null;
       map.remove();
     };
@@ -406,6 +544,20 @@ export default function MapView({ live, active }: MapViewProps) {
         background: TOKENS.bgBase,
         visibility: active ? "visible" : "hidden",
       }}
-    />
+    >
+      <div ref={veilRef} className="day-veil" style={{ opacity: 0 }} />
+    </div>
   );
+}
+
+/** Flatten the first (outer) ring of a polygon coordinate set. */
+function coordsOf(rings: number[][][]): [number, number][] {
+  const ring = rings[0] ?? [];
+  const out: [number, number][] = [];
+  for (const pair of ring) {
+    if (typeof pair[0] === "number" && typeof pair[1] === "number") {
+      out.push([pair[0], pair[1]]);
+    }
+  }
+  return out;
 }

@@ -11,8 +11,10 @@ import * as THREE from "three";
 import type { NeighborhoodLayout, StreetParcel } from "../procgen/placement";
 import { Rng } from "../procgen/rng";
 import type { LiveBuffers } from "../state/live";
+import { useAppStore } from "../state/store";
 import { TOKENS, socColorRgb } from "../tokens/tokens";
 import {
+  BADGE_ALTITUDE_M,
   HOUSE_DEPTH_M,
   HOUSE_WALL_H_M,
   POLE_ATTACH_H_M,
@@ -21,11 +23,14 @@ import {
   RING_INNER_M,
   RING_OUTER_M,
   RING_THETA_SEGMENTS,
+  WINDOW_Y_M,
+  createBadgeGeometry,
   createHouseGeometry,
   createPoleGeometry,
   createStreetsGeometry,
+  createWindowGeometry,
 } from "./geometry";
-import { createFlowMaterial, createSocRingMaterial } from "./telemetryShaders";
+import { createFlowMaterial, createSocRingMaterial, createWindowMaterial } from "./telemetryShaders";
 
 /** Flow dots travelling along each home's service line. */
 export const PARTICLES_PER_HOME = 6;
@@ -49,6 +54,12 @@ const _color = new THREE.Color();
 const _colorBase = new THREE.Color();
 const _flatQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
 
+/** Badge state colors as sRGB floats (written verbatim to instanceColor). */
+const BADGE_DISCHARGE_RGB: [number, number, number] = [0xe2 / 255, 0xa6 / 255, 0x3d / 255];
+const BADGE_CHARGE_RGB: [number, number, number] = [0x7f / 255, 0xae / 255, 0x6b / 255];
+const BADGE_IDLE_RGB: [number, number, number] = [0x5c / 255, 0x66 / 255, 0x72 / 255];
+const BADGE_RESERVE_RGB: [number, number, number] = [0xd0 / 255, 0x53 / 255, 0x3a / 255];
+
 export interface NeighborhoodWorld {
   /** Static scenery and overlays without event handlers. */
   group: THREE.Group;
@@ -62,6 +73,8 @@ export interface NeighborhoodWorld {
   indexOfHome: Map<string, number>;
   /** Seconds uniform feeding the flow-particle shader. */
   flowUtime: { value: number };
+  /** Drive the window-glow uniform from the day arc (0 day, 1 night). */
+  setDarkness: (darkness: number) => void;
   /**
    * Push the latest live buffers into the dynamic GPU attributes. Runs
    * allocation-free; call only when the buffer version has changed.
@@ -127,9 +140,9 @@ export function buildNeighborhoodWorld(layout: NeighborhoodLayout): Neighborhood
       ringGeometry,
       track(
         new THREE.MeshBasicMaterial({
-          color: TOKENS.hairline,
+          color: TOKENS.slateLine,
           transparent: true,
-          opacity: 0.3,
+          opacity: 0.45,
           depthWrite: false,
         }),
       ),
@@ -140,10 +153,44 @@ export function buildNeighborhoodWorld(layout: NeighborhoodLayout): Neighborhood
   ringTrack.frustumCulled = false;
   ringTrack.matrixAutoUpdate = false;
 
+  // State badges: one instanced triangle per home above the SOC ring.
+  // Color carries the state (sage charge, amber discharge, red reserve
+  // breach, slate idle); orientation carries charge up / discharge down.
+  const badgeMesh = track(
+    new THREE.InstancedMesh(
+      track(createBadgeGeometry()),
+      track(new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })),
+      n,
+    ),
+  );
+  badgeMesh.name = "state-badges";
+  badgeMesh.frustumCulled = false;
+  badgeMesh.matrixAutoUpdate = false;
+  const badgeColorAttr = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+  badgeColorAttr.setUsage(THREE.DynamicDrawUsage);
+  badgeMesh.instanceColor = badgeColorAttr;
+
+  // Window glow: one shader quad on each street-facing wall.
+  const windowGeometry = track(createWindowGeometry());
+  const glowAttr = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
+  glowAttr.setUsage(THREE.DynamicDrawUsage);
+  windowGeometry.setAttribute("glow", glowAttr);
+  const windows = createWindowMaterial();
+  track(windows.material);
+  const windowMesh = track(new THREE.InstancedMesh(windowGeometry, windows.material, n));
+  windowMesh.name = "window-glow";
+  windowMesh.frustumCulled = false;
+  windowMesh.matrixAutoUpdate = false;
+
+  // Reserve floors are static per home; read them once at build time.
+  const homesMeta = useAppStore.getState().homesMeta;
+  const reserveFloor = new Float32Array(n);
+
   for (let i = 0; i < n; i++) {
     const parcel = parcels[i];
     if (!parcel) continue;
     indexOfHome.set(parcel.homeId, i);
+    reserveFloor[i] = homesMeta[parcel.homeId]?.reserveFloorFrac ?? 0;
 
     const rng = new Rng(`house:${parcel.homeId}`);
     const footprint = rng.range(0.88, 1.12);
@@ -155,7 +202,7 @@ export function buildNeighborhoodWorld(layout: NeighborhoodLayout): Neighborhood
     _matrix.compose(_position, _quaternion, _scale);
     houseMesh.setMatrixAt(i, _matrix);
 
-    _colorBase.set(TOKENS.terrainElev).lerp(_color.set(TOKENS.textPrimary), 0.42);
+    _colorBase.set(TOKENS.terrainElev).lerp(_color.set(TOKENS.textPrimary), 0.3);
     _color.copy(_colorBase);
     _color.offsetHSL(rng.range(-0.015, 0.015), rng.range(-0.04, 0.04), rng.range(-0.055, 0.045));
     houseMesh.setColorAt(i, _color);
@@ -164,10 +211,28 @@ export function buildNeighborhoodWorld(layout: NeighborhoodLayout): Neighborhood
     _scale.set(1, 1, 1);
     _matrix.compose(_position, _flatQuaternion, _scale);
     ringArc.setMatrixAt(i, _matrix);
+
+    // Badge floats upright over the ring; direction flips per telemetry.
+    _euler.set(0, parcel.yaw, 0);
+    _quaternion.setFromEuler(_euler);
+    _position.set(parcel.x, BADGE_ALTITUDE_M, parcel.z);
+    _matrix.compose(_position, _quaternion, _scale);
+    badgeMesh.setMatrixAt(i, _matrix);
+
+    // Window quad hugs the street-facing wall, normal outward.
+    const frontX = parcel.x + (HOUSE_DEPTH_M / 2 + 0.08) * Math.sin(parcel.yaw);
+    const frontZ = parcel.z + (HOUSE_DEPTH_M / 2 + 0.08) * Math.cos(parcel.yaw);
+    _euler.set(0, parcel.yaw, 0);
+    _quaternion.setFromEuler(_euler);
+    _position.set(frontX, WINDOW_Y_M, frontZ);
+    _matrix.compose(_position, _quaternion, _scale);
+    windowMesh.setMatrixAt(i, _matrix);
   }
   houseMesh.instanceMatrix.needsUpdate = true;
   if (houseMesh.instanceColor) houseMesh.instanceColor.needsUpdate = true;
   ringArc.instanceMatrix.needsUpdate = true;
+  badgeMesh.instanceMatrix.needsUpdate = true;
+  windowMesh.instanceMatrix.needsUpdate = true;
 
   // Track ring shares the arc's instance transforms, nudged down slightly
   // so the two never z-fight.
@@ -182,7 +247,7 @@ export function buildNeighborhoodWorld(layout: NeighborhoodLayout): Neighborhood
   groundGeometry.rotateX(-Math.PI / 2);
   const groundMesh = new THREE.Mesh(
     groundGeometry,
-    track(new THREE.MeshStandardMaterial({ color: TOKENS.surface, roughness: 1, metalness: 0 })),
+    track(new THREE.MeshStandardMaterial({ color: TOKENS.groundSlab, roughness: 1, metalness: 0 })),
   );
   groundMesh.name = "ground";
   groundMesh.position.set(center.x, -0.15, center.z);
@@ -194,10 +259,7 @@ export function buildNeighborhoodWorld(layout: NeighborhoodLayout): Neighborhood
     let streetsMesh: THREE.Mesh | null = null;
     if (streetsGeometry) {
       track(streetsGeometry);
-      const streetColor = new THREE.Color(TOKENS.surface).lerp(
-        new THREE.Color(TOKENS.slateLine),
-        0.4,
-      );
+      const streetColor = new THREE.Color(TOKENS.streetSlab);
     streetsMesh = new THREE.Mesh(
       streetsGeometry,
       track(new THREE.MeshStandardMaterial({ color: streetColor, roughness: 1, metalness: 0 })),
@@ -339,6 +401,8 @@ export function buildNeighborhoodWorld(layout: NeighborhoodLayout): Neighborhood
   group.name = "neighborhood-static";
   group.add(ringTrack);
   group.add(ringArc);
+  group.add(badgeMesh);
+  group.add(windowMesh);
   group.add(poleMesh);
   if (streetsMesh) group.add(streetsMesh);
   group.add(lines);
@@ -352,10 +416,13 @@ export function buildNeighborhoodWorld(layout: NeighborhoodLayout): Neighborhood
     const soc = live.soc;
     const gridKw = live.gridKw;
     const batteryKw = live.batteryKw;
+    const loadKw = live.loadKw;
     const fracArray = socFracAttr.array as Float32Array;
     const colorArray = ringColorAttr.array as Float32Array;
     const gridArray = gridKwAttr.array as Float32Array;
     const batteryArray = batteryKwAttr.array as Float32Array;
+    const badgeArray = badgeColorAttr.array as Float32Array;
+    const glowArray = glowAttr.array as Float32Array;
     for (let i = 0; i < n; i++) {
       let slot = slots[i] ?? -1;
       if (slot < 0) {
@@ -395,11 +462,46 @@ export function buildNeighborhoodWorld(layout: NeighborhoodLayout): Neighborhood
         gridArray[base + k] = gridValue;
         batteryArray[base + k] = batteryValue;
       }
+
+      // State badge: reserve breach wins, then flow direction, then idle.
+      const parcel = parcels[i];
+      if (!parcel) continue;
+      const floor = reserveFloor[i] ?? 0;
+      let badgeColor: [number, number, number];
+      let roll = 0;
+      let badgeScale = 1;
+      if (floor > 0 && t <= floor + 0.005) {
+        badgeColor = BADGE_RESERVE_RGB;
+      } else if (batteryValue > 0.05) {
+        badgeColor = BADGE_DISCHARGE_RGB;
+        roll = Math.PI;
+      } else if (batteryValue < -0.05) {
+        badgeColor = BADGE_CHARGE_RGB;
+      } else {
+        badgeColor = BADGE_IDLE_RGB;
+        badgeScale = 0.55;
+      }
+      badgeArray[c] = badgeColor[0];
+      badgeArray[c + 1] = badgeColor[1];
+      badgeArray[c + 2] = badgeColor[2];
+      // Spin about the badge's own face (Z) first, then yaw to the street.
+      _euler.set(0, parcel.yaw, roll, "ZYX");
+      _quaternion.setFromEuler(_euler);
+      _position.set(parcel.x, BADGE_ALTITUDE_M, parcel.z);
+      _scale.set(badgeScale, badgeScale, badgeScale);
+      _matrix.compose(_position, _quaternion, _scale);
+      badgeMesh.setMatrixAt(i, _matrix);
+
+      // Windows brighten with the home's own load.
+      glowArray[i] = Math.min(1, Math.max(0, (loadKw[slot] ?? 0) / 3));
     }
     socFracAttr.needsUpdate = true;
     ringColorAttr.needsUpdate = true;
     gridKwAttr.needsUpdate = true;
     batteryKwAttr.needsUpdate = true;
+    badgeColorAttr.needsUpdate = true;
+    badgeMesh.instanceMatrix.needsUpdate = true;
+    glowAttr.needsUpdate = true;
   };
 
   let disposed = false;
@@ -413,6 +515,9 @@ export function buildNeighborhoodWorld(layout: NeighborhoodLayout): Neighborhood
     parcels,
     indexOfHome,
     flowUtime: flow.uTime,
+    setDarkness: (darkness: number) => {
+      windows.uDarkness.value = darkness;
+    },
     writeTelemetry,
     dispose: () => {
       if (disposed) return;
