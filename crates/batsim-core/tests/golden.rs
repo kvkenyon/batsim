@@ -39,6 +39,7 @@ fn run_scenario(mut world: SimWorld, model_label: &str) -> (serde_json::Value, S
             ScheduledDispatch {
                 execute_at_tick: 20 * 3600,
                 action: DispatchAction::SetMode(ControlMode::Manual),
+                tag: 0,
             },
         )
         .unwrap();
@@ -48,6 +49,7 @@ fn run_scenario(mut world: SimWorld, model_label: &str) -> (serde_json::Value, S
             ScheduledDispatch {
                 execute_at_tick: 20 * 3600,
                 action: DispatchAction::SetManualSetpoint(3000.0),
+                tag: 0,
             },
         )
         .unwrap();

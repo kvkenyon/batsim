@@ -1,0 +1,24 @@
+{
+  "name": "e2e-fleet-100",
+  "seed": 42,
+  "archetypes": [
+    {
+      "weight": 0.6,
+      "template": {
+        "battery": { "model_id": "tesla.powerwall_3", "count": 1 },
+        "pv": { "peak_kw": { "uniform": [5.0, 11.0] } },
+        "load": { "archetype": "sfh_family" }
+      }
+    },
+    {
+      "weight": 0.4,
+      "template": {
+        "battery": { "model_id": "enphase.iq_battery_5p", "count": 2 },
+        "pv": { "peak_kw": { "uniform": [4.0, 9.0] } },
+        "load": { "archetype": "townhome" }
+      }
+    }
+  ],
+  "geo": { "ercot_load_zones": { "LZ_NORTH": 0.6, "LZ_HOUSTON": 0.4 } },
+  "count": 100
+}

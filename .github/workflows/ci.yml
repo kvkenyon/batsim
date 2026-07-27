@@ -11,7 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Pinned toolchain per spec C.2.3 (rust-toolchain.toml: 1.83.0)
       - name: Install Rust toolchain
         run: rustup toolchain install 1.83.0 --component clippy,rustfmt --profile minimal
 
@@ -25,3 +24,52 @@ jobs:
 
       - name: Test
         run: cargo +1.83.0 test --workspace
+
+  spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.83.0 --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Vendored OpenAPI is fresh
+        run: |
+          cargo +1.83.0 run -p batsim-server -- --dump-openapi > /tmp/openapi.json
+          diff -u api/openapi.json /tmp/openapi.json
+
+      - name: Contract tests (schemathesis)
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="$HOME/.local/bin:$PATH"
+          uv tool install schemathesis==4.24.3
+          cargo +1.83.0 build -p batsim-server
+          ./target/debug/batsim --port 18097 &
+          for i in $(seq 1 50); do
+            curl -sf http://127.0.0.1:18097/v1/system/health >/dev/null && break
+            sleep 0.2
+          done
+          curl -sf http://127.0.0.1:18097/v1/system/health >/dev/null
+          schemathesis run http://127.0.0.1:18097/openapi.json --checks all \
+            --request-timeout 60 --max-examples 30 \
+            --exclude-path /v1/telemetry/stream --exclude-path /v1/telemetry/ws
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.83.0 --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generated-client end-to-end (100-home fleet)
+        run: examples/python-e2e/run.sh

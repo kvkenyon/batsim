@@ -1,102 +1,136 @@
 # batsim
 
-A deterministic residential battery fleet simulator for ERCOT (Texas)
-territory, written in Rust.
+An ERCOT-only residential battery fleet simulator, written in Rust.
 
-batsim simulates homes equipped with real OEM battery systems - Tesla
-Powerwall 2/3, Enphase IQ Battery, SolarEdge Home Battery, and sonnen -
-so dispatch strategies can be developed and tested against realistic
-fleet behavior without touching real hardware.
+batsim provides physics-faithful virtual residential battery systems —
+Tesla Powerwall 2/3, Enphase IQ Battery, SolarEdge Home Battery, and
+sonnen — behind an OpenAPI-first HTTP API, so dispatch strategies can be
+developed and tested against realistic fleet behavior without touching
+real hardware.
 
-## What you can do today
+## Status
 
-batsim is currently a Rust library (two crates) with no network surface:
+Core engine, device registry, and the HTTP API skeleton are complete:
+homes and fleets CRUD with deterministic fleet manifests, scenario
+bindings (time, prices, weather, outages, seed), virtual time control,
+fleet dispatch with jittered per-device execution latency, audit log,
+idempotency, telemetry series and live streams, all documented by an
+OpenAPI document generated from code. ERCOT price replay, settlement,
+outage physics, snapshots, and vendor-API mimicry land in later
+milestones.
 
-- **`batsim-core`** - the simulation engine. A virtual-clock tick loop
-  (1-60 s steps) drives each home through a fixed per-tick pipeline:
-  load, PV, dispatch, battery, inverter, metering, telemetry. Physics
-  includes a split-efficiency battery SOC model with Thevenin voltage
-  sag, LFP/NMC chemistry modules, load-dependent inverter efficiency,
-  Texas residential load synthesis, and a solar position / clear-sky /
-  cloud-variability PV pipeline.
-- **`batsim-registry`** - a validated, integrity-checked catalog of 21
-  OEM device entries (11 batteries, 4 controllers, 5 inverters, 1 PV
-  preset) shipped as JSON and embedded into the binary. Every catalog
-  value carries a provenance marker (`spec` or `estimated`).
+## Quick start
 
-Everything is deterministic: one master seed reproduces a run bit-for
-bit, including under rayon parallelism. Conformance tests hold every
-standalone catalog battery's measured round-trip efficiency within 0.5
-percentage
-points of its datasheet figure.
-
-## Coming next
-
-An OpenAPI-first HTTP API for creating homes, scheduling dispatch
-actions, and reading telemetry, followed by ERCOT market integration,
-outage simulation, thermal and degradation models, and vendor API
-mimicry.
-
-## Quickstart
-
-Requires a Rust toolchain (pinned to 1.83.0 via `rust-toolchain.toml`).
-
-```sh
-# Simulate one Powerwall 3 home for 24 h and print its SOC trace
-cargo run -p batsim-core --example single_home_trace
-
-# Simulate a small fleet across device families and report energy
-cargo run -p batsim-core --example fleet_energy
-
-# Browse the device catalog
-cargo run -p batsim-core --example catalog_browser
-
-# Same seed twice: prove the results are bit-identical
-cargo run -p batsim-core --example determinism_demo
+```bash
+cargo build -p batsim-server
+./target/debug/batsim --config config/batsim.toml &
+curl -s localhost:8080/v1/system/health
 ```
 
-Minimal library usage:
+Interactive API docs (Swagger UI) live at `http://localhost:8080/docs`;
+the OpenAPI 3.1 document is served live at `/openapi.json` and vendored
+at `api/openapi.json` (regenerate with `batsim --dump-openapi`; CI fails
+if the vendored copy drifts).
 
-```rust
-use batsim_core::battery::BatteryConfig;
-use batsim_core::engine::{AmbientFeed, SimWorld};
-use batsim_core::home::Home;
-use batsim_core::time::SimClock;
-use batsim_core::topology::{build_devices, HomeBuildConfig};
-use batsim_registry::Registry;
+A minimal session:
 
-let registry = Registry::embedded()?;
-let mut world = SimWorld::new(
-    SimClock::from_rfc3339("2025-06-15T00:00:00Z", 60)?,
-    42, // master seed
-    AmbientFeed::Constant(30.0),
-)?;
-// Compose a HomeSystem document, validate it, build devices, add a home.
-// See examples/single_home_trace.rs for the full flow.
-world.step_n(1440); // 24 h at 60 s ticks
+```bash
+curl -s -X POST localhost:8080/v1/fleets -H 'content-type: application/json' -d @examples/fleet-100.json
+curl -s -X POST localhost:8080/v1/scenarios -H 'content-type: application/json' -d @examples/scenario-day.json
+curl -s -X POST localhost:8080/v1/scenarios/scn_01J…:activate
+curl -s -X POST localhost:8080/v1/sim:start
+curl -N 'localhost:8080/v1/telemetry/stream?fleet_id=flt_01J…'
 ```
 
-## Documentation
+## API surface
 
-- [Architecture guide](docs/architecture.md) - crates, tick pipeline,
-  determinism design
-- [Device registry guide](docs/device-registry.md) - catalog format,
-  adding a device, provenance markers
-- [Physics models guide](docs/physics-models.md) - battery, chemistry,
-  inverter, load, and PV models with measured accuracy figures
-- [Testing guide](docs/testing.md) - golden traces, determinism gate,
-  property tests
-- [Data sources](assets/DATA_SOURCES.md) - provenance of every load/PV
-  shape table
+All routes are under `/v1` and return RFC 9457 problem documents on
+error. Every mutating POST accepts an `Idempotency-Key` header; every
+dispatch takes a client-supplied `command_id` so retries can never
+execute twice.
 
-## Development
+- `/v1/registry/*` — device catalog queries and version.
+- `/v1/homes` — simulated home CRUD (config changes while paused).
+- `/v1/fleets` — manifests expand deterministically into homes;
+  re-applying a manifest yields an identical expansion hash.
+- `/v1/scenarios` — bind a time range, price source, weather feed,
+  outage schedule, and seed; one active scenario at a time.
+- `/v1/sim:*` — virtual time: start/pause/resume/stop, synchronous step
+  and run-until, speed multiplier.
+- `/v1/dispatch` — kW setpoints, reserve SOC, operating modes, PV
+  curtailment; jittered per-device execution latency; audit log.
+- `/v1/telemetry/*` — columnar history (1 s to 1 h buckets, settlement
+  aligned at 5 minutes) plus SSE and WebSocket live streams with
+  filtering and downsampling.
+- `/v1/system/*` — health, version, redacted config.
 
-```sh
-cargo check --workspace
+Prices for now come from a static or deterministic synthetic source
+behind a replay-ready interface; historical replay plugs in without API
+changes.
+
+## Generating clients
+
+Clients are generated from the live document, never handwritten:
+
+```bash
+npx @openapitools/openapi-generator-cli generate \
+  -i http://localhost:8080/openapi.json \
+  -g python -o clients/python --additional-properties=packageName=batsim_client
+```
+
+(Fern and Stainless accept the same document.) A complete example —
+generate the client, then create a 100-home fleet, run a scenario,
+dispatch it, and read telemetry — runs with one command:
+
+```bash
+examples/python-e2e/run.sh
+```
+
+## CLI
+
+`batsimctl` mirrors the API one-to-one and prints JSON by default:
+
+```bash
+batsimctl fleets create examples/fleet-100.json
+batsimctl sim step 3600
+batsimctl dispatch run - --idempotency-key $UUID < command.json
+batsimctl telemetry fleet-series <fleet-id> --resolution 5m --agg sum
+```
+
+## Configuration
+
+File + environment + flags, in increasing precedence. The file defaults
+to `config/batsim.toml`; environment overrides use `BATSIM_` with `__`
+for nesting (`BATSIM_SERVER__PORT=9090`). `--print-config` shows the
+effective, redacted configuration.
+
+Auth is off by default (single-tenant local). Set `auth.api_keys` (or
+`BATSIM_AUTH__API_KEYS=k1,k2`) to require bearer tokens; read-only keys
+are supported too.
+
+## Testing
+
+```bash
+cargo test --workspace                 # unit + integration, incl. determinism
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+examples/python-e2e/run.sh             # generated-client E2E
+
+# contract tests against a running server
+schemathesis run http://localhost:8080/openapi.json --checks all \
+  --exclude-path /v1/telemetry/stream --exclude-path /v1/telemetry/ws
 ```
 
-The founding design document (still the build contract for upcoming
-work) is
-[`docs/residential-battery-fleet-simulator-spec.md`](docs/residential-battery-fleet-simulator-spec.md).
+The `schemathesis.toml` in this repo documents the per-operation
+exemptions; the two stream paths are excluded because they are infinite
+streams and an upgrade handshake, not request/response pairs.
+
+## Layout
+
+- `crates/batsim-core` — synchronous physics engine (no async, no I/O).
+- `crates/batsim-registry` — embedded, integrity-checked device catalog.
+- `crates/batsim-server` — axum shell, OpenAPI assembly, engine thread.
+- `crates/batsim-cli` — `batsimctl` admin CLI.
+- `registry/` — catalog JSON (batteries, inverters, controllers, PV).
+- `api/openapi.json` — vendored API document (CI-checked).
+- `examples/python-e2e/` — generated-client end-to-end drive.
+- `docs/residential-battery-fleet-simulator-spec.md` — the build brief.

@@ -1,0 +1,33 @@
+# Default batsim configuration. Precedence: this file < BATSIM_* env
+# (double underscore nests) < CLI flags.
+
+[server]
+host = "127.0.0.1"
+port = 8080
+cors_origins = ["*"]
+
+[engine]
+seed = 1
+epoch = "2025-01-01T00:00:00Z"
+tick_seconds = 1
+speed = 1.0
+stream_buffer = 1024
+raw_stream_max_homes = 500
+
+[telemetry]
+raw_ticks = 3600
+rollup_minutes = 1440
+
+[auth]
+api_keys = []
+read_only_keys = []
+
+[audit]
+idempotency_ttl_hours = 24
+max_commands = 10000
+
+[logging]
+filter = "info,tower_http=info"
+json = false
+
+data_dir = "data"

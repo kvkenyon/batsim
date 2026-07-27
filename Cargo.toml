@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/batsim-core", "crates/batsim-registry"]
+members = ["crates/batsim-core", "crates/batsim-registry", "crates/batsim-server", "crates/batsim-cli"]
 
 [workspace.package]
 edition = "2021"
@@ -10,6 +10,23 @@ repository = "https://github.com/batsim/batsim"
 [workspace.dependencies]
 batsim-core = { path = "crates/batsim-core" }
 batsim-registry = { path = "crates/batsim-registry" }
+batsim-server = { path = "crates/batsim-server" }
+
+axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+figment = { version = "0.10", features = ["toml", "env"] }
+ureq = { version = "3", default-features = false, features = ["json"] }
+subtle = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+ulid = "1"
+utoipa = { version = "5", features = ["yaml"] }
+futures-util = "0.3"
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+anyhow = "1"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

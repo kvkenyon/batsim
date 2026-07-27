@@ -314,14 +314,17 @@ fn dispatch_scheduled_out_of_order_still_fires_on_time() {
     home.schedule(ScheduledDispatch {
         execute_at_tick: 8,
         action: DispatchAction::SetManualSetpoint(1_000.0),
+        tag: 0,
     });
     home.schedule(ScheduledDispatch {
         execute_at_tick: 2,
         action: DispatchAction::SetMode(ControlMode::Manual),
+        tag: 0,
     });
     home.schedule(ScheduledDispatch {
         execute_at_tick: 2,
         action: DispatchAction::SetManualSetpoint(2_500.0),
+        tag: 0,
     });
 
     for tick in 0..4 {

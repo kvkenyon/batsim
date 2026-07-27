@@ -1,9 +1,11 @@
 # Architecture
 
 batsim is a deterministic simulator for residential battery fleets in the
-ERCOT (Texas) market. It is a Cargo workspace of two library crates and
-nothing else: no daemon, no async runtime, no network. This guide covers
-how the pieces fit together. For the device catalog schema see
+ERCOT (Texas) market. The Cargo workspace holds four crates: the two
+library crates this guide covers (`batsim-core`, `batsim-registry` - the
+engine itself has no async runtime and no network) plus `batsim-server`
+(the axum HTTP shell) and `batsim-cli` (the `batsimctl` admin CLI). This
+guide covers how the pieces fit together. For the device catalog schema see
 [device-registry.md](device-registry.md); for the physics behind the
 battery, inverter, load, and PV models see
 [physics-models.md](physics-models.md); for how the determinism and
@@ -11,7 +13,7 @@ accuracy claims are enforced see [testing.md](testing.md).
 
 ## 1. Workspace layout
 
-The workspace root `Cargo.toml` declares two members:
+The workspace root `Cargo.toml` declares four members:
 
 - `crates/batsim-registry` - the OEM hardware catalog. Device models
   (batteries, inverters, controllers, PV presets) are declarative JSON
@@ -25,6 +27,12 @@ The workspace root `Cargo.toml` declares two members:
 - `crates/batsim-core` - the simulation engine: tick loop, physics
   models, dispatch, topology routing, telemetry. It depends on
   batsim-registry; batsim-registry depends on nothing in the workspace.
+- `crates/batsim-server` - the HTTP shell (binary `batsim`): axum
+  routes, utoipa OpenAPI assembly, and an engine thread that owns a
+  `SimWorld` behind a command channel. No physics: handlers validate,
+  translate into core calls, and serialize.
+- `crates/batsim-cli` - `batsimctl`, a clap admin CLI that mirrors the
+  HTTP API one-to-one over HTTP (no workspace-crate dependency).
 
 The registry is deliberately data-only. Its types in
 `crates/batsim-registry/src/types.rs` exist as serde deserialization
@@ -79,6 +87,9 @@ pub struct SimWorld {
   `HashMap`: iteration order is exactly insertion order, so traversal is
   deterministic. `SimWorld::add_home` returns the home's stable arena
   index, which doubles as the base of that home's RNG entity key (section 4).
+  Deletion is tombstoning: `Home::set_retired` keeps the arena slot
+  (removal would re-key every RNG substream) but skips all physics and
+  telemetry for the retired home.
 - **`SimClock`** (`crates/batsim-core/src/time.rs`) - the virtual clock:
   `(epoch_s, tick, dt_s)`. `t_sim() = tick * dt_s`,
   `unix_time() = epoch_s + t_sim()`. Construction invariants:
@@ -140,11 +151,17 @@ in the code yet; the dispatch stage reads stages 1-2 of the same tick.
 - **Tick top** - `apply_due_dispatches` drains every `ScheduledDispatch`
   with `execute_at_tick <= tick` from the queue (kept sorted by
   `execute_at_tick`, submission order preserved for equal ticks) and
-  applies the action: `SetMode`, `SetManualSetpoint`, or `SetReserve`.
+  applies the action: `SetMode`, `SetManualSetpoint`, `SetReserve`, or
+  `SetPvCurtail`. Every command carries an opaque issuer `tag`, so
+  `Home::cancel_tagged` can retract one issuer's still-queued commands
+  without disturbing anyone else's.
 - **Stage 1, load** - `LoadModel::power_w(unix_time_s, tick, dt_s,
   t_amb_c)` returns the whole-home load in watts, plus the critical-loads
   share. Stochastic layers draw from the home's load RNG substreams.
-- **Stage 2, PV** - `PvArray::dc_power_w` returns array DC output. If the
+- **Stage 2, PV** - `PvArray::dc_power_w` returns array DC output,
+  scaled by `1 - pv_curtail_frac` (the `SetPvCurtail` dispatch action;
+  curtailment is lossless, as an MPPT moving off its maximum-power
+  point). If the
   system has a dedicated PV string inverter (`HomeDevices::pv_inverter`),
   the array converts here via `dc_to_ac_capped` and never touches the
   battery path. With a hybrid inverter, PV DC lands on the shared bus and
@@ -385,14 +402,13 @@ sharing a `(kind, model_id)` key), and `UnknownModel` (a queried
 
 ## 8. Planned future work
 
-The engine is a library today; there is no server. Planned additions,
-deliberately absent from the current code:
+Planned additions, deliberately absent from the current code:
 
-- **HTTP API** - a service layer exposing the fleet: the dispatch layer
-  (`DispatchAction` is documented as the subset of the planned
-  `/v1/dispatch` actions), HTTP-layer latency modeling, and market
-  dispatch. The `DispatchJitter` RNG purpose tag is already reserved for
-  execution jitter.
+- **Market dispatch** - ERCOT price/AS-driven dispatch over the HTTP
+  API shipped in `batsim-server`. The `DispatchJitter` RNG purpose tag
+  remains reserved in core: the server currently draws per-target
+  execution latency itself, deterministically per
+  `(command_id, home_id)`.
 - **Outages and backup-panel physics** - the grid is always present
   today; `OutageTrigger` is reserved in the RNG purpose enum and the
   `BACKUP_PANEL` meter point is not yet wired.

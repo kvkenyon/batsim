@@ -258,7 +258,7 @@ per IQ8D), `expansion` metadata, `warranty` (tracked, never enforced),
 `operating_temperature`, `cooling`, `ramp_rate` (estimated everywhere:
 full swing in ~1 s), `self_discharge_frac_per_day` (folds in idle draw),
 and `vendor_api` mimicry metadata (API family, auth style, endpoint list)
-consumed by the vendor adapter layer of the planned HTTP API.
+consumed by the planned vendor-API mimicry layer of the HTTP API.
 
 All battery power values are at the device boundary: AC-side for
 AC-coupled and microinverter devices, DC-bus-side for DC-coupled hybrids.
