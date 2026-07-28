@@ -927,6 +927,204 @@ pub struct StreamParams {
     pub downsample: Option<u64>,
 }
 
+// ---------- backtests (M3) ----------
+
+const fn default_seed() -> u64 {
+    1
+}
+
+/// Retail rate structure for the retailer-margin view.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RetailRateSpec {
+    /// A single flat retail rate.
+    Flat {
+        /// Rate in $/kWh.
+        usd_per_kwh: f64,
+    },
+    /// Time-of-use windows over CPT hours.
+    Tou {
+        /// Rate windows; first match wins.
+        windows: Vec<TouWindowSpec>,
+    },
+    /// Griddy-style wholesale pass-through.
+    WholesalePassThrough {
+        /// Multiplier applied to the RTM SPP.
+        multiplier: f64,
+        /// Flat adder in $/kWh.
+        #[serde(default)]
+        adder_usd_per_kwh: f64,
+    },
+}
+
+/// One TOU rate window over CPT hours (wraps midnight when
+/// `start_hour_cpt > end_hour_cpt`).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TouWindowSpec {
+    /// First CPT hour of the window (0-23, inclusive).
+    pub start_hour_cpt: u8,
+    /// Last CPT hour of the window (0-23, inclusive).
+    pub end_hour_cpt: u8,
+    /// Rate in $/kWh.
+    pub usd_per_kwh: f64,
+}
+
+/// Strategy action for a schedule entry.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StrategyAction {
+    /// Charge every home at `kw`.
+    Charge,
+    /// Discharge every home at `kw`.
+    Discharge,
+}
+
+/// One strategy schedule entry (per-home kW setpoint from `start` for
+/// `duration_s`, then revert to self-consumption).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StrategyEntrySpec {
+    /// Start time (RFC 3339).
+    pub start: String,
+    /// Charge or discharge.
+    pub action: StrategyAction,
+    /// Per-home setpoint in kW.
+    pub kw: f64,
+    /// Hold duration in seconds (omit to hold until the next entry).
+    pub duration_s: Option<u64>,
+}
+
+/// Dispatch strategy for a backtest run.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum StrategySpec {
+    /// Baseline: no dispatch (self-consumption only).
+    None,
+    /// Fixed schedule of fleet-wide setpoints.
+    Schedule {
+        /// Entries in time order.
+        entries: Vec<StrategyEntrySpec>,
+    },
+}
+
+impl Default for StrategySpec {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// ERCOT ancillary-service product (backtest awards).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AsProductSpec {
+    /// Responsive Reserve Service.
+    Rrs,
+    /// ERCOT Contingency Reserve Service.
+    Ecrs,
+    /// Non-Spinning Reserve.
+    NonSpin,
+    /// Regulation Up (modeled as unavailable to residential ADER).
+    RegUp,
+    /// Regulation Down (modeled as unavailable to residential ADER).
+    RegDown,
+}
+
+/// An ancillary-service award to settle over the run.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AsAwardSpec {
+    /// Product.
+    pub product: AsProductSpec,
+    /// Window start (RFC 3339).
+    pub start: String,
+    /// Window end (RFC 3339).
+    pub end: String,
+    /// Awarded capacity in MW.
+    pub awarded_mw: f64,
+    /// Clearing price in $/MW (default: DAM MCPC average over the window).
+    pub mcpc_usd_per_mw: Option<f64>,
+    /// Score a deployment event over the window (delivered vs instructed).
+    #[serde(default)]
+    pub deployed: bool,
+}
+
+/// 4CP configuration for the run.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FourCpSpec {
+    /// Transmission rate in $/kW-month.
+    pub transmission_rate_usd_per_kw_mo: f64,
+    /// Explicit candidate interval starts (RFC 3339). When the archive
+    /// carries a system-load signal, the 4CP watch flags additional
+    /// candidates automatically.
+    #[serde(default)]
+    pub candidate_intervals: Vec<String>,
+}
+
+/// Backtest run request: replay one ERCOT operating day against a fleet
+/// and settle it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BacktestRequest {
+    /// Fleet to run (must already be expanded).
+    pub fleet_id: String,
+    /// Human label.
+    pub name: Option<String>,
+    /// CPT operating day (YYYY-MM-DD).
+    pub date: String,
+    /// Settlement point (e.g. `LZ_HOUSTON`).
+    pub settlement_point: String,
+    /// Dispatch strategy (default: baseline, no dispatch).
+    #[serde(default)]
+    pub strategy: StrategySpec,
+    /// Retail rate structure (default: wholesale pass-through x1.0).
+    #[serde(default)]
+    pub retail_rate: Option<RetailRateSpec>,
+    /// Ancillary-service awards to settle.
+    #[serde(default)]
+    pub as_awards: Vec<AsAwardSpec>,
+    /// 4CP configuration (absent: 4CP savings not scored).
+    #[serde(default)]
+    pub four_cp: Option<FourCpSpec>,
+    /// Scenario seed.
+    #[serde(default = "default_seed")]
+    pub seed: u64,
+    /// Speed multiplier (default 0 = as fast as possible).
+    #[serde(default)]
+    pub speed: Option<f64>,
+}
+
+/// Backtest run document.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct BacktestDoc {
+    /// Run id.
+    pub id: String,
+    /// Fleet id.
+    pub fleet_id: String,
+    /// Internally created scenario id.
+    pub scenario_id: String,
+    /// Lifecycle state (running / settled / failed).
+    pub state: String,
+    /// Current sim time (RFC 3339 UTC).
+    pub sim_time: String,
+    /// Settlement intervals closed so far.
+    pub intervals_settled: u64,
+    /// Wall-clock creation time.
+    pub created_at: String,
+    /// URL of the final settlement report.
+    pub settlement_url: String,
+}
+
+/// Page of backtest runs.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct BacktestsPage {
+    /// Runs.
+    pub data: Vec<BacktestDoc>,
+    /// Pagination.
+    pub page: PageInfo,
+}
+
 // ---------- registry ----------
 
 /// Battery catalog summary.

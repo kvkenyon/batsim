@@ -491,6 +491,16 @@ pub async fn sse_stream(
                 });
                 vec![sse_event("dispatch", Some(tick), data)]
             }
+            Ok(SimEvent::Settlement(row)) => {
+                let data = serde_json::to_value(&row).unwrap_or_else(|_| {
+                    serde_json::json!({"error": "settlement serialization failed"})
+                });
+                vec![sse_event("settlement", None, data)]
+            }
+            Ok(SimEvent::RunFinished { run_id, tick }) => {
+                let data = serde_json::json!({"run_id": run_id, "tick": tick});
+                vec![sse_event("run_finished", Some(tick), data)]
+            }
             Err(BroadcastStreamRecvError::Lagged(n)) => {
                 let data = serde_json::json!({ "missed_events": n });
                 vec![sse_event("gap", None, data)]
@@ -558,6 +568,18 @@ async fn ws_loop(
                         "command_id": command_id,
                         "targets_applied": targets_applied,
                         "targets_rejected": targets_rejected,
+                    })],
+                    Ok(SimEvent::Settlement(row)) => {
+                        let mut data = serde_json::to_value(&row).unwrap_or_else(|_| {
+                            serde_json::json!({"error": "settlement serialization failed"})
+                        });
+                        data["event"] = serde_json::json!("settlement");
+                        vec![data]
+                    }
+                    Ok(SimEvent::RunFinished { run_id, tick }) => vec![serde_json::json!({
+                        "event": "run_finished",
+                        "run_id": run_id,
+                        "tick": tick,
                     })],
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         vec![serde_json::json!({ "event": "gap", "missed_events": n })]

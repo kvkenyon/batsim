@@ -148,11 +148,17 @@ Explicit checklist notes:
    `config/ercot_rules.v2025.toml`; verified 2026-07-27. Uri-era replays
    must use the pre-2022 $9,000 cap (also in the rules file).
 
-### Real-data validation (report 13061, 2023 file)
+### Real-data validation log
 
-Parsed `rpt.00013061.0000000000000000.RTMLZHBSPP_2023.xlsx` (22 MB,
-12 monthly sheets) with `batsim-ercot-ingest import`. Numbers recorded in
-the validation log section below (updated at each re-verification).
+All three reports ingested from real ERCOT files and verified with
+`batsim-ercot-ingest verify` (schema version, manifest row counts, strictly
+increasing timestamps per partition). Verification date: 2026-07-27.
+
+| Report | Source | Result |
+|---|---|---|
+| RTM SPP (13061, 2023 xlsx, 22 MB) | `import` | 805,920 rows read → 525,600 kept (280,320 duplicated load-zone rows dropped); 5,475 partitions (365 days × 15 settlement points); 5,475/5,475 verify ok. 2023-08-17 `LZ_NORTH`: **96 rows, max $5,197.60/MWh** (matches ERCOT's published value). DST days: 2023-03-12 → 92 rows, 2023-11-05 → 100 rows per location. Wall time ≈ 6 s. |
+| DAM SPP (13060, 2023 zipped xlsx) | `fetch` (live MIS) | 131,400 rows (365 × 24 × 15); 5,475/5,475 verify ok. DST days: 2023-03-12 → 23 rows, 2023-11-05 → 25 rows. 2023-08-17 `LZ_NORTH` max $3,357.07/MWh. Note: this report uses `Hour Ending` / `Settlement Point` headers and has no `Delivery Interval` column — the parser treats the interval as implied-1 (hourly). |
+| AS MCPC (13091, 2023 zipped csv) | `fetch` (live MIS) | 8,760 hourly rows → 39,961 product prices (3,839 empty pre-ECRS cells skipped); 365 partitions; 365/365 verify ok. Pre-ECRS days 96 rows/day (4 products), 120 rows/day after ECRS launch 2023-06-10; DST days 92/125 rows. Columns `REGUP ` etc. carry trailing spaces — header matching is punctuation-tolerant. |
 
 ## Scope rules
 

@@ -55,6 +55,7 @@ fn test_state_with_raw_cap(raw_stream_max_homes: usize) -> AppState {
         homes: Arc::new(RwLock::new(HashMap::new())),
         fleets: Arc::new(RwLock::new(HashMap::new())),
         scenarios: Arc::new(RwLock::new(HashMap::new())),
+        backtests: Arc::new(RwLock::new(HashMap::new())),
         active_scenario: Arc::new(RwLock::new(None)),
         audit,
         idempotency: Arc::new(RwLock::new(IdemStore::new(24))),

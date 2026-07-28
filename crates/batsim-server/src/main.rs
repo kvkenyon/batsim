@@ -117,6 +117,7 @@ fn main() -> Result<()> {
         homes: Arc::new(RwLock::new(std::collections::HashMap::new())),
         fleets: Arc::new(RwLock::new(std::collections::HashMap::new())),
         scenarios: Arc::new(RwLock::new(std::collections::HashMap::new())),
+        backtests: Arc::new(RwLock::new(std::collections::HashMap::new())),
         active_scenario: Arc::new(RwLock::new(None)),
         audit,
         idempotency: Arc::new(RwLock::new(IdemStore::new(

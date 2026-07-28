@@ -363,6 +363,12 @@ impl SettlementEngine {
         }
     }
 
+    /// The most recently recorded interval row (for streaming).
+    #[must_use]
+    pub fn last_interval(&self) -> Option<&IntervalSettlement> {
+        self.intervals.last()
+    }
+
     /// Record one settlement interval: per-home net export kWh (export
     /// positive) against the interval's RTM price sample. Retail avoided
     /// cost and charging cost are computed per home (a home's net export

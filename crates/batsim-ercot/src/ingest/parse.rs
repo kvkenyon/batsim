@@ -97,7 +97,8 @@ pub enum ReportFormat {
     Xlsx,
     /// Plain CSV text.
     Csv,
-    /// Zip archive containing CSV file(s).
+    /// Zip archive containing CSV file(s) or an XLSX workbook (ERCOT serves
+    /// historical workbooks zipped).
     CsvZip,
 }
 
@@ -281,7 +282,7 @@ struct SppRow {
 struct SppColumns {
     date: usize,
     hour: usize,
-    interval: usize,
+    interval: Option<usize>,
     flag: Option<usize>,
     name: usize,
     price: usize,
@@ -291,9 +292,10 @@ impl SppColumns {
     fn find(headers: &[String], context: &str) -> Result<Self> {
         Ok(Self {
             date: find_column(headers, &["DELIVERYDATE"], &["DATE"]).ok_or_else(|| missing(context, "Delivery Date"))?,
-            hour: find_column(headers, &["DELIVERYHOUR"], &[]).ok_or_else(|| missing(context, "Delivery Hour"))?,
-            interval: find_column(headers, &["DELIVERYINTERVAL"], &[])
-                .ok_or_else(|| missing(context, "Delivery Interval"))?,
+            hour: find_column(headers, &["DELIVERYHOUR", "HOURENDING"], &[])
+                .ok_or_else(|| missing(context, "Delivery Hour / Hour Ending"))?,
+            // Hourly reports (13060) have no interval column; implied 1.
+            interval: find_column(headers, &["DELIVERYINTERVAL"], &[]),
             flag: find_column(headers, &["REPEATEDHOURFLAG", "DSTFLAG"], &[]),
             name: find_column(headers, &["SETTLEMENTPOINTNAME", "SETTLEMENTPOINT"], &[])
                 .ok_or_else(|| missing(context, "Settlement Point Name"))?,
@@ -310,7 +312,7 @@ fn read_spp_row(
     stats: &mut ParseStats,
 ) -> Result<Option<SppRow>> {
     let price = match cell_at(cells, cols.price) {
-        Cell::Empty => {
+        cell if cell.is_empty() => {
             stats.empty_skipped += 1;
             return Ok(None);
         }
@@ -324,7 +326,10 @@ fn read_spp_row(
     Ok(Some(SppRow {
         date: cell_date(cell_at(cells, cols.date), context)?,
         hour_ending: cell_hour_ending(cell_at(cells, cols.hour), context)?,
-        interval: cell_u8(cell_at(cells, cols.interval), context, "Delivery Interval")?,
+        interval: match cols.interval {
+            Some(i) => cell_u8(cell_at(cells, i), context, "Delivery Interval")?,
+            None => 1,
+        },
         repeated_hour: cols.flag.is_some_and(|i| cell_flag(cell_at(cells, i))),
         name,
         price,
@@ -375,7 +380,7 @@ fn read_as_row(
     let ts = cpt_interval_to_utc(date, hour, 1, 1, repeated)?;
     for (idx, product) in &cols.products {
         let price = match cell_at(cells, *idx) {
-            Cell::Empty => {
+            cell if cell.is_empty() => {
                 stats.empty_skipped += 1;
                 continue;
             }
@@ -573,18 +578,30 @@ fn read_csv_zip(bytes: &[u8], context: &str) -> Result<Vec<Table>> {
             context: context.to_string(),
             detail: format!("zip entry {i}: {e}"),
         })?;
-        if !entry.name().to_ascii_lowercase().ends_with(".csv") {
+        let entry_name = entry.name().to_string();
+        let ext = entry_name
+            .rsplit('.')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let is_csv = ext == "csv";
+        let is_xlsx = ext == "xlsx" || ext == "xlsm";
+        if !is_csv && !is_xlsx {
             continue;
         }
-        let name = entry.name().to_string();
         let mut buf = Vec::new();
         entry.read_to_end(&mut buf)?;
-        tables.push(table_from_csv_bytes(&buf, &format!("{context} entry {name}"))?);
+        let entry_context = format!("{context} entry {entry_name}");
+        if is_csv {
+            tables.push(table_from_csv_bytes(&buf, &entry_context)?);
+        } else {
+            tables.extend(read_xlsx(&buf, &entry_context)?);
+        }
     }
     if tables.is_empty() {
         return Err(ErcotError::Parse {
             context: context.to_string(),
-            detail: "zip contains no .csv entry".to_string(),
+            detail: "zip contains no .csv/.xlsx entry".to_string(),
         });
     }
     Ok(tables)
@@ -927,6 +944,20 @@ Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Poin
         let repeat = out.rows.iter().find(|r| r.lmp_usd_per_mwh == 31.0).unwrap();
         assert_eq!(first.ts, datetime!(2023-11-05 06:00 UTC));
         assert_eq!(repeat.ts, datetime!(2023-11-05 07:00 UTC));
+    }
+
+    #[test]
+    fn dam_hourly_layout_without_interval_column() {
+        // Real 13060 layout: "Hour Ending", "Settlement Point", no interval.
+        let csv = "Delivery Date,Hour Ending,Repeated Hour Flag,Settlement Point,Settlement Point Price\n\
+                   08/17/2023,01:00,N,HB_BUSAVG,10.36\n\
+                   08/17/2023,02:00,N,HB_BUSAVG,9.99\n";
+        let out = parse_spp_report(ReportKind::DamSpp, csv.as_bytes(), ReportFormat::Csv).unwrap();
+        assert_eq!(out.rows.len(), 2);
+        assert_eq!(out.rows[0].interval_secs, 3600);
+        assert_eq!(out.rows[0].ts, datetime!(2023-08-17 05:00 UTC));
+        assert_eq!(out.rows[1].ts, datetime!(2023-08-17 06:00 UTC));
+        assert_eq!(out.rows[0].lmp_usd_per_mwh, 10.36);
     }
 
     #[test]
