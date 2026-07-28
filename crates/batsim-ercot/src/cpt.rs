@@ -11,7 +11,8 @@
 //! (column `Repeated Hour Flag` = "Y"). The first occurrence is CDT (UTC-5),
 //! the repeat is CST (UTC-6).
 
-use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset, Weekday};
+use time::macros::time;
+use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, UtcOffset, Weekday};
 
 use crate::error::{ErcotError, Result};
 
@@ -21,19 +22,26 @@ pub const CDT: UtcOffset = time::macros::offset!(-5);
 pub const CST: UtcOffset = time::macros::offset!(-6);
 
 /// Nth weekday of a month (e.g. 2nd Sunday of March).
+///
+/// `n` must be 1-5; inputs are internal constants, so day validity is by
+/// construction (day <= 29 for n <= 4 in any month).
 fn nth_weekday(year: i32, month: Month, weekday: Weekday, n: u8) -> Date {
-    let first = Date::from_calendar_date(year, month, 1).expect("valid date");
+    let first =
+        Date::from_calendar_date(year, month, 1).unwrap_or_else(|_| unreachable!("day 1 exists"));
     let shift = (7 + weekday as u8 - first.weekday() as u8) % 7;
     #[allow(clippy::cast_possible_wrap)]
     let day = 1 + shift + 7 * (n - 1);
-    Date::from_calendar_date(year, month, day).expect("valid date")
+    match Date::from_calendar_date(year, month, day) {
+        Ok(d) => d,
+        Err(_) => unreachable!("nth weekday with n <= 4 falls within the month"),
+    }
 }
 
 /// UTC instant of the spring-forward transition (02:00 CST -> 03:00 CDT).
 fn spring_forward_utc(year: i32) -> OffsetDateTime {
     // 02:00 local CST = 08:00 UTC.
     nth_weekday(year, Month::March, Weekday::Sunday, 2)
-        .with_time(Time::from_hms(8, 0, 0).expect("valid time"))
+        .with_time(time!(8:00))
         .assume_utc()
 }
 
@@ -41,7 +49,7 @@ fn spring_forward_utc(year: i32) -> OffsetDateTime {
 fn fall_back_utc(year: i32) -> OffsetDateTime {
     // 02:00 local CDT = 07:00 UTC.
     nth_weekday(year, Month::November, Weekday::Sunday, 1)
-        .with_time(Time::from_hms(7, 0, 0).expect("valid time"))
+        .with_time(time!(7:00))
         .assume_utc()
 }
 
@@ -81,6 +89,10 @@ pub fn operating_day(ts: OffsetDateTime) -> Date {
 /// # Errors
 /// Returns `ErcotError::Time` for out-of-range inputs, non-divisible
 /// cadences, or an interval that falls in the spring-forward gap.
+///
+/// # Panics
+/// Never panics in practice: internal `Time` constructors use constant
+/// values validated at compile time via the `time!` macro.
 pub fn cpt_interval_to_utc(
     date: Date,
     hour_ending: u8,
@@ -109,48 +121,33 @@ pub fn cpt_interval_to_utc(
     let local_date = date
         .checked_add(time::Duration::days(i64::from(day_offset)))
         .ok_or_else(|| ErcotError::Time("date overflow".to_string()))?;
-    let local_time =
-        Time::from_hms(0, 0, 0).expect("midnight") + time::Duration::minutes(i64::from(min_of_day));
+    let local_time = time!(0:00) + time::Duration::minutes(i64::from(min_of_day));
     let naive = PrimitiveDateTime::new(local_date, local_time);
 
     let year = local_date.year();
-    let spring = spring_forward_utc(year);
-    let fall = fall_back_utc(year);
-
-    // Candidate UTC instants under both offsets.
-    let as_cdt = naive.assume_offset(CDT);
-    let as_cst = naive.assume_offset(CST);
 
     // Ambiguous window: the fall-back day's [01:00, 02:00) local hour.
-    let ambiguous = naive >= PrimitiveDateTime::new(
-        fall_back_utc(year).date(),
-        Time::from_hms(1, 0, 0).expect("valid time"),
-    ) && naive
-        < PrimitiveDateTime::new(
-            fall_back_utc(year).date(),
-            Time::from_hms(2, 0, 0).expect("valid time"),
-        );
+    let ambiguous = naive
+        >= PrimitiveDateTime::new(fall_back_utc(year).date(), time!(1:00))
+        && naive < PrimitiveDateTime::new(fall_back_utc(year).date(), time!(2:00));
     // Gap window: the spring-forward day's [02:00, 03:00) local hour.
-    let gap = naive >= PrimitiveDateTime::new(
-        spring_forward_utc(year).date(),
-        Time::from_hms(2, 0, 0).expect("valid time"),
-    ) && naive
-        < PrimitiveDateTime::new(
-            spring_forward_utc(year).date(),
-            Time::from_hms(3, 0, 0).expect("valid time"),
-        );
+    let gap = naive
+        >= PrimitiveDateTime::new(spring_forward_utc(year).date(), time!(2:00))
+        && naive < PrimitiveDateTime::new(spring_forward_utc(year).date(), time!(3:00));
 
-    if ambiguous {
-        // First occurrence is CDT; the flagged repeat is CST.
-        return Ok(if repeated_hour { as_cst } else { as_cdt });
-    }
     if gap {
         return Err(ErcotError::Time(format!(
             "{naive} falls in the spring-forward gap (CPT)"
         )));
     }
-    let _ = (spring, fall);
-    Ok(if offset_at_local(naive) == CDT { as_cdt } else { as_cst })
+    // First occurrence of the ambiguous hour is CDT; the flagged repeat
+    // is CST. Every other local time is unambiguous.
+    let offset = if ambiguous {
+        if repeated_hour { CST } else { CDT }
+    } else {
+        offset_at_local(naive)
+    };
+    Ok(naive.assume_offset(offset))
 }
 
 /// CPT offset for an unambiguous local civil time.
@@ -161,11 +158,11 @@ fn offset_at_local(naive: PrimitiveDateTime) -> UtcOffset {
     // is handled by the caller).
     let cdt_start = PrimitiveDateTime::new(
         nth_weekday(year, Month::March, Weekday::Sunday, 2),
-        Time::from_hms(3, 0, 0).expect("valid time"),
+        time!(3:00),
     );
     let cdt_end = PrimitiveDateTime::new(
         nth_weekday(year, Month::November, Weekday::Sunday, 1),
-        Time::from_hms(2, 0, 0).expect("valid time"),
+        time!(2:00),
     );
     if naive >= cdt_start && naive < cdt_end {
         CDT
@@ -175,9 +172,11 @@ fn offset_at_local(naive: PrimitiveDateTime) -> UtcOffset {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
 mod tests {
     use super::*;
     use time::macros::datetime;
+    use time::Time;
 
     fn d(y: i32, m: u8, day: u8) -> Date {
         Date::from_calendar_date(y, Month::try_from(m).unwrap(), day).unwrap()

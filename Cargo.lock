@@ -451,6 +451,7 @@ dependencies = [
  "axum",
  "base64",
  "batsim-core",
+ "batsim-ercot",
  "batsim-registry",
  "clap",
  "figment",

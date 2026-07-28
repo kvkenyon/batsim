@@ -17,12 +17,24 @@ use crate::types::{AsPrice, Location, PriceSample, SystemSignal, TimeRange};
 /// and indexed before the run starts; the tick loop reads from memory.
 pub trait PriceSource: Send + Sync {
     /// DAM hourly SPPs for `[start, end)`.
+    ///
+    /// # Errors
+    /// Returns `ErcotError::DataNotFound` when the source lacks coverage.
     fn dam_spps(&self, loc: &Location, r: TimeRange) -> Result<Vec<PriceSample>>;
     /// Real-time SPPs at the native cadence of the source.
+    ///
+    /// # Errors
+    /// Returns `ErcotError::DataNotFound` when the source lacks coverage.
     fn rt_spps(&self, loc: &Location, r: TimeRange) -> Result<Vec<PriceSample>>;
     /// DAM AS clearing prices for capacity (hourly, per product).
+    ///
+    /// # Errors
+    /// Returns `ErcotError::DataNotFound` when the source lacks coverage.
     fn as_prices(&self, r: TimeRange) -> Result<Vec<AsPrice>>;
     /// System load / reserves / fuel mix (drives 4CP watch and emissions).
+    ///
+    /// # Errors
+    /// Returns `ErcotError::DataNotFound` when the source lacks coverage.
     fn system_signals(&self, r: TimeRange) -> Result<Vec<SystemSignal>>;
     /// Streaming view for live mode. Default: unsupported.
     ///

@@ -14,6 +14,7 @@ path = "src/lib.rs"
 
 [dependencies]
 batsim-core.workspace = true
+batsim-ercot.workspace = true
 batsim-registry.workspace = true
 
 anyhow.workspace = true

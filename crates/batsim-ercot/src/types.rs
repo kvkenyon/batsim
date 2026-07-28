@@ -244,6 +244,9 @@ pub struct TimeRange {
 
 impl TimeRange {
     /// Construct, validating `start < end`.
+    ///
+    /// # Errors
+    /// Returns `ErcotError::InvalidRange` when `start >= end`.
     pub fn new(start: OffsetDateTime, end: OffsetDateTime) -> Result<Self, ErcotError> {
         if start >= end {
             return Err(ErcotError::InvalidRange { start, end });
