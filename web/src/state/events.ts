@@ -94,12 +94,12 @@ export function createEventDetector(): EventDetector {
 
       const fleet = frame.fleets[0];
       if (fleet) {
-        // Solar ramp: first crossing of half the day's own peak.
+        // Solar ramp: the day's first crossing of a fleet-scaled
+        // output floor, once the day has shown real generation.
         if (fleet.pv_power_kw > pvDailyPeakKw) pvDailyPeakKw = fleet.pv_power_kw;
         if (
           pvRampMarkedDay !== dayIndex &&
           pvDailyPeakKw > Math.max(20, fleet.homes * 0.5) &&
-          fleet.pv_power_kw > pvDailyPeakKw * 0.45 &&
           fleet.pv_power_kw > Math.max(10, fleet.homes * 0.25)
         ) {
           pvRampMarkedDay = dayIndex;

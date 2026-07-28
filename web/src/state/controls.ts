@@ -104,13 +104,13 @@ export function createReplayController(transport: ReplayTransport): SimControlle
         set({ dispatchStatus: "no price event ahead in the recording" });
       }
     },
-    dispatchFleet(direction) {
+    dispatchFleet(_direction) {
       // The recording already contains a real fleet dispatch with true
       // per-home execution latency; seek to it and watch the fleet move.
       if (transport.jumpToNextDispatch()) {
         set({
           paused: false,
-          dispatchStatus: `replaying recorded fleet ${direction} · watch the fleet respond`,
+          dispatchStatus: "replaying recorded fleet dispatch · watch the fleet respond",
         });
       } else {
         set({ dispatchStatus: "recording holds no fleet dispatch" });

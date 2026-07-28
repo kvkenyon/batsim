@@ -142,6 +142,7 @@ export default function MapView({ live, active }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const veilRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaplibreMap | null>(null);
+  const overlayRef = useRef<MapFlowOverlay | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
 
@@ -189,7 +190,8 @@ export default function MapView({ live, active }: MapViewProps) {
 
     const overlay = new MapFlowOverlay(container);
     overlay.attach(map, live);
-    overlay.start();
+    overlayRef.current = overlay;
+    if (activeRef.current) overlay.start();
 
     /** Zone styling for the active lens: the fill stays a quiet neutral;
      * the price lens speaks through the boundary color, not a flood fill. */
@@ -524,6 +526,7 @@ export default function MapView({ live, active }: MapViewProps) {
       abort.abort();
       window.clearInterval(timer);
       unsubscribe();
+      overlayRef.current = null;
       overlay.detach();
       mapRef.current = null;
       map.remove();
@@ -536,6 +539,11 @@ export default function MapView({ live, active }: MapViewProps) {
     const container = containerRef.current;
     if (!container) return;
     container.style.visibility = active ? "visible" : "hidden";
+    const overlay = overlayRef.current;
+    if (overlay) {
+      if (active) overlay.start();
+      else overlay.stop();
+    }
     const map = mapRef.current;
     if (!map) return;
     if (active) {
