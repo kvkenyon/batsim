@@ -17,7 +17,20 @@ markers. (2) The palette is the dark operations-console theme in
 supersedes the warm-neutral token table in Part D §0.3 while keeping its
 amber-discharge / sage-charge / restrained-alert-red semantics. For everything already
 implemented, the `web/` code is authoritative; this brief remains the target for the
-unimplemented scope (Z2/Z4/Z5 strata, build mode, lenses beyond price/SOC).
+unimplemented scope (Z2/Z4/Z5 strata, lenses beyond price/SOC).
+
+Implementation note (2026-07-27, operator tools): build mode, the dispatch console,
+fleet scenarios, and a time scrubber shipped as deliberate subsets of U8/U9/U11/U13.
+Build mode is the registry catalog model picker with click-to-place inside a zone
+polygon and a two-step remove in the inspector; U11's PV/backup/EV configuration is
+not implemented. The dispatch console does zone- or fleet-scoped charge/discharge/idle
+with per-home acknowledgement counts; U13's individual-home commands, selection-based
+group scoping, scheduling, and undo are not implemented. Fleet scenarios are named
+fleet-composition snapshots in browser localStorage, not U9's server-side sim
+savegames - the server scenario API binds time/prices/seed and has no fleet
+composition to store. The scrubber seeks the demo
+replay tape only; U8's scrub over live telemetry rings is not implemented, so live
+mode shows the scrubber disabled and labeled.
 
 0. Executive Summary
 batsim-ui is the visual operations layer for the batsim residential battery fleet
