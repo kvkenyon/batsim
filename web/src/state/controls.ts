@@ -87,11 +87,12 @@ function dispatchAction(direction: DispatchDirection): DispatchRequest["action"]
 }
 
 /** Poll a live command until every target reports, updating the ack rollup. */
-function watchLiveCommand(api: BatsimApi, command: string, zone: string, direction: DispatchDirection): void {
+function watchLiveCommand(api: BatsimApi, command: string, initial: ZoneAck): void {
   const started = Date.now();
+  let mine = initial;
   const poll = async (): Promise<void> => {
     const ack = useAppStore.getState().zoneAck;
-    if (ack === null || ack.zone !== zone || ack.done) return;
+    if (ack !== mine || ack.done) return;
     try {
       const doc = await api.getCommand(command);
       const acked = doc.targets.filter(
@@ -103,17 +104,18 @@ function watchLiveCommand(api: BatsimApi, command: string, zone: string, directi
         doc.status === "completed" ||
         doc.status === "completed_with_errors" ||
         doc.status === "cancelled";
-      useAppStore.setState({ zoneAck: { zone, direction, acked, expected: doc.targets.length, done } });
+      mine = { ...mine, acked, expected: doc.targets.length, done };
+      useAppStore.setState((state) => ({ zoneAck: state.zoneAck === ack ? mine : state.zoneAck }));
       if (!done && Date.now() - started < ACK_TIMEOUT_MS) {
         window.setTimeout(() => void poll(), ACK_POLL_MS);
       } else if (!done) {
         useAppStore.setState((state) => ({
-          zoneAck: state.zoneAck ? { ...state.zoneAck, done: true } : null,
+          zoneAck: state.zoneAck === mine ? { ...mine, done: true } : state.zoneAck,
         }));
       }
     } catch (err) {
       useAppStore.setState((state) => ({
-        zoneAck: state.zoneAck ? { ...state.zoneAck, done: true } : null,
+        zoneAck: state.zoneAck === mine ? { ...mine, done: true } : state.zoneAck,
       }));
       setError(err);
     }
@@ -127,24 +129,26 @@ function watchLiveCommand(api: BatsimApi, command: string, zone: string, directi
  * per-device latency the recorder captured, so the rollup climbs home by
  * home exactly as it would against a live fleet.
  */
-function watchReplayAcks(zone: string, direction: DispatchDirection): void {
+function watchReplayAcks(initial: ZoneAck): void {
   const started = Date.now();
+  let mine = initial;
   const poll = (): void => {
     const ack = useAppStore.getState().zoneAck;
-    if (ack === null || ack.zone !== zone || ack.done) return;
+    if (ack !== mine || ack.done) return;
     const { live } = getRuntime();
     let acked = 0;
-    for (const id of zoneHomeIds(zone)) {
+    for (const id of zoneHomeIds(mine.zone)) {
       const slot = live.slotOf.get(id);
       if (slot === undefined) continue;
       const kw = live.batteryKw[slot] ?? 0;
       const responding =
-        direction === "discharge" ? kw > REPLAY_ACK_KW : direction === "charge" ? kw < -REPLAY_ACK_KW : Math.abs(kw) <= REPLAY_ACK_KW;
+        mine.direction === "discharge" ? kw > REPLAY_ACK_KW : mine.direction === "charge" ? kw < -REPLAY_ACK_KW : Math.abs(kw) <= REPLAY_ACK_KW;
       if (responding) acked += 1;
     }
     const timedOut = Date.now() - started > ACK_TIMEOUT_MS;
-    const done = acked >= ack.expected || timedOut;
-    useAppStore.setState({ zoneAck: { ...ack, acked, done } });
+    const done = acked >= mine.expected || timedOut;
+    mine = { ...mine, acked, done };
+    useAppStore.setState((state) => ({ zoneAck: state.zoneAck === ack ? mine : state.zoneAck }));
     if (!done) window.setTimeout(poll, ACK_POLL_MS);
   };
   window.setTimeout(poll, ACK_POLL_MS);
@@ -263,7 +267,7 @@ export function createLiveController(api: BatsimApi, fleetId: string | null): Si
         })
         .then((res) => {
           set({ dispatchStatus: `${direction} ${zone} · ${res.targets} homes targeted` });
-          watchLiveCommand(api, res.command_id, zone, direction);
+          watchLiveCommand(api, res.command_id, ack);
         })
         .catch((err: unknown) => {
           set({ zoneAck: null, dispatchStatus: err instanceof Error ? err.message : String(err) });
@@ -432,13 +436,14 @@ export function createReplayController(transport: ReplayTransport): SimControlle
         set({ zoneAck: null, dispatchStatus: "recording holds no fleet dispatch" });
         return;
       }
+      const replayAck: ZoneAck = { zone, direction, acked: 0, expected, done: false };
       set({
         paused: false,
-        zoneAck: { zone, direction, acked: 0, expected, done: false },
+        zoneAck: replayAck,
         dispatchStatus: `replaying recorded dispatch · ${zone} responding`,
       });
       transport.resume();
-      watchReplayAcks(zone, direction);
+      watchReplayAcks(replayAck);
     },
     placeHome(modelId, zone, lng, lat) {
       localHomeSequence += 1;
