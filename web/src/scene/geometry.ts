@@ -96,7 +96,8 @@ export const BADGE_SIZE_M = 1.1;
 
 /**
  * Per-home state badge: a flat triangle (charge = up, discharge = down,
- * idle = diamond, reserve breach = red triangle). Flat in local XY; the
+ * idle = same triangle scaled small, reserve breach = red triangle).
+ * Flat in local XY; the
  * instance transform billboards it upright and rotates for direction.
  */
 export function createBadgeGeometry(): THREE.BufferGeometry {

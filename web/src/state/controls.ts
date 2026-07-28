@@ -112,6 +112,7 @@ export function createReplayController(transport: ReplayTransport): SimControlle
           paused: false,
           dispatchStatus: "replaying recorded fleet dispatch · watch the fleet respond",
         });
+        transport.resume();
       } else {
         set({ dispatchStatus: "recording holds no fleet dispatch" });
       }
