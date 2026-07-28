@@ -73,7 +73,7 @@ function interiorPoint(ring: [number, number][], bbox: [number, number, number, 
   return [cx, cy];
 }
 
-function pointInPolygon(x: number, y: number, ring: [number, number][]): boolean {
+export function pointInPolygon(x: number, y: number, ring: [number, number][]): boolean {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const pi = ring[i] ?? [0, 0];

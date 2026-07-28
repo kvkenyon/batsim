@@ -25,6 +25,7 @@ import { useEffect, useRef } from "react";
 import { dayArc } from "../state/dayArc";
 import type { LiveBuffers } from "../state/live";
 import { useAppStore, type Lens } from "../state/store";
+import { pointInPolygon } from "../procgen/placement";
 import { TOKENS, priceColor, priceMarkerColor, socColor } from "../tokens/tokens";
 import { MapFlowOverlay } from "./flowOverlay";
 
@@ -77,6 +78,28 @@ type ZoneGeometry = Polygon | MultiPolygon;
 
 const EMPTY_FC: FeatureCollection = { type: "FeatureCollection", features: [] };
 const NO_ZONE: FilterSpecification = ["==", ["get", "zone"], ""];
+
+/**
+ * Zone under a lng/lat point, computed against the parsed GeoJSON rather
+ * than queryRenderedFeatures: rendered-feature queries depend on tile
+ * timing, so a programmatic jump could leave the crosshair zone (and the
+ * dive chip) stuck empty until the camera moved again.
+ */
+function zoneAtPoint(zones: Feature<ZoneGeometry>[], lng: number, lat: number): string | null {
+  for (const feature of zones) {
+    const zone: unknown = feature.properties?.zone;
+    if (typeof zone !== "string") continue;
+    const geometry = feature.geometry;
+    const rings =
+      geometry.type === "Polygon"
+        ? [coordsOf(geometry.coordinates)]
+        : geometry.type === "MultiPolygon"
+          ? geometry.coordinates.map((poly) => coordsOf(poly))
+          : [];
+    if (rings.some((ring) => pointInPolygon(lng, lat, ring))) return zone;
+  }
+  return null;
+}
 
 /** One point feature per home, colored for the given lens. */
 function buildHomesCollection(live: LiveBuffers, lens: Lens): FeatureCollection<Point> {
@@ -156,6 +179,7 @@ export default function MapView({ live, active }: MapViewProps) {
     const lastVersionRef = { current: -1 };
     const lastCountRef = { current: -1 };
     let layersReady = false;
+    let zoneFeatures: Feature<ZoneGeometry>[] = [];
 
     const style: StyleSpecification = {
       version: 8,
@@ -303,11 +327,7 @@ export default function MapView({ live, active }: MapViewProps) {
       // handoff both target this zone, not a fixed one.
       const updateCenterZone = () => {
         const center = map.getCenter();
-        const features = map.queryRenderedFeatures(map.project([center.lng, center.lat]), {
-          layers: [LAYER_ZONES_FILL],
-        });
-        const zone: unknown = features[0]?.properties?.zone;
-        const next = typeof zone === "string" ? zone : null;
+        const next = zoneAtPoint(zoneFeatures, center.lng, center.lat);
         if (useAppStore.getState().centerZone !== next) {
           useAppStore.setState({ centerZone: next });
         }
@@ -315,9 +335,7 @@ export default function MapView({ live, active }: MapViewProps) {
 
       map.on("dblclick", (e) => {
         e.preventDefault();
-        const features = map.queryRenderedFeatures(e.point, { layers: [LAYER_ZONES_FILL] });
-        const zone: unknown = features[0]?.properties?.zone;
-        useAppStore.getState().diveZone(typeof zone === "string" ? zone : null);
+        useAppStore.getState().diveZone(zoneAtPoint(zoneFeatures, e.lngLat.lng, e.lngLat.lat));
       });
 
       // Handoff is armed while zoomed out below the threshold and consumed
@@ -344,6 +362,7 @@ export default function MapView({ live, active }: MapViewProps) {
 
     const addLayers = (zonesFc: FeatureCollection) => {
       const { state, zones, labels } = splitZones(zonesFc);
+      zoneFeatures = zones.features;
       const lens = lensRef.current;
 
       map.addSource(SOURCE_BASEMAP, {

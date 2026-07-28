@@ -6,6 +6,19 @@ Stack: React + TypeScript + three.js (React Three Fiber) + MapLibre GL, WebGL2
 Audience: AI implementation agents (this document is the complete build brief)
 Version: 1.0 — 2026-07-26
 Status: Approved for implementation
+
+Implementation note (2026-07-27, captain-review override): the shipped vertical slice
+deliberately deviates from this brief in two places. (1) The Z1 basemap is CartoDB Dark
+Matter raster tiles, not the hand-drawn stylized Texas of Part D; large flat price fills
+over the coarse zone polygons read badly, so zones stay subtle (neutral fill, price ramp
+carried on zone outlines, hover highlight) and the price/SOC lensing lives on the home
+markers. (2) The palette is the dark operations-console theme in
+`web/src/tokens/tokens.ts` (near-black #0B0E11 surfaces, IBM Plex Sans/Mono), which
+supersedes the warm-neutral token table in Part D §0.3 while keeping its
+amber-discharge / sage-charge / restrained-alert-red semantics. For everything already
+implemented, the `web/` code is authoritative; this brief remains the target for the
+unimplemented scope (Z2/Z4/Z5 strata, build mode, lenses beyond price/SOC).
+
 0. Executive Summary
 batsim-ui is the visual operations layer for the batsim residential battery fleet
 simulator. The experience is best described as Factorio × Cities: Skylines × Bloomberg
