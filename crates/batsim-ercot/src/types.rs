@@ -12,8 +12,11 @@ use time::OffsetDateTime;
 use crate::error::ErcotError;
 
 /// ERCOT settlement location (spec D.1.1).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+///
+/// Serializes as the canonical settlement-point string (`HB_NORTH`,
+/// `LZ_HOUSTON`, or a verbatim node name) so JSON reports and Parquet
+/// partitions share one representation.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Location {
     /// A trading hub (e.g. HB_NORTH).
     Hub(TradingHub),
@@ -21,6 +24,19 @@ pub enum Location {
     LoadZone(LoadZone),
     /// A resource node or any other settlement point name, verbatim.
     Node(String),
+}
+
+impl Serialize for Location {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(&self.settlement_point())
+    }
+}
+
+impl<'de> Deserialize<'de> for Location {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let name = String::deserialize(d)?;
+        Ok(Self::from_settlement_point(&name))
+    }
 }
 
 impl Location {
@@ -258,5 +274,30 @@ impl TimeRange {
     #[must_use]
     pub fn contains(&self, ts: OffsetDateTime) -> bool {
         ts >= self.start && ts < self.end
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn location_serializes_as_settlement_point_string() {
+        assert_eq!(
+            serde_json::to_string(&Location::Hub(TradingHub::North)).unwrap(),
+            "\"HB_NORTH\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Location::LoadZone(LoadZone::Houston)).unwrap(),
+            "\"LZ_HOUSTON\""
+        );
+        let node = Location::Node("MY_NODE_X".to_string());
+        let json = serde_json::to_string(&node).unwrap();
+        assert_eq!(json, "\"MY_NODE_X\"");
+        let back: Location = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, node);
+        let hub: Location = serde_json::from_str("\"HB_NORTH\"").unwrap();
+        assert_eq!(hub, Location::Hub(TradingHub::North));
     }
 }
