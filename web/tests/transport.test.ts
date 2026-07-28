@@ -82,6 +82,19 @@ describe("ReplayTransport scrubbing", () => {
     expect(Date.parse(frame.sim_time ?? "")).toBe(Date.UTC(2025, 5, 15, 15, 2));
   });
 
+  it("seek backwards from mid-tape lands on the earlier tick", async () => {
+    const transport = await startedTransport();
+    transport.pause();
+    const mid = Date.UTC(2025, 5, 15, 15, 5);
+    expect(transport.seekToSimTime(mid)).toBe(true);
+    emitted = [];
+    const early = Date.UTC(2025, 5, 15, 15, 2);
+    expect(transport.seekToSimTime(early)).toBe(true);
+    expect(emitted).toHaveLength(1);
+    const frame = emitted[0]?.data as { sim_time?: string };
+    expect(Date.parse(frame.sim_time ?? "")).toBe(Date.UTC(2025, 5, 15, 15, 2));
+  });
+
   it("seek past the end reports no landing", async () => {
     const transport = await startedTransport();
     transport.pause();

@@ -217,18 +217,29 @@ export class ReplayTransport implements TelemetryTransport {
   seekToSimTime(targetMs: number): boolean {
     // Scrubbing lands exactly on the target; the context back-up that
     // jump-to-event seeks use would leave the HUD minutes off the drag.
-    const found = this.seekForward(
-      (line) => {
-        if (line.event !== "tick") return false;
-        const sim = typeof line.sim_time === "string" ? Date.parse(line.sim_time) : NaN;
-        return Number.isFinite(sim) && sim >= targetMs;
-      },
-      0,
-    );
-    // A paused tape shows nothing on seek; emit the landed frame once so
-    // the scrubber's lighting, prices, and markers track the drag.
-    if (found && this.paused) this.emitCurrent();
-    return found;
+    const n = this.lines.length;
+    let landing = -1;
+    for (let i = 0; i < n; i++) {
+      const line = this.lines[i];
+      if (line?.event !== "tick") continue;
+      const sim = typeof line.sim_time === "string" ? Date.parse(line.sim_time) : NaN;
+      if (Number.isFinite(sim) && sim >= targetMs) {
+        landing = i;
+        break;
+      }
+    }
+    if (landing < 0) return false;
+    this.index = landing;
+    this.lastSimMs = null;
+    this.lastWallMs = null;
+    if (!this.paused) {
+      this.scheduleNext(0);
+    } else {
+      // A paused tape shows nothing on seek; emit the landed frame once
+      // so the scrubber's lighting, prices, and markers track the drag.
+      this.emitCurrent();
+    }
+    return true;
   }
 
   /** Seek to just before the next tick that crosses into high price. */

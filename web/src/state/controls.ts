@@ -325,43 +325,55 @@ export function createLiveController(api: BatsimApi, fleetId: string | null): Si
       set({ buildStatus: `loading scenario · replacing ${useAppStore.getState().homeOrder.length} homes…` });
       void (async () => {
         // The whole swap is structural: pause the sim for the duration.
-        const wasRunning = (await api.simStatus()).state === "running";
-        if (wasRunning) await api.simPause();
         try {
-          const current = [...useAppStore.getState().homeOrder];
-          for (const id of current) {
-            await api.deleteHome(id).catch(() => undefined);
-          }
-          const seeds: WorldSeed[] = [];
-          let failed = 0;
-          for (const home of homes) {
-            try {
-              const doc = await api.createHome({
-                battery: { model_id: home.modelId as BatteryModelId, count: home.count },
-                load: { archetype: home.archetype as LoadArchetype },
-                location: { ercot_load_zone: home.zone as LoadZone },
-                fleet_id: fleetId,
-                initial_soc: home.soc,
-              });
-              seeds.push({
-                meta: homeMetaFromDoc(doc, catalogSummaries(), useAppStore.getState().batteryDetails),
-                lng: home.lng,
-                lat: home.lat,
-                soc: doc.state.soc,
-              });
-            } catch {
-              failed += 1;
+          const wasRunning = (await api.simStatus()).state === "running";
+          if (wasRunning) await api.simPause();
+          try {
+            const current = [...useAppStore.getState().homeOrder];
+            let deleteFailed = 0;
+            for (const id of current) {
+              try {
+                await api.deleteHome(id);
+              } catch {
+                deleteFailed += 1;
+              }
             }
+            const seeds: WorldSeed[] = [];
+            let failed = 0;
+            for (const home of homes) {
+              try {
+                const doc = await api.createHome({
+                  battery: { model_id: home.modelId as BatteryModelId, count: home.count },
+                  load: { archetype: home.archetype as LoadArchetype },
+                  location: { ercot_load_zone: home.zone as LoadZone },
+                  fleet_id: fleetId,
+                  initial_soc: home.soc,
+                });
+                seeds.push({
+                  meta: homeMetaFromDoc(doc, catalogSummaries(), useAppStore.getState().batteryDetails),
+                  lng: home.lng,
+                  lat: home.lat,
+                  soc: doc.state.soc,
+                });
+              } catch {
+                failed += 1;
+              }
+            }
+            const placed = replaceWorld(getRuntime().live, seeds);
+            const notes: string[] = [];
+            if (failed > 0) notes.push(`${failed} rejected by the API`);
+            if (deleteFailed > 0) notes.push(`${deleteFailed} deletes failed; those homes still exist server-side`);
+            set({
+              buildStatus:
+                notes.length > 0
+                  ? `scenario loaded · ${placed} homes · ${notes.join(" · ")}`
+                  : `scenario loaded · ${placed} homes`,
+            });
+          } finally {
+            if (wasRunning) await api.simResume();
           }
-          const placed = replaceWorld(getRuntime().live, seeds);
-          set({
-            buildStatus:
-              failed > 0
-                ? `scenario loaded · ${placed} homes · ${failed} rejected by the API`
-                : `scenario loaded · ${placed} homes`,
-          });
-        } finally {
-          if (wasRunning) await api.simResume();
+        } catch (err) {
+          set({ buildStatus: err instanceof Error ? err.message : String(err) });
         }
       })();
     },
