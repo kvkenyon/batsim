@@ -215,11 +215,31 @@ export class ReplayTransport implements TelemetryTransport {
 
   /** Seek to the first tick at or after a sim time (epoch ms). */
   seekToSimTime(targetMs: number): boolean {
-    return this.seekForward((line) => {
-      if (line.event !== "tick") return false;
+    // Scrubbing lands exactly on the target; the context back-up that
+    // jump-to-event seeks use would leave the HUD minutes off the drag.
+    const n = this.lines.length;
+    let landing = -1;
+    for (let i = 0; i < n; i++) {
+      const line = this.lines[i];
+      if (line?.event !== "tick") continue;
       const sim = typeof line.sim_time === "string" ? Date.parse(line.sim_time) : NaN;
-      return Number.isFinite(sim) && sim >= targetMs;
-    });
+      if (Number.isFinite(sim) && sim >= targetMs) {
+        landing = i;
+        break;
+      }
+    }
+    if (landing < 0) return false;
+    this.index = landing;
+    this.lastSimMs = null;
+    this.lastWallMs = null;
+    if (!this.paused) {
+      this.scheduleNext(0);
+    } else {
+      // A paused tape shows nothing on seek; emit the landed frame once
+      // so the scrubber's lighting, prices, and markers track the drag.
+      this.emitCurrent();
+    }
+    return true;
   }
 
   /** Seek to just before the next tick that crosses into high price. */
@@ -246,23 +266,22 @@ export class ReplayTransport implements TelemetryTransport {
 
   /**
    * Scan forward (wrapping once) for a line matching `pred`, then back
-   * up a few ticks so the replay lands with context before the event.
+   * up `back` ticks so a jump lands with context before the event.
    */
-  private seekForward(pred: (line: RecordedLine) => boolean): boolean {
+  private seekForward(pred: (line: RecordedLine) => boolean, back = 3): boolean {
     const n = this.lines.length;
     if (n === 0) return false;
     for (let step = 1; step <= n; step++) {
       const i = (this.index + step) % n;
       const line = this.lines[i];
       if (line && pred(line)) {
-        // Land a handful of ticks ahead of the hit so the build-up shows.
-        let back = i;
-        for (let k = 0; k < 3; k++) {
-          const candidate = (back - 1 + n) % n;
+        let landing = i;
+        for (let k = 0; k < back; k++) {
+          const candidate = (landing - 1 + n) % n;
           if (this.lines[candidate]?.event !== "tick") break;
-          back = candidate;
+          landing = candidate;
         }
-        this.index = back;
+        this.index = landing;
         this.lastSimMs = null;
         this.lastWallMs = null;
         if (!this.paused) this.scheduleNext(0);
@@ -270,6 +289,16 @@ export class ReplayTransport implements TelemetryTransport {
       }
     }
     return false;
+  }
+
+  /** Emit the frame under the cursor once, advancing the cursor. */
+  private emitCurrent(): void {
+    if (this.stopped || !this.handlers) return;
+    const line = this.lines[this.index];
+    if (!line) return;
+    this.index += 1;
+    const { event, ...payload } = line;
+    this.handlers.onEvent(event, payload);
   }
 
   private scheduleNext(delayMs: number): void {

@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { getController } from "../state/controls";
 import { SOC_HIST_CAP } from "../state/live";
 import { getRuntime } from "../state/runtime";
 import { useAppStore, type HomeMeta } from "../state/store";
@@ -94,6 +95,11 @@ function Sparkline({ history, soc }: { history: number[]; soc: number }) {
 export function Inspector({ meta }: { meta: HomeMeta }) {
   const selectHome = useAppStore((s) => s.selectHome);
   const [snap, setSnap] = useState<HomeLiveSnapshot | null>(() => readSnapshot(meta.id));
+  const [confirmRemove, setConfirmRemove] = useState(false);
+
+  useEffect(() => {
+    setConfirmRemove(false);
+  }, [meta.id]);
 
   useEffect(() => {
     setSnap(readSnapshot(meta.id));
@@ -242,6 +248,30 @@ export function Inspector({ meta }: { meta: HomeMeta }) {
           <span className="k">pv nameplate</span>
           <span className="v mono">{meta.pvPeakKw.toFixed(1)} kW</span>
         </div>
+      )}
+
+      <div className="section">world</div>
+      {confirmRemove ? (
+        <div className="remove-confirm">
+          <button
+            className="cmd remove"
+            onClick={() => getController().removeHome(meta.id)}
+            title="remove this home from the world"
+          >
+            confirm remove
+          </button>
+          <button className="cmd keep" onClick={() => setConfirmRemove(false)}>
+            keep
+          </button>
+        </div>
+      ) : (
+        <button
+          className="cmd remove"
+          onClick={() => setConfirmRemove(true)}
+          title="remove this home from the world"
+        >
+          remove home
+        </button>
       )}
     </aside>
   );

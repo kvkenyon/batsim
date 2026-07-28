@@ -11,8 +11,9 @@ import { createLiveController, createReplayController, setController, type SimCo
 import { createIngest } from "./ingest";
 import { createLiveBuffers, type LiveBuffers } from "./live";
 import { setRuntime } from "./runtime";
-import { useAppStore, type HomeMeta } from "./store";
-import { ReplayTransport, SseTransport, type TelemetryTransport } from "./transport";
+import { useAppStore, type CatalogBattery, type HomeMeta } from "./store";
+import { homeMetaFromDoc } from "./world";
+import { ReplayTransport, SseTransport, type TelemetryTransport, type TraceManifest } from "./transport";
 
 export interface BootResult {
   live: LiveBuffers;
@@ -27,23 +28,6 @@ interface EntitiesBundle {
 }
 
 const DEMO_TRACE_URL = "traces/demo";
-
-function numberAt(v: unknown, path: string[]): number | null {
-  let cur = v;
-  for (const key of path) {
-    if (typeof cur !== "object" || cur === null) return null;
-    cur = (cur as Record<string, unknown>)[key];
-  }
-  return typeof cur === "number" && Number.isFinite(cur) ? cur : null;
-}
-
-/** Read a possibly provenance-wrapped catalog number: {value, unit, ...} or a bare number. */
-function catalogNumber(entry: Record<string, unknown> | undefined, key: string): number | null {
-  if (!entry) return null;
-  const direct = numberAt(entry, [key]);
-  if (direct !== null) return direct;
-  return numberAt(entry, [key, "value"]);
-}
 
 async function loadLiveEntities(api: BatsimApi): Promise<EntitiesBundle> {
   const [homes, batteries, status] = await Promise.all([
@@ -83,25 +67,7 @@ function buildHomeMeta(bundle: EntitiesBundle): Record<string, HomeMeta> {
   const summaryByModel = new Map(bundle.batteries.map((b) => [b.model_id, b]));
   const metas: Record<string, HomeMeta> = {};
   for (const home of bundle.homes) {
-    const modelId = home.config.battery.model_id;
-    const summary = summaryByModel.get(modelId);
-    const detail = bundle.batteryDetails[modelId];
-    metas[home.id] = {
-      id: home.id,
-      fleetId: home.config.fleet_id ?? null,
-      batteryModelId: modelId,
-      batteryDisplayName: summary?.display_name ?? modelId,
-      vendor: summary?.vendor ?? "",
-      chemistry: summary?.chemistry ?? "",
-      coupling: summary?.coupling ?? "",
-      batteryCount: home.config.battery.count,
-      usableEnergyKwh: summary?.usable_energy_kwh ?? catalogNumber(detail, "usable_energy_kwh") ?? 0,
-      reserveFloorFrac: numberAt(detail ?? {}, ["soc_window", "reserve_floor_frac"]) ?? 0,
-      zone: home.config.ercot_load_zone,
-      archetype: home.config.load_archetype,
-      pvPeakKw: home.config.pv_peak_kw ?? null,
-      mode: home.state.mode,
-    };
+    metas[home.id] = homeMetaFromDoc(home, summaryByModel, bundle.batteryDetails);
   }
   return metas;
 }
@@ -185,6 +151,24 @@ async function runBootstrap(options: { forceDemo?: boolean; apiBase?: string }):
   assignPositions(bundle.homes, zones, live);
   const neighborhood = pickNeighborhood(bundle.homes, zones);
 
+  // Demo replay also publishes its recorded time bounds for the scrubber.
+  let traceRangeMs: [number, number] | null = null;
+  if (!isLive) {
+    try {
+      const res = await fetch(`${DEMO_TRACE_URL}/manifest.json`);
+      if (res.ok) {
+        const manifest = (await res.json()) as TraceManifest;
+        const start = Date.parse(manifest.sim_time_range[0]);
+        const end = Date.parse(manifest.sim_time_range[1]);
+        if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+          traceRangeMs = [start, end];
+        }
+      }
+    } catch {
+      // A missing manifest only costs the scrubber its bounds; replay runs.
+    }
+  }
+
   store.setState({
     connection,
     scenarioName: bundle.scenarioName,
@@ -196,6 +180,18 @@ async function runBootstrap(options: { forceDemo?: boolean; apiBase?: string }):
     centerZone: neighborhood.zone,
     zoneAnchors: Object.fromEntries([...zones.values()].map((z) => [z.zone, z.anchor])),
     zoneLabels: Object.fromEntries([...zones.values()].map((z) => [z.zone, z.label])),
+    catalog: bundle.batteries.map(
+      (b): CatalogBattery => ({
+        modelId: b.model_id,
+        displayName: b.display_name,
+        vendor: b.vendor,
+        chemistry: b.chemistry,
+        coupling: b.coupling,
+        usableEnergyKwh: b.usable_energy_kwh,
+      }),
+    ),
+    batteryDetails: bundle.batteryDetails,
+    traceRangeMs,
   });
 
   const ingest = createIngest(live);

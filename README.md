@@ -152,7 +152,14 @@ streams and an upgrade handshake, not request/response pairs.
 The `web/` app is a pure client of the HTTP API: a MapLibre map of the
 ERCOT territory with lensable fleet markers, a three.js street-level
 neighborhood driven by live telemetry, and a click-to-inspect panel for
-any home. Its TypeScript API types are generated from the vendored
+any home. Operator tools turn it into a control surface: build mode
+places homes from the registry catalog by clicking inside an ERCOT zone
+polygon (with a two-step remove in the inspector), the dispatch console
+sends zone- or fleet-scoped charge/discharge/idle commands and counts
+per-home acknowledgements as they arrive, fleet scenarios save named
+fleet-composition snapshots to browser local storage, and a time
+scrubber drags through the demo replay tape (disabled in live mode).
+Its TypeScript API types are generated from the vendored
 OpenAPI document with one command (run from `web/`):
 
 ```bash
