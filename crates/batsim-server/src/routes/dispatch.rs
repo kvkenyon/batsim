@@ -182,7 +182,7 @@ async fn filter_targets(
 }
 
 /// Translate an action into engine dispatches (tagged, tick-aligned).
-fn actions_for(
+pub(crate) fn actions_for(
     action: &ActionSpec,
     execute_at_tick: u64,
     dt_s: u32,

@@ -171,6 +171,7 @@ async fn create_home_inner(state: &AppState, req: &CreateHomeRequest) -> ApiResu
     let idx = idxs.first().copied().unwrap_or(0);
     let entry = HomeEntry {
         id: home_id,
+        plan: plan.clone(),
         idx,
         fleet_id: req.fleet_id.clone(),
         config: crate::model::HomeConfigDoc {

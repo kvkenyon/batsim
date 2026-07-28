@@ -55,15 +55,18 @@ pub async fn scenario_action(
     }
 }
 
-fn validate_scenario(req: &ScenarioRequest) -> ApiResult<(u64, u64, u32)> {
-    let start = crate::engine::unix_of(&req.time.start)
+fn validate_scenario(
+    req: &ScenarioRequest,
+    data_root: &std::path::Path,
+) -> ApiResult<(u64, u64, u32)> {
+    let start_u = crate::engine::unix_of(&req.time.start)
         .map_err(|e| Problem::validation(format!("time.start: {e}")))?;
     let end = crate::engine::unix_of(&req.time.end)
         .map_err(|e| Problem::validation(format!("time.end: {e}")))?;
-    if end <= start {
+    if end <= start_u {
         return Err(Problem::validation("time.end must be after time.start"));
     }
-    if start % 300 != 0 {
+    if start_u % 300 != 0 {
         return Err(Problem::validation(
             "time.start must be aligned to a 5-minute boundary",
         ));
@@ -74,13 +77,17 @@ fn validate_scenario(req: &ScenarioRequest) -> ApiResult<(u64, u64, u32)> {
             "time.tick_seconds must be within 1..=60",
         ));
     }
-    PriceSource::resolve(&req.prices).map_err(Problem::unprocessable)?;
+    let ctx = crate::price::ResolveCtx {
+        data_root,
+        range: Some((start_u, end)),
+    };
+    PriceSource::resolve(&req.prices, &ctx).map_err(Problem::unprocessable)?;
     if matches!(req.weather, Some(WeatherSpec::Replay { .. })) {
         return Err(Problem::unprocessable(
             "weather replay is not available yet; use a synthetic ambient feed",
         ));
     }
-    Ok((start, end, tick_s))
+    Ok((start_u, end, tick_s))
 }
 
 fn ambient_of(req: &ScenarioRequest) -> AmbientFeed {
@@ -122,7 +129,7 @@ pub async fn create_scenario(
     idempotent(&state, key.as_deref(), hash, || {
         let state = &state;
         async move {
-            validate_scenario(&req)?;
+            validate_scenario(&req, &state.config.data_dir)?;
             let entry = ScenarioEntry {
                 id: ids::new_id(ids::SCENARIO),
                 request: req.clone(),
@@ -252,11 +259,11 @@ pub async fn activate_scenario(
     activate_impl(state, &id).await.map(Json)
 }
 
-async fn activate_impl(state: AppState, id: &str) -> ApiResult<ScenarioDoc> {
+pub(crate) async fn activate_impl(state: AppState, id: &str) -> ApiResult<ScenarioDoc> {
     let entry = state
         .scenario(id)
         .ok_or_else(|| Problem::not_found("scenario", id))?;
-    let (start, _end, tick_s) = validate_scenario(&entry.request)?;
+    let (start, end, tick_s) = validate_scenario(&entry.request, &state.config.data_dir)?;
     let status = state
         .engine
         .call(|tx| EngineMsg::Status { reply: tx })
@@ -266,7 +273,12 @@ async fn activate_impl(state: AppState, id: &str) -> ApiResult<ScenarioDoc> {
             "scenario activation requires a stopped simulation",
         ));
     }
-    let price = PriceSource::resolve(&entry.request.prices).map_err(Problem::unprocessable)?;
+    let ctx = crate::price::ResolveCtx {
+        data_root: &state.config.data_dir,
+        range: Some((start, end)),
+    };
+    let price =
+        PriceSource::resolve(&entry.request.prices, &ctx).map_err(Problem::unprocessable)?;
     let rebound = state
         .engine
         .call(|tx| EngineMsg::Rebind {

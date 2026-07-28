@@ -6,6 +6,7 @@
 //! model docs dozens of times, so the lint is relaxed module-wide.
 #![allow(clippy::missing_errors_doc)]
 
+pub mod backtests;
 pub mod dispatch;
 pub mod fleets;
 pub mod homes;
@@ -46,6 +47,7 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/homes", homes::router())
         .nest("/fleets", fleets::router())
         .nest("/scenarios", scenarios::router())
+        .nest("/backtests", backtests::router())
         .merge(sim::router())
         .nest("/dispatch", dispatch::router())
         .nest("/telemetry", telemetry::router())

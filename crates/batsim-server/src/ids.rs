@@ -22,3 +22,5 @@ pub const SCENARIO: &str = "scn";
 pub const COMMAND: &str = "cmd";
 /// Snapshot id prefix.
 pub const SNAPSHOT: &str = "snap";
+/// Backtest run id prefix.
+pub const BACKTEST: &str = "bt";

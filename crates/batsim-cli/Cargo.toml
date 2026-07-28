@@ -12,6 +12,9 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 ureq.workspace = true
+# Not used in code: unifies webpki 0.102's "std" feature on for
+# rustls-platform-verifier 0.3.4 on Linux (see workspace Cargo.toml).
+rustls-webpki.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

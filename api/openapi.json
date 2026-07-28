@@ -10,6 +10,217 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/v1/backtests": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "List backtest runs.",
+        "operationId": "list_backtests",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (1..=1000, default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 1000,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque continuation cursor from a previous page.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of backtest runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Start a backtest run.",
+        "operationId": "create_backtest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Backtest run started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown fleet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Simulation is not stopped",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Replay data unavailable or invalid strategy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/backtests/{id}": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Get one backtest run.",
+        "operationId": "get_backtest",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest run id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Backtest run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown backtest run",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/backtests/{id}/settlement": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Get the final settlement report for a run.",
+        "operationId": "get_settlement",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest run id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Settlement report (spec D.5 SettlementReport)"
+          },
+          "404": {
+            "description": "Unknown backtest run",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Run has not settled yet",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/dispatch": {
       "post": {
         "tags": [
@@ -2408,6 +2619,208 @@
         },
         "additionalProperties": false
       },
+      "AsAwardSpec": {
+        "type": "object",
+        "description": "An ancillary-service award to settle over the run.",
+        "required": [
+          "product",
+          "start",
+          "end",
+          "awarded_mw"
+        ],
+        "properties": {
+          "awarded_mw": {
+            "type": "number",
+            "format": "double",
+            "description": "Awarded capacity in MW."
+          },
+          "deployed": {
+            "type": "boolean",
+            "description": "Score a deployment event over the window (delivered vs instructed)."
+          },
+          "end": {
+            "type": "string",
+            "description": "Window end (RFC 3339)."
+          },
+          "mcpc_usd_per_mw": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Clearing price in $/MW (default: DAM MCPC average over the window)."
+          },
+          "product": {
+            "$ref": "#/components/schemas/AsProductSpec",
+            "description": "Product."
+          },
+          "start": {
+            "type": "string",
+            "description": "Window start (RFC 3339)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AsProductSpec": {
+        "type": "string",
+        "description": "ERCOT ancillary-service product (backtest awards).",
+        "enum": [
+          "rrs",
+          "ecrs",
+          "non_spin",
+          "reg_up",
+          "reg_down"
+        ]
+      },
+      "BacktestDoc": {
+        "type": "object",
+        "description": "Backtest run document.",
+        "required": [
+          "id",
+          "fleet_id",
+          "scenario_id",
+          "state",
+          "sim_time",
+          "intervals_settled",
+          "created_at",
+          "settlement_url"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "Wall-clock creation time."
+          },
+          "fleet_id": {
+            "type": "string",
+            "description": "Fleet id."
+          },
+          "id": {
+            "type": "string",
+            "description": "Run id."
+          },
+          "intervals_settled": {
+            "type": "integer",
+            "description": "Settlement intervals closed so far.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          },
+          "scenario_id": {
+            "type": "string",
+            "description": "Internally created scenario id."
+          },
+          "settlement_url": {
+            "type": "string",
+            "description": "URL of the final settlement report."
+          },
+          "sim_time": {
+            "type": "string",
+            "description": "Current sim time (RFC 3339 UTC)."
+          },
+          "state": {
+            "type": "string",
+            "description": "Lifecycle state (running / settled / failed)."
+          }
+        }
+      },
+      "BacktestRequest": {
+        "type": "object",
+        "description": "Backtest run request: replay one ERCOT operating day against a fleet\nand settle it.",
+        "required": [
+          "fleet_id",
+          "date",
+          "settlement_point"
+        ],
+        "properties": {
+          "as_awards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AsAwardSpec"
+            },
+            "description": "Ancillary-service awards to settle."
+          },
+          "date": {
+            "type": "string",
+            "description": "CPT operating day (YYYY-MM-DD)."
+          },
+          "fleet_id": {
+            "type": "string",
+            "description": "Fleet to run (must already be expanded)."
+          },
+          "four_cp": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FourCpSpec",
+                "description": "4CP configuration (absent: 4CP savings not scored)."
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human label."
+          },
+          "retail_rate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetailRateSpec",
+                "description": "Retail rate structure (default: wholesale pass-through x1.0)."
+              }
+            ]
+          },
+          "seed": {
+            "type": "integer",
+            "description": "Scenario seed.",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          },
+          "settlement_point": {
+            "type": "string",
+            "description": "Settlement point (e.g. `LZ_HOUSTON`)."
+          },
+          "speed": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Speed multiplier (default 0 = as fast as possible)."
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/StrategySpec",
+            "description": "Dispatch strategy (default: baseline, no dispatch)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BacktestsPage": {
+        "type": "object",
+        "description": "Page of backtest runs.",
+        "required": [
+          "data",
+          "page"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BacktestDoc"
+            },
+            "description": "Runs."
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Pagination."
+          }
+        }
+      },
       "BatteryList": {
         "type": "object",
         "description": "Battery list response.",
@@ -2933,6 +3346,28 @@
             "description": "Pagination."
           }
         }
+      },
+      "FourCpSpec": {
+        "type": "object",
+        "description": "4CP configuration for the run.",
+        "required": [
+          "transmission_rate_usd_per_kw_mo"
+        ],
+        "properties": {
+          "candidate_intervals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Explicit candidate interval starts (RFC 3339). When the archive\ncarries a system-load signal, the 4CP watch flags additional\ncandidates automatically."
+          },
+          "transmission_rate_usd_per_kw_mo": {
+            "type": "number",
+            "format": "double",
+            "description": "Transmission rate in $/kW-month."
+          }
+        },
+        "additionalProperties": false
       },
       "GeoSpec": {
         "type": "object",
@@ -3579,7 +4014,7 @@
           },
           {
             "type": "object",
-            "description": "Historical replay. Not available yet; activating a scenario with\nthis source fails validation until replay data support lands.",
+            "description": "Historical replay from a normalized ERCOT Parquet archive\n(`<data_dir>/ercot`, written by `batsim-ercot-ingest`).",
             "required": [
               "source"
             ],
@@ -3598,7 +4033,7 @@
                     "type": "string"
                   }
                 ],
-                "description": "Inclusive date range (ISO 8601 dates) to replay."
+                "description": "Inclusive date range (ISO 8601 dates, CPT operating days) to replay."
               },
               "market": {
                 "type": [
@@ -3612,7 +4047,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Settlement point / hub."
+                "description": "Settlement point / hub (required; e.g. `LZ_HOUSTON`)."
               },
               "source": {
                 "type": "string",
@@ -3774,6 +4209,81 @@
           "15m",
           "1h"
         ]
+      },
+      "RetailRateSpec": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A single flat retail rate.",
+            "required": [
+              "usd_per_kwh",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "flat"
+                ]
+              },
+              "usd_per_kwh": {
+                "type": "number",
+                "format": "double",
+                "description": "Rate in $/kWh."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Time-of-use windows over CPT hours.",
+            "required": [
+              "windows",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tou"
+                ]
+              },
+              "windows": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TouWindowSpec"
+                },
+                "description": "Rate windows; first match wins."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Griddy-style wholesale pass-through.",
+            "required": [
+              "multiplier",
+              "kind"
+            ],
+            "properties": {
+              "adder_usd_per_kwh": {
+                "type": "number",
+                "format": "double",
+                "description": "Flat adder in $/kWh."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "wholesale_pass_through"
+                ]
+              },
+              "multiplier": {
+                "type": "number",
+                "format": "double",
+                "description": "Multiplier applied to the RTM SPP."
+              }
+            }
+          }
+        ],
+        "description": "Retail rate structure for the retailer-margin view."
       },
       "RunUntilRequest": {
         "type": "object",
@@ -4139,6 +4649,91 @@
           }
         }
       },
+      "StrategyAction": {
+        "type": "string",
+        "description": "Strategy action for a schedule entry.",
+        "enum": [
+          "charge",
+          "discharge"
+        ]
+      },
+      "StrategyEntrySpec": {
+        "type": "object",
+        "description": "One strategy schedule entry (per-home kW setpoint from `start` for\n`duration_s`, then revert to self-consumption).",
+        "required": [
+          "start",
+          "action",
+          "kw"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/StrategyAction",
+            "description": "Charge or discharge."
+          },
+          "duration_s": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Hold duration in seconds (omit to hold until the next entry).",
+            "maximum": 18446744073709551615,
+            "minimum": 0
+          },
+          "kw": {
+            "type": "number",
+            "format": "double",
+            "description": "Per-home setpoint in kW."
+          },
+          "start": {
+            "type": "string",
+            "description": "Start time (RFC 3339)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StrategySpec": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Baseline: no dispatch (self-consumption only).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Fixed schedule of fleet-wide setpoints.",
+            "required": [
+              "entries",
+              "kind"
+            ],
+            "properties": {
+              "entries": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/StrategyEntrySpec"
+                },
+                "description": "Entries in time order."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "schedule"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Dispatch strategy for a backtest run."
+      },
       "SyntheticProfile": {
         "type": "string",
         "description": "Synthetic price profile shapes.",
@@ -4314,6 +4909,35 @@
           "cancelled"
         ]
       },
+      "TouWindowSpec": {
+        "type": "object",
+        "description": "One TOU rate window over CPT hours (wraps midnight when\n`start_hour_cpt > end_hour_cpt`).",
+        "required": [
+          "start_hour_cpt",
+          "end_hour_cpt",
+          "usd_per_kwh"
+        ],
+        "properties": {
+          "end_hour_cpt": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Last CPT hour of the window (0-23, inclusive).",
+            "minimum": 0
+          },
+          "start_hour_cpt": {
+            "type": "integer",
+            "format": "int32",
+            "description": "First CPT hour of the window (0-23, inclusive).",
+            "minimum": 0
+          },
+          "usd_per_kwh": {
+            "type": "number",
+            "format": "double",
+            "description": "Rate in $/kWh."
+          }
+        },
+        "additionalProperties": false
+      },
       "VersionDoc": {
         "type": "object",
         "description": "Version document.",
@@ -4407,6 +5031,10 @@
     {
       "name": "scenarios",
       "description": "Simulation run bindings"
+    },
+    {
+      "name": "backtests",
+      "description": "ERCOT replay backtests with settlement"
     },
     {
       "name": "sim",

@@ -1,10 +1,11 @@
 # Architecture
 
 batsim is a deterministic simulator for residential battery fleets in the
-ERCOT (Texas) market. The Cargo workspace holds four crates: the two
+ERCOT (Texas) market. The Cargo workspace holds five crates: the two
 library crates this guide covers (`batsim-core`, `batsim-registry` - the
 engine itself has no async runtime and no network) plus `batsim-server`
-(the axum HTTP shell) and `batsim-cli` (the `batsimctl` admin CLI). This
+(the axum HTTP shell), `batsim-cli` (the `batsimctl` admin CLI), and
+`batsim-ercot` (the ERCOT market adapter). This
 guide covers how the pieces fit together. For the device catalog schema see
 [device-registry.md](device-registry.md); for the physics behind the
 battery, inverter, load, and PV models see
@@ -13,7 +14,7 @@ accuracy claims are enforced see [testing.md](testing.md).
 
 ## 1. Workspace layout
 
-The workspace root `Cargo.toml` declares four members:
+The workspace root `Cargo.toml` declares five members:
 
 - `crates/batsim-registry` - the OEM hardware catalog. Device models
   (batteries, inverters, controllers, PV presets) are declarative JSON
@@ -33,6 +34,12 @@ The workspace root `Cargo.toml` declares four members:
   translate into core calls, and serialize.
 - `crates/batsim-cli` - `batsimctl`, a clap admin CLI that mirrors the
   HTTP API one-to-one over HTTP (no workspace-crate dependency).
+- `crates/batsim-ercot` - the ERCOT market adapter (spec Part D):
+  normalized market data types, the `PriceSource` trait with Parquet
+  replay and a seeded synthetic generator, the settlement engine, and
+  the `batsim-ercot-ingest` binary that normalizes real ERCOT MIS yearly
+  reports into partitioned Parquet. Like the engine, it performs no
+  network or wall-clock I/O on any simulation path.
 
 The registry is deliberately data-only. Its types in
 `crates/batsim-registry/src/types.rs` exist as serde deserialization

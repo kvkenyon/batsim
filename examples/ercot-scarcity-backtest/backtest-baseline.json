@@ -1,0 +1,9 @@
+{
+  "fleet_id": "@FLEET_ID@",
+  "name": "baseline-2023-08-17",
+  "date": "2023-08-17",
+  "settlement_point": "LZ_NORTH",
+  "seed": 7,
+  "strategy": { "kind": "none" },
+  "retail_rate": { "kind": "flat", "usd_per_kwh": 0.12 }
+}

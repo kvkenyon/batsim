@@ -4,6 +4,58 @@
  */
 
 export interface paths {
+    "/v1/backtests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List backtest runs. */
+        get: operations["list_backtests"];
+        put?: never;
+        /** Start a backtest run. */
+        post: operations["create_backtest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/backtests/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one backtest run. */
+        get: operations["get_backtest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/backtests/{id}/settlement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the final settlement report for a run. */
+        get: operations["get_settlement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dispatch": {
         parameters: {
             query?: never;
@@ -658,6 +710,83 @@ export interface components {
              */
             weight: number;
         };
+        /** @description An ancillary-service award to settle over the run. */
+        AsAwardSpec: {
+            /**
+             * Format: double
+             * @description Awarded capacity in MW.
+             */
+            awarded_mw: number;
+            /** @description Score a deployment event over the window (delivered vs instructed). */
+            deployed?: boolean;
+            /** @description Window end (RFC 3339). */
+            end: string;
+            /**
+             * Format: double
+             * @description Clearing price in $/MW (default: DAM MCPC average over the window).
+             */
+            mcpc_usd_per_mw?: number | null;
+            /** @description Product. */
+            product: components["schemas"]["AsProductSpec"];
+            /** @description Window start (RFC 3339). */
+            start: string;
+        };
+        /**
+         * @description ERCOT ancillary-service product (backtest awards).
+         * @enum {string}
+         */
+        AsProductSpec: "rrs" | "ecrs" | "non_spin" | "reg_up" | "reg_down";
+        /** @description Backtest run document. */
+        BacktestDoc: {
+            /** @description Wall-clock creation time. */
+            created_at: string;
+            /** @description Fleet id. */
+            fleet_id: string;
+            /** @description Run id. */
+            id: string;
+            /** @description Settlement intervals closed so far. */
+            intervals_settled: number;
+            /** @description Internally created scenario id. */
+            scenario_id: string;
+            /** @description URL of the final settlement report. */
+            settlement_url: string;
+            /** @description Current sim time (RFC 3339 UTC). */
+            sim_time: string;
+            /** @description Lifecycle state (running / settled / failed). */
+            state: string;
+        };
+        /** @description Backtest run request: replay one ERCOT operating day against a fleet
+         *     and settle it. */
+        BacktestRequest: {
+            /** @description Ancillary-service awards to settle. */
+            as_awards?: components["schemas"]["AsAwardSpec"][];
+            /** @description CPT operating day (YYYY-MM-DD). */
+            date: string;
+            /** @description Fleet to run (must already be expanded). */
+            fleet_id: string;
+            four_cp?: null | components["schemas"]["FourCpSpec"];
+            /** @description Human label. */
+            name?: string | null;
+            retail_rate?: null | components["schemas"]["RetailRateSpec"];
+            /** @description Scenario seed. */
+            seed?: number;
+            /** @description Settlement point (e.g. `LZ_HOUSTON`). */
+            settlement_point: string;
+            /**
+             * Format: double
+             * @description Speed multiplier (default 0 = as fast as possible).
+             */
+            speed?: number | null;
+            /** @description Dispatch strategy (default: baseline, no dispatch). */
+            strategy?: components["schemas"]["StrategySpec"];
+        };
+        /** @description Page of backtest runs. */
+        BacktestsPage: {
+            /** @description Runs. */
+            data: components["schemas"]["BacktestDoc"][];
+            /** @description Pagination. */
+            page: components["schemas"]["PageInfo"];
+        };
         /** @description Battery list response. */
         BatteryList: {
             /** @description Entries. */
@@ -842,6 +971,18 @@ export interface components {
             data: components["schemas"]["FleetDoc"][];
             /** @description Pagination. */
             page: components["schemas"]["PageInfo"];
+        };
+        /** @description 4CP configuration for the run. */
+        FourCpSpec: {
+            /** @description Explicit candidate interval starts (RFC 3339). When the archive
+             *     carries a system-load signal, the 4CP watch flags additional
+             *     candidates automatically. */
+            candidate_intervals?: string[];
+            /**
+             * Format: double
+             * @description Transmission rate in $/kW-month.
+             */
+            transmission_rate_usd_per_kw_mo: number;
         };
         /** @description Geographic distribution. */
         GeoSpec: {
@@ -1096,14 +1237,14 @@ export interface components {
             /** @enum {string} */
             source: "synthetic";
         } | {
-            /** @description Inclusive date range (ISO 8601 dates) to replay. */
+            /** @description Inclusive date range (ISO 8601 dates, CPT operating days) to replay. */
             date_range?: [
                 string,
                 string
             ] | null;
             /** @description Market (only the real-time market is modeled). */
             market?: string | null;
-            /** @description Settlement point / hub. */
+            /** @description Settlement point / hub (required; e.g. `LZ_HOUSTON`). */
             settlement_point?: string | null;
             /** @enum {string} */
             source: "replay";
@@ -1174,6 +1315,34 @@ export interface components {
          * @enum {string}
          */
         Resolution: "1s" | "1m" | "5m" | "15m" | "1h";
+        /** @description Retail rate structure for the retailer-margin view. */
+        RetailRateSpec: {
+            /** @enum {string} */
+            kind: "flat";
+            /**
+             * Format: double
+             * @description Rate in $/kWh.
+             */
+            usd_per_kwh: number;
+        } | {
+            /** @enum {string} */
+            kind: "tou";
+            /** @description Rate windows; first match wins. */
+            windows: components["schemas"]["TouWindowSpec"][];
+        } | {
+            /**
+             * Format: double
+             * @description Flat adder in $/kWh.
+             */
+            adder_usd_per_kwh?: number;
+            /** @enum {string} */
+            kind: "wholesale_pass_through";
+            /**
+             * Format: double
+             * @description Multiplier applied to the RTM SPP.
+             */
+            multiplier: number;
+        };
         /** @description Run-until request. */
         RunUntilRequest: {
             /**
@@ -1309,6 +1478,36 @@ export interface components {
             wall_ms: number;
         };
         /**
+         * @description Strategy action for a schedule entry.
+         * @enum {string}
+         */
+        StrategyAction: "charge" | "discharge";
+        /** @description One strategy schedule entry (per-home kW setpoint from `start` for
+         *     `duration_s`, then revert to self-consumption). */
+        StrategyEntrySpec: {
+            /** @description Charge or discharge. */
+            action: components["schemas"]["StrategyAction"];
+            /** @description Hold duration in seconds (omit to hold until the next entry). */
+            duration_s?: number | null;
+            /**
+             * Format: double
+             * @description Per-home setpoint in kW.
+             */
+            kw: number;
+            /** @description Start time (RFC 3339). */
+            start: string;
+        };
+        /** @description Dispatch strategy for a backtest run. */
+        StrategySpec: {
+            /** @enum {string} */
+            kind: "none";
+        } | {
+            /** @description Entries in time order. */
+            entries: components["schemas"]["StrategyEntrySpec"][];
+            /** @enum {string} */
+            kind: "schedule";
+        };
+        /**
          * @description Synthetic price profile shapes.
          * @enum {string}
          */
@@ -1360,6 +1559,25 @@ export interface components {
          * @enum {string}
          */
         TargetStatus: "applied" | "partial" | "rejected" | "timeout" | "cancelled";
+        /** @description One TOU rate window over CPT hours (wraps midnight when
+         *     `start_hour_cpt > end_hour_cpt`). */
+        TouWindowSpec: {
+            /**
+             * Format: int32
+             * @description Last CPT hour of the window (0-23, inclusive).
+             */
+            end_hour_cpt: number;
+            /**
+             * Format: int32
+             * @description First CPT hour of the window (0-23, inclusive).
+             */
+            start_hour_cpt: number;
+            /**
+             * Format: double
+             * @description Rate in $/kWh.
+             */
+            usd_per_kwh: number;
+        };
         /** @description Version document. */
         VersionDoc: {
             /** @description Build git SHA (when available). */
@@ -1392,6 +1610,171 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_backtests: {
+        parameters: {
+            query?: {
+                /** @description Page size (1..=1000, default 100). */
+                limit?: number;
+                /** @description Opaque continuation cursor from a previous page. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of backtest runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestsPage"];
+                };
+            };
+            /** @description Invalid query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_backtest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestRequest"];
+            };
+        };
+        responses: {
+            /** @description Backtest run started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestDoc"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unknown fleet */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Simulation is not stopped */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Replay data unavailable or invalid strategy */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_backtest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest run id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Backtest run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestDoc"];
+                };
+            };
+            /** @description Unknown backtest run */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    get_settlement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest run id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settlement report (spec D.5 SettlementReport) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown backtest run */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Run has not settled yet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     dispatch: {
         parameters: {
             query?: never;

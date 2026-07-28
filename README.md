@@ -5,19 +5,21 @@ An ERCOT-only residential battery fleet simulator, written in Rust.
 batsim provides physics-faithful virtual residential battery systems —
 Tesla Powerwall 2/3, Enphase IQ Battery, SolarEdge Home Battery, and
 sonnen — behind an OpenAPI-first HTTP API, so dispatch strategies can be
-developed and tested against realistic fleet behavior without touching
-real hardware.
+developed and tested against realistic fleet behavior and real ERCOT
+market history without touching real hardware.
 
 ## Status
 
-Core engine, device registry, and the HTTP API skeleton are complete:
-homes and fleets CRUD with deterministic fleet manifests, scenario
+Core engine, device registry, the HTTP API, and ERCOT backtesting are
+complete: homes and fleets CRUD with deterministic fleet manifests, scenario
 bindings (time, prices, weather, outages, seed), virtual time control,
 fleet dispatch with jittered per-device execution latency, audit log,
 idempotency, telemetry series and live streams, all documented by an
-OpenAPI document generated from code. ERCOT price replay, settlement,
-outage physics, snapshots, and vendor-API mimicry land in later
-milestones.
+OpenAPI document generated from code. Backtests replay a real ERCOT day
+from normalized MIS archives (ingested by `batsim-ercot-ingest`) against a
+fleet and settle per-interval energy, ancillary services, 4CP, and
+retailer margin into a deterministic P&L report. Outage physics,
+snapshots, and vendor-API mimicry land in later milestones.
 
 ## Quick start
 
@@ -62,11 +64,16 @@ execute twice.
 - `/v1/telemetry/*` — columnar history (1 s to 1 h buckets, settlement
   aligned at 5 minutes) plus SSE and WebSocket live streams with
   filtering and downsampling.
+- `/v1/backtests` — replay an ERCOT operating day against a fleet with
+  an inline dispatch strategy; per-interval settlement streams over the
+  telemetry path and a final settlement report endpoint returns the P&L.
 - `/v1/system/*` — health, version, redacted config.
 
-Prices for now come from a static or deterministic synthetic source
-behind a replay-ready interface; historical replay plugs in without API
-changes.
+Scenario prices come from a static, synthetic, or replay source: replay
+binds a normalized ERCOT Parquet archive (`<data_dir>/ercot`, written by
+`batsim-ercot-ingest` from real ERCOT MIS yearly reports) to a
+settlement point. A worked scarcity-day backtest (baseline vs heuristic,
+real 2023-08-17 data) lives in `examples/ercot-scarcity-backtest/`.
 
 ## Generating clients
 
@@ -95,6 +102,7 @@ batsimctl fleets create examples/fleet-100.json
 batsimctl sim step 3600
 batsimctl dispatch run - --idempotency-key $UUID < command.json
 batsimctl telemetry fleet-series <fleet-id> --resolution 5m --agg sum
+batsimctl backtests start examples/ercot-scarcity-backtest/backtest-baseline.json
 ```
 
 ## Configuration
@@ -130,10 +138,13 @@ streams and an upgrade handshake, not request/response pairs.
 - `crates/batsim-registry` — embedded, integrity-checked device catalog.
 - `crates/batsim-server` — axum shell, OpenAPI assembly, engine thread.
 - `crates/batsim-cli` — `batsimctl` admin CLI.
+- `crates/batsim-ercot` — ERCOT market data: `PriceSource` replay over
+  Parquet, synthetic generator, settlement engine, MIS ingest binary.
 - `web/` — 3D fleet console (React + TypeScript, MapLibre + three.js).
 - `registry/` — catalog JSON (batteries, inverters, controllers, PV).
 - `api/openapi.json` — vendored API document (CI-checked).
 - `examples/python-e2e/` — generated-client end-to-end drive.
+- `examples/ercot-scarcity-backtest/` — real-day backtest with P&L.
 - `docs/residential-battery-fleet-simulator-spec.md` — the build brief.
 
 ## Web console

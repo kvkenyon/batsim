@@ -26,6 +26,8 @@ pub struct HomeEntry {
     pub fleet_id: Option<String>,
     /// Validated configuration echo.
     pub config: HomeConfigDoc,
+    /// Composition plan (for pristine-state resets before backtests).
+    pub plan: crate::compose::HomePlan,
     /// Wall-clock creation time (RFC 3339).
     pub created_at: String,
 }
@@ -60,6 +62,24 @@ pub struct ScenarioEntry {
     pub request: ScenarioRequest,
     /// Wall-clock creation time.
     pub created_at: String,
+}
+
+/// A backtest run record.
+#[derive(Debug, Clone)]
+pub struct BacktestEntry {
+    /// Run id.
+    pub id: String,
+    /// Fleet id.
+    pub fleet_id: String,
+    /// Internally created scenario id.
+    pub scenario_id: String,
+    /// The original request.
+    pub request: crate::model::BacktestRequest,
+    /// Wall-clock creation time.
+    pub created_at: String,
+    /// Final settlement report (JSON), captured once the run settles so it
+    /// survives later runs rebinding the engine.
+    pub report: Option<serde_json::Value>,
 }
 
 /// Append-only dispatch audit log (bounded).
@@ -325,6 +345,8 @@ pub struct AppState {
     pub fleets: Arc<RwLock<HashMap<String, FleetEntry>>>,
     /// Scenarios by id.
     pub scenarios: Arc<RwLock<HashMap<String, ScenarioEntry>>>,
+    /// Backtest runs by id.
+    pub backtests: Arc<RwLock<HashMap<String, BacktestEntry>>>,
     /// The active scenario id, if any.
     pub active_scenario: Arc<RwLock<Option<String>>>,
     /// Dispatch audit log.
@@ -354,6 +376,12 @@ impl AppState {
     #[must_use]
     pub fn scenario(&self, id: &str) -> Option<ScenarioEntry> {
         self.scenarios.read().ok()?.get(id).cloned()
+    }
+
+    /// Read a backtest entry by id.
+    #[must_use]
+    pub fn backtest(&self, id: &str) -> Option<BacktestEntry> {
+        self.backtests.read().ok()?.get(id).cloned()
     }
 
     /// Build a dispatch command record for insertion.

@@ -41,6 +41,8 @@ in the suite is seconds.
 | RTE conformance | `crates/batsim-core/tests/rte_conformance.rs` | Measured vs catalog round-trip efficiency |
 | Composition | `crates/batsim-core/tests/composition.rs` | Multi-device homes, coupling edge cases |
 | Server API integration | `crates/batsim-server/tests/api.rs` | Route behavior, problem documents, idempotency, dispatch audit |
+| Backtest integration | `crates/batsim-server/tests/backtest.rs` | Replay-run lifecycle, settlement streaming, bit-identical reruns |
+| ERCOT ingest pipeline | `crates/batsim-ercot/tests/ingest_pipeline.rs` | MIS fixture parse, CPT/DST conversion, manifest verify round-trip |
 | Shared helpers | `crates/batsim-core/tests/common/mod.rs` | Austin site, golden epoch, standard home builders |
 
 The integration tests share `tests/common/mod.rs`: an Austin, TX site (30.27, -97.74), the

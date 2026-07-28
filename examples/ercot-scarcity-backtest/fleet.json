@@ -1,0 +1,16 @@
+{
+  "name": "houston-100-pw3",
+  "seed": 42,
+  "count": 100,
+  "archetypes": [
+    {
+      "weight": 1.0,
+      "template": {
+        "battery": { "model_id": "tesla.powerwall_3", "count": 1 },
+        "pv": { "peak_kw": 8.0 },
+        "load": { "archetype": "sfh_family" }
+      }
+    }
+  ],
+  "geo": { "ercot_load_zones": { "LZ_NORTH": 1.0 } }
+}
