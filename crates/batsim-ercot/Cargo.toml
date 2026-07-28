@@ -1,0 +1,33 @@
+[package]
+name = "batsim-ercot"
+version = "0.3.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ERCOT market integration: price/AS replay + synthetic sources, MIS ingestion, settlement"
+
+[dependencies]
+batsim-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+libm = { workspace = true }
+sha2 = { workspace = true }
+toml = "0.8"
+futures-util = { workspace = true }
+ureq = { workspace = true }
+clap = { workspace = true }
+arrow = { version = "=53.4.0", default-features = false }
+parquet = { version = "=53.4.0", default-features = false, features = ["arrow", "snap"] }
+calamine = { version = "0.26", default-features = false }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"
+insta = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/batsim-core", "crates/batsim-registry", "crates/batsim-server", "crates/batsim-cli"]
+members = ["crates/batsim-core", "crates/batsim-registry", "crates/batsim-ercot", "crates/batsim-server", "crates/batsim-cli"]
 
 [workspace.package]
 edition = "2021"
@@ -9,6 +9,7 @@ repository = "https://github.com/batsim/batsim"
 
 [workspace.dependencies]
 batsim-core = { path = "crates/batsim-core" }
+batsim-ercot = { path = "crates/batsim-ercot" }
 batsim-registry = { path = "crates/batsim-registry" }
 batsim-server = { path = "crates/batsim-server" }
 
@@ -32,7 +33,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tracing = "0.1"
-time = { version = "=0.3.36", features = ["parsing", "formatting", "serde"] }
+time = { version = "=0.3.36", features = ["parsing", "formatting", "serde", "macros"] }
 rand = "0.8"
 rand_chacha = "0.3"
 rayon = "1"

@@ -1,0 +1,99 @@
+# ERCOT market rules, protocol environment verified 2026-07-27.
+# Sources: ERCOT Nodal Protocols (post-RTC+B, live 2025-12-05), PUCT HCAP/LCAP
+# orders (post-Uri, effective 2022-01-01), ERCOT MIS report catalog.
+# Every constant here is referenced by name from batsim-ercot logic; no
+# ERCOT-specific literal may appear in code. Bump the file name (vYYYY) on
+# protocol changes; the version string is recorded in every SettlementReport
+# and every ingested Parquet manifest (spec D.8).
+
+[meta]
+protocol_version = "v2025"
+verification_date = "2026-07-27"
+notes = "Post-RTC+B (Dec 5 2025) environment. RTM settlement interval post-RTC+B treated as configuration (300s allowed, 900s default); pre-RTC+B historical data (e.g. 2023) is natively 900s."
+
+[offer_caps]
+# PUCT post-Winter-Storm-Uri caps (effective 2022-01-01).
+hcap_usd_per_mwh = 5000.0
+lcap_usd_per_mwh = 2000.0
+# Emergency Pricing Program: drop to LCAP after this many cumulative hours at
+# HCAP within the rolling window. Exact trigger language parameterized (D.1.1).
+emergency_hours_at_hcap = 12.0
+emergency_rolling_window_hours = 24.0
+# Cap in force during Feb 2021 (Winter Storm Uri) - for era-correct replays.
+winter_storm_uri_cap_usd_per_mwh = 9000.0
+
+[ordc]
+# Simplified ORDC: adder rises from 0 at threshold to ~voll at floor (D.1.1,
+# D.4.2). Stress tool, not a price-forecasting model.
+threshold_mw = 7000.0
+floor_mw = 3000.0
+voll_usd_per_mwh = 5000.0
+
+[settlement]
+default_interval_secs = 900
+allowed_interval_secs = [300, 900]
+
+[four_cp]
+# June-September coincident-peak months (D.1.4).
+months = [6, 7, 8, 9]
+# Candidate flag: system load within this fraction of season-to-date peak.
+candidate_window_pct_of_peak = 0.95
+# Each confirmed CP month carries this share of the annual transmission tag.
+annual_allocation_per_cp = 0.25
+
+# Ancillary services (D.1.3). response_deadline_secs: scoring starts at
+# t0 + deadline (D.7). sustain_hours: required deployment duration.
+# full_duration_hours: a resource with at least this many hours of usable
+# energy sells full rated power; shorter durations derate linearly
+# (awardable = rated x min(1, usable_hours / full_duration_hours)).
+# available_to_ader: false = modeled as NOT available to aggregated
+# residential fleets (RegUp/RegDown require AGC-grade telemetry).
+[as.ECRS]
+response_deadline_secs = 600
+sustain_hours = 2.0
+full_duration_hours = 2.0
+available_to_ader = true
+
+[as.RRS]
+response_deadline_secs = 60
+sustain_hours = 1.0
+full_duration_hours = 1.0
+available_to_ader = true
+
+[as.NSPIN]
+response_deadline_secs = 600
+sustain_hours = 4.0
+full_duration_hours = 4.0
+available_to_ader = true
+
+[as.REGUP]
+response_deadline_secs = 5
+sustain_hours = 1.0
+full_duration_hours = 1.0
+available_to_ader = false
+
+[as.REGDN]
+response_deadline_secs = 5
+sustain_hours = 1.0
+full_duration_hours = 1.0
+available_to_ader = false
+
+[as.performance]
+# Delivered/instructed below this over a deployment triggers the clawback
+# multiplier on the shortfall (simplified ERCOT non-performance penalty -
+# protocol-specific exact penalties are out of scope v1, D.5.1).
+threshold = 0.90
+clawback_multiplier = 2.0
+
+[emissions]
+# Average-mix attribution (simplification; marginal emissions out of scope
+# v1, D.5.1). kg CO2 per MWh, EPA eGRID-style static factors, configurable.
+[emissions.kg_co2_per_mwh]
+coal = 1001.0
+natural_gas = 469.0
+combined_cycle = 390.0
+nuclear = 0.0
+wind = 0.0
+solar = 0.0
+hydro = 0.0
+other = 500.0
