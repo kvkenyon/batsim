@@ -13,7 +13,15 @@ export type BatterySummary = components["schemas"]["BatterySummary"];
 export type SimStatusDoc = components["schemas"]["SimStatusDoc"];
 export type DispatchResponse = components["schemas"]["DispatchResponse"];
 export type FleetDispatchRequest = components["schemas"]["FleetDispatchRequest"];
+export type DispatchRequest = components["schemas"]["DispatchRequest"];
+export type CreateHomeRequest = components["schemas"]["CreateHomeRequest"];
+export type CommandDoc = components["schemas"]["CommandDoc"];
 export type Problem = components["schemas"]["Problem"];
+
+/** Catalog-narrowed enums for home creation; values arrive as runtime strings. */
+export type BatteryModelId = CreateHomeRequest["battery"]["model_id"];
+export type LoadZone = CreateHomeRequest["location"]["ercot_load_zone"];
+export type LoadArchetype = CreateHomeRequest["load"]["archetype"];
 
 export class ApiError extends Error {
   constructor(
@@ -21,7 +29,9 @@ export class ApiError extends Error {
     readonly problem: Problem | null,
     message: string,
   ) {
-    super(message);
+    // RFC 9457 detail carries the actionable reason ("pause or stop the
+    // simulation before deleting homes"); surface it, not just the gate.
+    super(problem?.detail ? `${message}: ${problem.detail}` : message);
     this.name = "ApiError";
   }
 }
@@ -41,6 +51,14 @@ export interface BatsimApi {
   runUntil: (untilIso: string) => Promise<void>;
   /** Send one command to every home in a fleet. */
   dispatchFleet: (fleetId: string, request: FleetDispatchRequest) => Promise<DispatchResponse>;
+  /** Send one command to an explicit set of homes. */
+  dispatch: (request: DispatchRequest) => Promise<DispatchResponse>;
+  /** Execution detail for one command (per-target acks). */
+  getCommand: (commandId: string) => Promise<CommandDoc>;
+  /** Create a home; returns the validated document. */
+  createHome: (request: CreateHomeRequest) => Promise<HomeDoc>;
+  /** Retire a home (tombstone; never re-keys the fleet). */
+  deleteHome: (homeId: string) => Promise<void>;
 }
 
 export function createBatsimApi(baseUrl: string): BatsimApi {
@@ -144,6 +162,45 @@ export function createBatsimApi(baseUrl: string): BatsimApi {
         throw new ApiError(response.status, (error as Problem) ?? null, "fleet dispatch rejected");
       }
       return data;
+    },
+
+    async dispatch(request: DispatchRequest) {
+      const { data, error, response } = await client.POST("/v1/dispatch", {
+        body: request,
+      });
+      if (!response.ok || !data) {
+        throw new ApiError(response.status, (error as Problem) ?? null, "dispatch rejected");
+      }
+      return data;
+    },
+
+    async getCommand(commandId: string) {
+      const { data, error, response } = await client.GET("/v1/dispatch/commands/{command_id}", {
+        params: { path: { command_id: commandId } },
+      });
+      if (!response.ok || !data) {
+        throw new ApiError(response.status, (error as Problem) ?? null, "failed to read command");
+      }
+      return data;
+    },
+
+    async createHome(request: CreateHomeRequest) {
+      const { data, error, response } = await client.POST("/v1/homes", {
+        body: request,
+      });
+      if (!response.ok || !data) {
+        throw new ApiError(response.status, (error as Problem) ?? null, "home creation rejected");
+      }
+      return data;
+    },
+
+    async deleteHome(homeId: string) {
+      const { error, response } = await client.DELETE("/v1/homes/{id}", {
+        params: { path: { id: homeId } },
+      });
+      if (!response.ok) {
+        throw new ApiError(response.status, (error as Problem) ?? null, "home removal rejected");
+      }
     },
   };
 }

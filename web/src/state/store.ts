@@ -42,6 +42,26 @@ export interface FleetRollup {
   socMean: number;
 }
 
+/** Battery catalog entry offered by build mode. */
+export interface CatalogBattery {
+  modelId: string;
+  displayName: string;
+  vendor: string;
+  chemistry: string;
+  coupling: string;
+  usableEnergyKwh: number;
+}
+
+/** Per-zone dispatch acknowledgement rollup shown in the dispatch console. */
+export interface ZoneAck {
+  zone: string;
+  direction: "discharge" | "charge" | "idle";
+  acked: number;
+  expected: number;
+  /** False while responses are still arriving. */
+  done: boolean;
+}
+
 export interface AppState {
   connection: ConnectionState;
   scenarioName: string;
@@ -79,9 +99,25 @@ export interface AppState {
   /** Last known map zoom, updated on moveend; gates the dive chip. */
   mapZoom: number;
 
+  /** Device catalog offered by build mode (registry summaries). */
+  catalog: CatalogBattery[];
+  /** Raw catalog detail per model id, cached at boot (reserve floor etc.). */
+  batteryDetails: Record<string, Record<string, unknown>>;
+  /** Build mode: armed state and the model placed on the next map click. */
+  buildMode: boolean;
+  buildModelId: string | null;
+  /** One-line status for the build panel (placed, rejected, removed). */
+  buildStatus: string | null;
+  /** Replay trace time bounds (epoch ms); null in live mode. */
+  traceRangeMs: [number, number] | null;
+  /** Per-zone dispatch acknowledgement rollup; null when idle. */
+  zoneAck: ZoneAck | null;
+
   setLens: (lens: Lens) => void;
   selectHome: (id: string | null) => void;
   setStratum: (stratum: Stratum) => void;
+  setBuildMode: (on: boolean) => void;
+  setBuildModel: (modelId: string | null) => void;
   /**
    * Dive into the street-level neighborhood for a zone. Null means the
    * zone currently under the map crosshair. No-op when the zone has no
@@ -118,9 +154,19 @@ export const useAppStore = create<AppState>((set) => ({
   canReplayDispatch: false,
   mapZoom: 5,
 
+  catalog: [],
+  batteryDetails: {},
+  buildMode: false,
+  buildModelId: null,
+  buildStatus: null,
+  traceRangeMs: null,
+  zoneAck: null,
+
   setLens: (lens) => set({ lens }),
   selectHome: (id) => set({ selectedHomeId: id }),
   setStratum: (stratum) => set({ stratum }),
+  setBuildMode: (on) => set({ buildMode: on }),
+  setBuildModel: (modelId) => set({ buildModelId: modelId }),
   diveZone: (zone) =>
     set((state) => {
       const target = zone ?? state.centerZone ?? state.neighborhoodZone;

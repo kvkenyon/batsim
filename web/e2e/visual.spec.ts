@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { Map as MaplibreMap } from "maplibre-gl";
+import { bootDemo, expectUnoccluded } from "./helpers";
 
 declare global {
   interface Window {
@@ -14,32 +15,6 @@ declare global {
  * the events feed carrying a dispatch entry, and the inspect panel.
  * Screenshots land in test-results/visual/ for review.
  */
-
-async function bootDemo(page: Page): Promise<void> {
-  await page.goto("/?demo=1");
-  await expect(page.locator(".top-bar")).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator(".demo-badge")).toHaveText("demo replay", { timeout: 30_000 });
-  await expect
-    .poll(async () => page.evaluate(() => window.__batsim?.store.getState().tick ?? 0), {
-      timeout: 30_000,
-    })
-    .toBeGreaterThan(5);
-}
-
-/** True when the element's center is the topmost hit target (not occluded). */
-async function expectUnoccluded(page: Page, selector: string): Promise<void> {
-  const locator = page.locator(selector).first();
-  await expect(locator).toBeVisible();
-  const reachable = await locator.evaluate((el) => {
-    const rect = el.getBoundingClientRect();
-    const hit = document.elementFromPoint(
-      rect.left + rect.width / 2,
-      rect.top + rect.height / 2,
-    );
-    return hit !== null && (hit === el || el.contains(hit));
-  });
-  expect(reachable, `${selector} is covered by another panel`).toBe(true);
-}
 
 async function clickRenderedHomeDot(page: Page): Promise<void> {
   await expect
@@ -190,9 +165,15 @@ test("events feed never traps the inspector's exits", async ({ page }) => {
     .poll(async () => page.evaluate(() => window.__batsim?.store.getState().stratum))
     .toBe("map");
 
-  // Clicking empty map (outside the panel) clears the selection too.
+  // Clicking empty map (open water, no panel, no marker) clears the
+  // selection too.
   await clickRenderedHomeDot(page);
-  await page.mouse.click(60, 500);
+  const gulf = await page.evaluate(() => {
+    const pt = window.__batsimMap?.project([-94.5, 28.2]);
+    return pt ? { x: pt.x, y: pt.y } : null;
+  });
+  if (!gulf) throw new Error("map handle missing");
+  await page.mouse.click(gulf.x, gulf.y);
   await expect(inspector).toBeHidden();
 });
 
@@ -256,6 +237,11 @@ test("every interactive control is clickable at its rendered position", async ({
     ".seg button:text-is('soc')",
     ".dispatch-panel .cmd.discharge",
     ".dispatch-panel .cmd.charge",
+    ".dispatch-panel .zone-select",
+    ".build-panel .cmd.place",
+    ".build-panel .model-select",
+    ".scenarios-panel .name-input",
+    ".scrubber-bar .scrub",
     ".maplibregl-ctrl-zoom-in",
     ".maplibregl-ctrl-zoom-out",
   ];

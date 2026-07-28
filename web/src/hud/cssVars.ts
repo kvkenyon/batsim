@@ -23,5 +23,6 @@ export const cssVarOverrides = {
   "--energy-export": TOKENS.energyExport,
   "--energy-solar": TOKENS.energySolar,
   "--alert": TOKENS.alert,
+  "--alert-deep": TOKENS.alertDeep,
   "--warn-amber": TOKENS.warnAmber,
 } as const;

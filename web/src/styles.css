@@ -8,8 +8,8 @@
  * sibling panel; geometry, not paint order, separates panels that share
  * a screen edge):
  *   0-5   viewports and their in-canvas overlays (flow canvas 4, day veil 5)
- *   20    top bar, KPI strip (screen-edge chrome)
- *   21    floating panels: events feed, dispatch panel, breadcrumb, dive chip
+ *   20    top bar, time scrubber, KPI strip (screen-edge chrome)
+ *   21    floating panels: events feed, ops stack, dispatch panel, breadcrumb, dive chip
  *   22    inspector (always above the events feed so its close stays live)
  *   30    error toast
  *   40    boot screen
@@ -416,7 +416,7 @@ body,
 
 .inspector {
   position: absolute;
-  bottom: 48px;
+  bottom: 92px;
   right: 12px;
   width: 300px;
   padding: 14px 16px;
@@ -561,7 +561,7 @@ body,
 .dispatch-panel {
   position: absolute;
   left: 12px;
-  bottom: 48px;
+  bottom: 92px;
   width: 240px;
   padding: 12px;
   z-index: 21;
@@ -620,6 +620,327 @@ body,
   min-height: 14px;
 }
 
+.dispatch-panel .seg.scope {
+  margin-bottom: 8px;
+}
+
+.dispatch-panel .seg.scope button {
+  flex: 1;
+}
+
+.dispatch-panel .cmd.idle {
+  border-color: var(--hairline);
+  color: var(--text-secondary);
+}
+
+/* Labeled select row shared by the ops panels (zone picker, model picker). */
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.field .k {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  flex: none;
+}
+
+.field select {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.field select:hover {
+  border-color: var(--text-dim);
+}
+
+/* ---- Ops stack: build mode + scenarios ------------------------------- */
+
+.ops-stack {
+  position: absolute;
+  left: 12px;
+  top: 96px;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 21;
+}
+
+.build-panel,
+.scenarios-panel {
+  padding: 12px;
+}
+
+.build-panel .head,
+.scenarios-panel .head {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.build-panel .buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.build-panel .cmd,
+.scenarios-panel .cmd {
+  appearance: none;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.build-panel .cmd:hover:not(:disabled),
+.scenarios-panel .cmd:hover:not(:disabled) {
+  border-color: var(--text-dim);
+}
+
+.build-panel .cmd:disabled,
+.scenarios-panel .cmd:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.build-panel .cmd.place {
+  flex: 1;
+  border-color: var(--energy-charge-deep);
+  color: var(--energy-charge);
+}
+
+.build-panel .cmd.place.armed {
+  border-color: var(--warn-amber);
+  color: var(--warn-amber);
+}
+
+.build-panel .status,
+.scenarios-panel .status {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  min-height: 14px;
+}
+
+.scenarios-panel .save-row {
+  display: flex;
+  gap: 8px;
+}
+
+.scenarios-panel .name-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.scenarios-panel .name-input::placeholder {
+  color: var(--text-dim);
+}
+
+.scenarios-panel .scenario-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 168px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline) transparent;
+}
+
+.scenarios-panel .scenario-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.scenarios-panel .scenario-row:last-child {
+  border-bottom: none;
+}
+
+.scenarios-panel .scenario-row .meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.scenarios-panel .scenario-row .name {
+  color: var(--text-primary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenarios-panel .scenario-row .sub {
+  color: var(--text-dim);
+}
+
+.scenarios-panel .cmd.load {
+  border-color: var(--energy-discharge-deep);
+  color: var(--energy-discharge);
+}
+
+.scenarios-panel .cmd.delete {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 6px 4px;
+}
+
+.scenarios-panel .cmd.delete:hover {
+  color: var(--alert);
+}
+
+/* ---- Inspector: remove-home affordance -------------------------------- */
+
+.inspector .cmd.remove {
+  width: 100%;
+  appearance: none;
+  border: 1px solid var(--alert-deep);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--alert);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+.inspector .cmd.remove:hover {
+  border-color: var(--alert);
+}
+
+.inspector .remove-confirm {
+  display: flex;
+  gap: 8px;
+}
+
+.inspector .remove-confirm .cmd.remove {
+  flex: 1;
+}
+
+.inspector .cmd.keep {
+  flex: 1;
+  appearance: none;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+.inspector .cmd.keep:hover {
+  color: var(--text-primary);
+}
+
+/* ---- Time scrubber ----------------------------------------------------- */
+
+.scrubber-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 36px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--surface-glass);
+  border-top: 1px solid var(--hairline);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 20;
+}
+
+.scrubber-bar .bound {
+  color: var(--text-dim);
+  font-size: 11px;
+  flex: none;
+}
+
+.scrubber-bar .position {
+  color: var(--text-primary);
+  font-size: 12px;
+  flex: none;
+  min-width: 128px;
+  text-align: right;
+}
+
+.scrubber-bar.disabled .position {
+  color: var(--text-dim);
+}
+
+.scrubber-bar .scrub {
+  flex: 1;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-raised);
+  outline: none;
+  cursor: pointer;
+}
+
+.scrubber-bar .scrub:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.scrubber-bar .scrub::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  border: 2px solid var(--bg-base);
+  box-shadow: 0 0 0 1px var(--hairline);
+}
+
+.scrubber-bar .scrub::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  border: 2px solid var(--bg-base);
+  box-shadow: 0 0 0 1px var(--hairline);
+}
+
 /* ---- Breadcrumb + dive chip ----------------------------------------- */
 
 .stratum-chip {
@@ -662,7 +983,7 @@ body,
 .dive-chip {
   position: absolute;
   left: 50%;
-  bottom: 48px;
+  bottom: 92px;
   transform: translateX(-50%);
   z-index: 21;
   appearance: none;
@@ -730,7 +1051,7 @@ body,
 
 .error-toast {
   position: absolute;
-  bottom: 88px;
+  bottom: 132px;
   left: 50%;
   transform: translateX(-50%);
   padding: 8px 14px;

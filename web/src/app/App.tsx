@@ -11,10 +11,13 @@ import { getRuntime } from "../state/runtime";
 import { useAppStore } from "../state/store";
 import { ReplayTransport } from "../state/transport";
 import { cssVarOverrides } from "../hud/cssVars";
+import { BuildPanel } from "../hud/BuildPanel";
 import { DispatchPanel } from "../hud/DispatchPanel";
 import { EventsFeed } from "../hud/EventsFeed";
 import { Inspector } from "../hud/Inspector";
 import { KpiStrip } from "../hud/KpiStrip";
+import { ScenariosPanel } from "../hud/ScenariosPanel";
+import { TimeScrubber } from "../hud/TimeScrubber";
 import { TopBar } from "../hud/TopBar";
 import { ViewportBoundary } from "./ViewportBoundary";
 
@@ -66,12 +69,14 @@ export function App() {
     return () => cancelAnimationFrame(frame);
   }, [ready]);
 
-  // Esc clears the selection first, then ascends one stratum.
+  // Esc disarms build placement first, then clears the selection, then
+  // ascends one stratum.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       const state = useAppStore.getState();
-      if (state.selectedHomeId !== null) state.selectHome(null);
+      if (state.buildMode) state.setBuildMode(false);
+      else if (state.selectedHomeId !== null) state.selectHome(null);
       else if (state.stratum === "neighborhood") state.setStratum("map");
     };
     window.addEventListener("keydown", onKey);
@@ -146,9 +151,14 @@ export function App() {
         </button>
       )}
       <EventsFeed />
+      <div className="ops-stack">
+        <BuildPanel />
+        <ScenariosPanel />
+      </div>
       <DispatchPanel />
       {selectedHomeId && selectedMeta && <Inspector meta={selectedMeta} />}
       {lastError && <div className="error-toast hud-panel">{lastError}</div>}
+      <TimeScrubber />
       <KpiStrip />
     </div>
   );

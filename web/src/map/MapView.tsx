@@ -23,6 +23,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef } from "react";
 
 import { dayArc } from "../state/dayArc";
+import { getController } from "../state/controls";
 import type { LiveBuffers } from "../state/live";
 import { useAppStore, type Lens } from "../state/store";
 import { pointInPolygon } from "../procgen/placement";
@@ -267,13 +268,28 @@ export default function MapView({ live, active }: MapViewProps) {
         useAppStore.getState().selectHome(typeof id === "string" ? id : null);
       });
       map.on("click", (e) => {
-        if (!e.defaultPrevented) useAppStore.getState().selectHome(null);
+        if (e.defaultPrevented) return;
+        const state = useAppStore.getState();
+        // Build mode: a map click sites a home instead of clearing the
+        // selection. The zone guard keeps every placement inside ERCOT.
+        if (state.buildMode) {
+          const modelId = state.buildModelId ?? state.catalog[0]?.modelId ?? null;
+          if (modelId === null) return;
+          const zone = zoneAtPoint(zoneFeatures, e.lngLat.lng, e.lngLat.lat);
+          if (zone === null) {
+            useAppStore.setState({ buildStatus: "outside ERCOT zones - pick a spot inside a zone" });
+            return;
+          }
+          getController().placeHome(modelId, zone, e.lngLat.lng, e.lngLat.lat);
+          return;
+        }
+        state.selectHome(null);
       });
       map.on("mouseenter", LAYER_HOMES, () => {
-        map.getCanvas().style.cursor = "pointer";
+        if (!useAppStore.getState().buildMode) map.getCanvas().style.cursor = "pointer";
       });
       map.on("mouseleave", LAYER_HOMES, () => {
-        map.getCanvas().style.cursor = "";
+        if (!useAppStore.getState().buildMode) map.getCanvas().style.cursor = "";
       });
 
       // Zone hover highlighting: a brightened fill + outline pair filtered
@@ -299,6 +315,9 @@ export default function MapView({ live, active }: MapViewProps) {
       // path, never the only one.
       map.on("click", LAYER_ZONES_FILL, (e) => {
         if (e.defaultPrevented) return;
+        // Placement clicks belong to build mode; framing the zone would
+        // yank the camera out from under the next placement.
+        if (useAppStore.getState().buildMode) return;
         const feature = e.features?.[0];
         if (!feature) return;
         const geometry = feature.geometry;
@@ -335,6 +354,7 @@ export default function MapView({ live, active }: MapViewProps) {
 
       map.on("dblclick", (e) => {
         e.preventDefault();
+        if (useAppStore.getState().buildMode) return;
         useAppStore.getState().diveZone(zoneAtPoint(zoneFeatures, e.lngLat.lng, e.lngLat.lat));
       });
 
@@ -518,6 +538,9 @@ export default function MapView({ live, active }: MapViewProps) {
     }, TELEMETRY_PUSH_MS);
 
     const unsubscribe = useAppStore.subscribe((state, prev) => {
+      if (state.buildMode !== prev.buildMode) {
+        map.getCanvas().style.cursor = state.buildMode ? "crosshair" : "";
+      }
       if (state.lens !== prev.lens) {
         lensRef.current = state.lens;
         if (map.getLayer(LAYER_HOMES)) {
