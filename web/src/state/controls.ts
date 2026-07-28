@@ -266,11 +266,16 @@ export function createLiveController(api: BatsimApi, fleetId: string | null): Si
           action: dispatchAction(direction),
         })
         .then((res) => {
+          if (useAppStore.getState().zoneAck !== ack) return;
           set({ dispatchStatus: `${direction} ${zone} · ${res.targets} homes targeted` });
           watchLiveCommand(api, res.command_id, ack);
         })
         .catch((err: unknown) => {
-          set({ zoneAck: null, dispatchStatus: err instanceof Error ? err.message : String(err) });
+          if (useAppStore.getState().zoneAck === ack) {
+            set({ zoneAck: null, dispatchStatus: err instanceof Error ? err.message : String(err) });
+          } else {
+            setError(err);
+          }
         });
     },
     placeHome(modelId, zone, lng, lat) {
