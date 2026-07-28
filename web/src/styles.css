@@ -1,3 +1,20 @@
+/*
+ * Global stylesheet. Dark operations-console theme: near-black surfaces,
+ * frosted-glass HUD panels, hairline borders, IBM Plex Sans for prose and
+ * IBM Plex Mono (tabular numerals) for every number. Spacing follows a
+ * 4 px grid (4/8/12/16/24/32); type follows one scale (see .t-* classes).
+ *
+ * Panel z-order contract (no interactive element is ever covered by a
+ * sibling panel; geometry, not paint order, separates panels that share
+ * a screen edge):
+ *   0-5   viewports and their in-canvas overlays (flow canvas 4, day veil 5)
+ *   20    top bar, KPI strip (screen-edge chrome)
+ *   21    floating panels: events feed, dispatch panel, breadcrumb, dive chip
+ *   22    inspector (always above the events feed so its close stays live)
+ *   30    error toast
+ *   40    boot screen
+ */
+
 :root {
   color-scheme: dark;
   font-family: "IBM Plex Sans", system-ui, sans-serif;
@@ -15,11 +32,53 @@ body,
   overflow: hidden;
   background: var(--bg-base);
   color: var(--text-primary);
+  font-size: 13px;
+  line-height: 16px;
 }
 
 .mono {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-feature-settings: "tnum";
+}
+
+/* Type scale: display / label / micro / number L-M-S. */
+.t-display {
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 600;
+}
+.t-label {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
+.t-micro {
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.t-num-l {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-feature-settings: "tnum";
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 500;
+}
+.t-num-m {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-feature-settings: "tnum";
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 400;
+}
+.t-num-s {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-feature-settings: "tnum";
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 400;
 }
 
 .app-shell {
@@ -56,13 +115,28 @@ body,
   visibility: visible;
 }
 
+/* Simulated-time-of-day veil over the map viewport. Opacity and tint are
+   driven from the day-arc module via inline style. */
+.day-veil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  transition:
+    background-color 900ms linear,
+    opacity 900ms linear;
+}
+
 .hud-panel {
   background: var(--surface-glass);
   border: 1px solid var(--hairline);
   border-radius: 8px;
   backdrop-filter: blur(12px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
 }
+
+/* ---- Top bar -------------------------------------------------------- */
 
 .top-bar {
   position: absolute;
@@ -77,7 +151,15 @@ body,
   background: var(--surface-glass);
   border-bottom: 1px solid var(--hairline);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   z-index: 20;
+  pointer-events: none;
+}
+
+/* The bar frames the viewport; only its own controls take clicks, so the
+   map stays pannable in the gaps. */
+.top-bar > * {
+  pointer-events: auto;
 }
 
 .top-bar .brand {
@@ -92,7 +174,7 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 320px;
+  max-width: 280px;
 }
 
 .top-bar .spacer {
@@ -102,6 +184,7 @@ body,
 .clock {
   font-size: 13px;
   color: var(--text-primary);
+  white-space: nowrap;
 }
 
 .clock .label {
@@ -110,6 +193,10 @@ body,
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin-right: 6px;
+}
+
+.clock.paused {
+  color: var(--warn-amber);
 }
 
 .demo-badge {
@@ -121,34 +208,77 @@ body,
   border-radius: 4px;
   padding: 2px 6px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
-.lens-toggle {
+/* Segmented control (lens picker, speed picker). */
+.seg {
   display: flex;
   border: 1px solid var(--hairline);
   border-radius: 6px;
   overflow: hidden;
+  flex: none;
 }
 
-.lens-toggle button {
+.seg button {
   appearance: none;
   border: none;
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
   font-size: 12px;
-  padding: 5px 12px;
+  padding: 5px 10px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
-.lens-toggle button.active {
+.seg button.active {
   background: var(--surface-raised);
   color: var(--text-primary);
 }
 
-.lens-toggle button:hover:not(.active) {
+.seg button:hover:not(.active):not(:disabled) {
   color: var(--text-primary);
 }
+
+.seg button:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.transport .jump {
+  appearance: none;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.transport .jump:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--text-dim);
+}
+
+.transport .jump:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* ---- KPI strip ------------------------------------------------------ */
 
 .kpi-strip {
   position: absolute;
@@ -163,8 +293,11 @@ body,
   background: var(--surface-glass);
   border-top: 1px solid var(--hairline);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   font-size: 12px;
   z-index: 20;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .kpi {
@@ -184,19 +317,121 @@ body,
   font-size: 13px;
 }
 
-.inspector {
+/* ---- Events feed ---------------------------------------------------- */
+
+.events-feed {
   position: absolute;
   top: 60px;
   right: 12px;
-  width: 288px;
+  width: 300px;
+  max-height: 30%;
+  display: flex;
+  flex-direction: column;
+  z-index: 21;
+  overflow: hidden;
+}
+
+/* While the inspector is open the feed yields the right edge: it
+   collapses to its newest entries so the two panels never overlap. */
+.events-feed.shrunk {
+  max-height: 128px;
+}
+
+.events-feed .feed-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+  color: var(--text-dim);
+}
+
+.events-feed .feed-list {
+  overflow-y: auto;
+  padding: 0 4px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline) transparent;
+}
+
+.event-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 8px;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+
+.event-row .t {
+  color: var(--text-dim);
+  flex: none;
+}
+
+.event-row .msg {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-row.sev-info {
+  border-left-color: var(--hairline);
+}
+
+.event-row.sev-watch {
+  border-left-color: var(--warn-amber);
+}
+
+.event-row.sev-watch .msg {
+  color: var(--text-primary);
+}
+
+.event-row.sev-critical {
+  border-left-color: var(--alert);
+}
+
+.event-row.sev-critical .msg {
+  color: var(--text-primary);
+}
+
+.event-row.kind-dispatch .msg {
+  color: var(--energy-discharge);
+}
+
+.event-row.fresh {
+  animation: event-in 400ms ease-out;
+}
+
+@keyframes event-in {
+  from {
+    background: var(--surface-raised);
+    opacity: 0.2;
+  }
+  to {
+    background: transparent;
+    opacity: 1;
+  }
+}
+
+/* ---- Inspector ------------------------------------------------------ */
+
+.inspector {
+  position: absolute;
+  bottom: 48px;
+  right: 12px;
+  width: 300px;
   padding: 14px 16px;
-  z-index: 20;
+  z-index: 22;
   font-size: 13px;
+  max-height: min(580px, calc(100% - 250px));
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline) transparent;
 }
 
 .inspector h2 {
   margin: 0 0 2px;
   font-size: 14px;
+  line-height: 20px;
   font-weight: 600;
 }
 
@@ -206,10 +441,19 @@ body,
   margin-bottom: 10px;
 }
 
+.inspector .section {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 12px 0 4px;
+}
+
 .inspector .row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 12px;
   padding: 4px 0;
   border-bottom: 1px solid var(--hairline);
 }
@@ -221,10 +465,12 @@ body,
 .inspector .row .k {
   color: var(--text-secondary);
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .inspector .row .v {
   font-size: 13px;
+  text-align: right;
 }
 
 .inspector .close {
@@ -237,6 +483,10 @@ body,
   color: var(--text-dim);
   cursor: pointer;
   font-size: 14px;
+}
+
+.inspector .close:hover {
+  color: var(--text-primary);
 }
 
 .soc-bar {
@@ -267,9 +517,220 @@ body,
   background: var(--warn-amber);
 }
 
+.sparkline {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin: 4px 0 2px;
+}
+
+.state-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+
+.state-chip.discharging {
+  color: var(--bg-base);
+  background: var(--energy-discharge);
+}
+
+.state-chip.charging {
+  color: var(--bg-base);
+  background: var(--energy-charge);
+}
+
+.state-chip.idle {
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+}
+
+.state-chip.reserve {
+  color: var(--bg-base);
+  background: var(--alert);
+}
+
+/* ---- Dispatch panel ------------------------------------------------- */
+
+.dispatch-panel {
+  position: absolute;
+  left: 12px;
+  bottom: 48px;
+  width: 240px;
+  padding: 12px;
+  z-index: 21;
+}
+
+.dispatch-panel .head {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.dispatch-panel .buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.dispatch-panel .cmd {
+  flex: 1;
+  appearance: none;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 7px 0;
+  cursor: pointer;
+}
+
+.dispatch-panel .cmd:hover:not(:disabled) {
+  border-color: var(--text-dim);
+}
+
+.dispatch-panel .cmd:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dispatch-panel .cmd.discharge {
+  border-color: var(--energy-discharge-deep);
+  color: var(--energy-discharge);
+}
+
+.dispatch-panel .cmd.charge {
+  border-color: var(--energy-charge-deep);
+  color: var(--energy-charge);
+}
+
+.dispatch-panel .status {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  min-height: 14px;
+}
+
+/* ---- Breadcrumb + dive chip ----------------------------------------- */
+
+.stratum-chip {
+  position: absolute;
+  left: 12px;
+  top: 60px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stratum-chip .crumb {
+  color: var(--text-primary);
+}
+
+.stratum-chip button.crumb-link {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  border-bottom: 1px solid transparent;
+}
+
+.stratum-chip button.crumb-link:hover {
+  border-bottom-color: var(--text-dim);
+}
+
+.stratum-chip .hint {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.dive-chip {
+  position: absolute;
+  left: 50%;
+  bottom: 48px;
+  transform: translateX(-50%);
+  z-index: 21;
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--surface-glass);
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  padding: 7px 14px;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.dive-chip:hover {
+  border-color: var(--text-dim);
+}
+
+.dive-chip .zone {
+  color: var(--energy-discharge);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-feature-settings: "tnum";
+}
+
+/* ---- MapLibre chrome ------------------------------------------------ */
+
+/* Zoom controls sit left of the events feed and below the top bar, never
+   under either; ours loads before maplibre-gl.css, so the extra
+   specificity is load-order insurance. */
+.app-shell .maplibregl-ctrl-top-right {
+  top: 56px;
+  right: 324px;
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+  background: var(--surface-glass);
+  color: var(--text-dim);
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--text-secondary);
+}
+
+.maplibregl-ctrl-group {
+  background: var(--surface-glass) !important;
+  border: 1px solid var(--hairline);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.maplibregl-ctrl-group button {
+  background: transparent;
+}
+
+.maplibregl-ctrl-group button span {
+  filter: invert(0.85);
+}
+
+/* ---- Toasts, boot, failures ------------------------------------------ */
+
 .error-toast {
   position: absolute;
-  bottom: 48px;
+  bottom: 88px;
   left: 50%;
   transform: translateX(-50%);
   padding: 8px 14px;
@@ -320,18 +781,4 @@ body,
 .viewport-failure .detail {
   color: var(--text-secondary);
   font-size: 13px;
-}
-
-.stratum-chip {
-  position: absolute;
-  left: 12px;
-  top: 60px;
-  padding: 6px 10px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  z-index: 20;
-}
-
-.stratum-chip .crumb {
-  color: var(--text-primary);
 }

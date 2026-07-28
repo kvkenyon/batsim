@@ -11,7 +11,7 @@ export const cssVarOverrides = {
   "--bg-deep": TOKENS.bgDeep,
   "--surface": TOKENS.surface,
   "--surface-raised": TOKENS.surfaceRaised,
-  "--surface-glass": "rgba(43, 38, 31, 0.72)",
+  "--surface-glass": "rgba(18, 22, 28, 0.78)",
   "--hairline": TOKENS.hairline,
   "--text-primary": TOKENS.textPrimary,
   "--text-secondary": TOKENS.textSecondary,

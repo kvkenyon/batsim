@@ -73,7 +73,7 @@ function interiorPoint(ring: [number, number][], bbox: [number, number, number, 
   return [cx, cy];
 }
 
-function pointInPolygon(x: number, y: number, ring: [number, number][]): boolean {
+export function pointInPolygon(x: number, y: number, ring: [number, number][]): boolean {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const pi = ring[i] ?? [0, 0];
@@ -93,8 +93,8 @@ function pointInPolygon(x: number, y: number, ring: [number, number][]): boolean
  */
 export function homeLngLat(homeId: string, zone: ZoneFeature): [number, number] {
   const rng = new Rng(`place:${homeId}`);
-  const spreadLng = Math.min((zone.bbox[2] - zone.bbox[0]) * 0.28, 0.9);
-  const spreadLat = Math.min((zone.bbox[3] - zone.bbox[1]) * 0.28, 0.9);
+  const spreadLng = Math.min((zone.bbox[2] - zone.bbox[0]) * 0.28, 0.35);
+  const spreadLat = Math.min((zone.bbox[3] - zone.bbox[1]) * 0.28, 0.35);
   for (let attempt = 0; attempt < 24; attempt++) {
     const x = zone.anchor[0] + rng.range(-spreadLng, spreadLng);
     const y = zone.anchor[1] + rng.range(-spreadLat, spreadLat);

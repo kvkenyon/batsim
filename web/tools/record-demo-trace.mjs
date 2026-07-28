@@ -185,11 +185,14 @@ function roundTickPayload(payload) {
 
 /**
  * Stream SSE from the telemetry endpoint and record TICKS tick events.
- * Writes {"event":"tick", ...payload} lines to `outStream`.
+ * Writes {"event":"tick"|"dispatch", ...payload} lines to `outStream`.
  * `onSubscribed` runs once the stream is attached, before any read, so
  * the caller can resume a paused sim with zero ticks lost in between.
+ * `onProgress(fraction)` fires as the capture crosses 40% of its tick
+ * target - the caller fires the fleet dispatch there so the trace
+ * contains a real command with true per-home execution latency.
  */
-async function recordTicks(outStream, onSubscribed) {
+async function recordTicks(outStream, onSubscribed, onProgress) {
   const res = await fetch(
     `${BATSIM_URL}/v1/telemetry/stream?fields=raw&downsample=${DOWNSAMPLE}`,
     { headers: { accept: "text/event-stream" } },
@@ -202,12 +205,13 @@ async function recordTicks(outStream, onSubscribed) {
   const decoder = new TextDecoder();
   let buffer = "";
   let recorded = 0;
+  let progressFired = false;
   let firstTick = null;
   let lastTick = null;
   let firstSimTime = null;
   let lastSimTime = null;
 
-  const handleEvent = (rawEvent) => {
+  const handleEvent = async (rawEvent) => {
     // One SSE event: `event:` names the kind, `data:` carries JSON.
     let kind = "message";
     let data = "";
@@ -218,13 +222,18 @@ async function recordTicks(outStream, onSubscribed) {
         data += (data ? "\n" : "") + line.slice(5).replace(/^ /, "");
       }
     }
-    if (kind !== "tick" || !data) return false;
+    if (!data) return false;
     let payload;
     try {
       payload = JSON.parse(data);
     } catch {
       return false;
     }
+    if (kind === "dispatch") {
+      outStream.write(JSON.stringify({ event: "dispatch", ...payload }) + "\n");
+      return false;
+    }
+    if (kind !== "tick") return false;
     if (!Number.isInteger(payload.tick)) return false;
     const line = { event: "tick", ...roundTickPayload(payload) };
     outStream.write(JSON.stringify(line) + "\n");
@@ -235,6 +244,10 @@ async function recordTicks(outStream, onSubscribed) {
     }
     lastTick = payload.tick;
     lastSimTime = payload.sim_time;
+    if (!progressFired && recorded >= TICKS * 0.4) {
+      progressFired = true;
+      if (onProgress) await onProgress();
+    }
     if (recorded % 60 === 0) log(`recorded ${recorded}/${TICKS} tick events`);
     return recorded >= TICKS;
   };
@@ -269,7 +282,7 @@ async function recordTicks(outStream, onSubscribed) {
     while ((idx = buffer.indexOf("\n\n")) !== -1) {
       const rawEvent = buffer.slice(0, idx);
       buffer = buffer.slice(idx + 2);
-      if (handleEvent(rawEvent)) {
+      if (await handleEvent(rawEvent)) {
         done = true;
         break;
       }
@@ -354,7 +367,20 @@ async function main() {
     mkdirSync(OUT_DIR, { recursive: true });
     const telemetryPath = path.join(OUT_DIR, "telemetry.jsonl");
     const outStream = createWriteStream(telemetryPath);
-    const stats = await recordTicks(outStream, () => api("POST", "/v1/sim:resume"));
+    const stats = await recordTicks(
+      outStream,
+      () => api("POST", "/v1/sim:resume"),
+      async () => {
+        // Mid-capture fleet discharge: the recorded trace carries the
+        // real command and the jittered per-home response, so the demo
+        // replay can show a true fleet dispatch moment.
+        const res = await api("POST", `/v1/fleets/${fleet.id}:dispatch`, {
+          command_id: `demo-fleet-discharge`,
+          action: { type: "discharge_to", kw: 5, duration_s: 1800 },
+        });
+        log(`fleet dispatch issued: ${res.command_id} -> ${res.targets} homes`);
+      },
+    );
     await new Promise((resolve) => outStream.end(resolve));
     log(`recorded ${stats.recorded} tick events (ticks ${stats.firstTick}..${stats.lastTick})`);
 

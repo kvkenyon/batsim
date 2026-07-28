@@ -9,7 +9,10 @@ import NeighborhoodView from "../scene/NeighborhoodView";
 import { bootstrap } from "../state/bootstrap";
 import { getRuntime } from "../state/runtime";
 import { useAppStore } from "../state/store";
+import { ReplayTransport } from "../state/transport";
 import { cssVarOverrides } from "../hud/cssVars";
+import { DispatchPanel } from "../hud/DispatchPanel";
+import { EventsFeed } from "../hud/EventsFeed";
 import { Inspector } from "../hud/Inspector";
 import { KpiStrip } from "../hud/KpiStrip";
 import { TopBar } from "../hud/TopBar";
@@ -18,7 +21,7 @@ import { ViewportBoundary } from "./ViewportBoundary";
 declare global {
   interface Window {
     /** Ops/e2e handle: inspect and drive the console from the console. */
-    __batsim?: { store: typeof useAppStore };
+    __batsim?: { store: typeof useAppStore; seekToSimTime?: (ms: number) => boolean };
   }
 }
 
@@ -34,6 +37,10 @@ export function App() {
   const selectedHomeId = useAppStore((s) => s.selectedHomeId);
   const selectedMeta = useAppStore((s) => (s.selectedHomeId ? s.homesMeta[s.selectedHomeId] : undefined));
   const neighborhoodZone = useAppStore((s) => s.neighborhoodZone);
+  const mapZoom = useAppStore((s) => s.mapZoom);
+  const centerZone = useAppStore((s) => s.centerZone);
+  const homesMeta = useAppStore((s) => s.homesMeta);
+  const zoneLabels = useAppStore((s) => s.zoneLabels);
   const lastError = useAppStore((s) => s.lastError);
 
   useEffect(() => {
@@ -42,7 +49,13 @@ export function App() {
     }
     const params = new URLSearchParams(window.location.search);
     bootstrap({ forceDemo: params.get("demo") === "1" })
-      .then(() => setReady(true))
+      .then(() => {
+        setReady(true);
+        const { transport } = getRuntime();
+        if (transport instanceof ReplayTransport && window.__batsim) {
+          window.__batsim.seekToSimTime = (ms: number) => transport.seekToSimTime(ms);
+        }
+      })
       .catch((err: unknown) => setBootError(err instanceof Error ? err.message : String(err)));
     window.__batsim = { store: useAppStore };
   }, []);
@@ -52,6 +65,18 @@ export function App() {
     const frame = requestAnimationFrame(() => setCrossfadeArmed(true));
     return () => cancelAnimationFrame(frame);
   }, [ready]);
+
+  // Esc clears the selection first, then ascends one stratum.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const state = useAppStore.getState();
+      if (state.selectedHomeId !== null) state.selectHome(null);
+      else if (state.stratum === "neighborhood") state.setStratum("map");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   if (bootError) {
     return (
@@ -72,6 +97,14 @@ export function App() {
   }
 
   const { live } = getRuntime();
+
+  // The dive chip offers the neighborhood under the map crosshair, and
+  // only when that zone actually has homes to walk.
+  let diveLabel: string | null = null;
+  if (centerZone !== null) {
+    const hasHomes = Object.values(homesMeta).some((m) => m.zone === centerZone);
+    if (hasHomes) diveLabel = zoneLabels[centerZone] ?? centerZone;
+  }
 
   return (
     <div className={`app-shell${crossfadeArmed ? " crossfade-armed" : ""}`}>
@@ -95,11 +128,25 @@ export function App() {
         {stratum === "map" ? (
           <span className="crumb">ERCOT · Texas</span>
         ) : (
-          <span>
-            <span className="crumb">ERCOT · Texas</span> ▸ neighborhood · {neighborhoodZone}
-          </span>
+          <>
+            <button className="crumb-link" onClick={() => useAppStore.getState().setStratum("map")}>
+              ERCOT · Texas
+            </button>
+            <span>▸</span>
+            <span className="crumb">neighborhood · {neighborhoodZone}</span>
+            <span className="hint">esc to return</span>
+          </>
         )}
       </div>
+      {stratum === "map" && mapZoom >= 9 && diveLabel !== null && (
+        <button
+          className="dive-chip"
+          onClick={() => useAppStore.getState().diveZone(null)}>
+          dive into <span className="zone">{diveLabel}</span>
+        </button>
+      )}
+      <EventsFeed />
+      <DispatchPanel />
       {selectedHomeId && selectedMeta && <Inspector meta={selectedMeta} />}
       {lastError && <div className="error-toast hud-panel">{lastError}</div>}
       <KpiStrip />
