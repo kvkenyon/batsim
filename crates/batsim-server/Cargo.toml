@@ -46,6 +46,7 @@ xxhash-rust.workspace = true
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 serde_path_to_error = "0.1"
+tempfile = "3"
 
 [lints]
 workspace = true

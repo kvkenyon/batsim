@@ -465,6 +465,7 @@ dependencies = [
  "serde_path_to_error",
  "sha2",
  "subtle",
+ "tempfile",
  "thiserror 2.0.19",
  "time",
  "tokio",

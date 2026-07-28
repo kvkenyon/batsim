@@ -1,0 +1,28 @@
+{
+  "fleet_id": "@FLEET_ID@",
+  "name": "heuristic-2023-08-17",
+  "date": "2023-08-17",
+  "settlement_point": "LZ_NORTH",
+  "seed": 7,
+  "strategy": {
+    "kind": "schedule",
+    "entries": [
+      { "start": "2023-08-17T01:00:00-05:00", "action": "charge", "kw": 5.0, "duration_s": 14400 },
+      { "start": "2023-08-17T17:00:00-05:00", "action": "discharge", "kw": 5.0, "duration_s": 14400 }
+    ]
+  },
+  "retail_rate": { "kind": "flat", "usd_per_kwh": 0.12 },
+  "as_awards": [
+    {
+      "product": "ecrs",
+      "start": "2023-08-17T17:00:00-05:00",
+      "end": "2023-08-17T19:00:00-05:00",
+      "awarded_mw": 0.4,
+      "deployed": true
+    }
+  ],
+  "four_cp": {
+    "transmission_rate_usd_per_kw_mo": 3.5,
+    "candidate_intervals": ["2023-08-17T17:00:00-05:00"]
+  }
+}
