@@ -225,7 +225,7 @@ pub async fn create_backtest(
         ));
     }
 
-    let (run_id, scenario_id) = start_run(&state, &req, start, end, schedule, as_awards, transmission_rate, four_cp_candidates).await?;
+    let (run_id, scenario_id) = start_run(&state, &fleet, &req, start, end, schedule, as_awards, transmission_rate, four_cp_candidates).await?;
 
     let bt_entry = BacktestEntry {
         id: run_id.clone(),
@@ -238,7 +238,13 @@ pub async fn create_backtest(
     if let Ok(mut backtests) = state.backtests.write() {
         backtests.insert(run_id.clone(), bt_entry.clone());
     }
-    let doc = doc_of(&bt_entry, None);
+    let doc = doc_of(&bt_entry, Some(&BacktestInfo {
+        run_id: run_id.clone(),
+        state: crate::engine::BacktestState::Running,
+        sim_time: rfc3339_of(start),
+        intervals_settled: 0,
+        report: None,
+    }));
     Ok((StatusCode::ACCEPTED, Json(doc)).into_response())
 }
 
@@ -247,6 +253,7 @@ pub async fn create_backtest(
 #[allow(clippy::too_many_arguments)]
 async fn start_run(
     state: &AppState,
+    fleet: &crate::state::FleetEntry,
     req: &BacktestRequest,
     start: u64,
     end: u64,
@@ -286,6 +293,33 @@ async fn start_run(
         scenarios.insert(scenario_id.clone(), entry);
     }
     activate_impl(state.clone(), &scenario_id).await?;
+
+    // Reset the fleet's homes to their pristine composed state at their
+    // existing arena indices: every backtest starts from identical
+    // physical conditions (same index => same RNG substreams, so runs are
+    // bit-identical given identical inputs).
+    let mut fresh = Vec::new();
+    for home_id in &fleet.home_ids {
+        let home = state
+            .home(home_id)
+            .ok_or_else(|| Problem::not_found("home", home_id))?;
+        let composed = crate::compose::compose_home(
+            &state.registry,
+            &home.plan,
+            &home.id,
+            req.seed,
+            home.idx,
+        )?;
+        fresh.push((home.idx, composed.home));
+    }
+    state
+        .engine
+        .call(|tx| EngineMsg::ResetHomes {
+            homes: fresh,
+            reply: tx,
+        })
+        .await?
+        .map_err(|e| Problem::internal().detail(e))?;
 
     // Configure the engine-side settlement tracker.
     let run_id = ids::new_id(ids::BACKTEST);

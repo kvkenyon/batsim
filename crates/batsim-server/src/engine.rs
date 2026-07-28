@@ -446,6 +446,15 @@ pub enum EngineMsg {
         /// Completion reply.
         reply: oneshot::Sender<Result<(), String>>,
     },
+    /// Replace homes at existing arena indices with freshly composed
+    /// instances (backtest pristine-state reset; indices — and therefore
+    /// RNG substreams — are preserved).
+    ResetHomes {
+        /// `(arena index, fresh home)` pairs.
+        homes: Vec<(u64, Home)>,
+        /// Completion reply.
+        reply: oneshot::Sender<Result<(), String>>,
+    },
     /// Configure a backtest run (stopped only, replay-backed price feed).
     ConfigureBacktest {
         /// Run configuration.
@@ -637,6 +646,14 @@ impl Engine {
             }
             EngineMsg::BacktestStatus { reply } => {
                 drop(reply.send(self.backtest_info()));
+            }
+            EngineMsg::ResetHomes { homes, reply } => {
+                let r = if self.state == SimState::Stopped {
+                    self.reset_homes(homes)
+                } else {
+                    Err("home reset requires a stopped simulation".to_owned())
+                };
+                drop(reply.send(r));
             }
             other => self.handle_homes_and_dispatch(other),
         }
@@ -1197,6 +1214,17 @@ impl Engine {
         Ok(())
     }
 
+    /// Replace homes in place at their arena indices (pristine reset).
+    fn reset_homes(&mut self, homes: Vec<(u64, Home)>) -> Result<(), String> {
+        for (idx, home) in homes {
+            match self.world.home_mut(idx as usize) {
+                Some(slot) => *slot = home,
+                None => return Err(format!("no home at arena index {idx}")),
+            }
+        }
+        Ok(())
+    }
+
     /// Meter snapshots for every active home (backtest baseline).
     fn meter_snapshots(&self) -> std::collections::HashMap<u64, MeterSnapshot> {
         let mut out = std::collections::HashMap::new();
@@ -1505,6 +1533,11 @@ fn settlement_for(
     }
     let rules = batsim_ercot::rules::ErcotRules::current().map_err(|e| e.to_string())?;
     let watch = batsim_ercot::four_cp::FourCpWatch::new(&rules);
+    // Provenance comes from the loaded data, never from the request: a
+    // synthetic archive must never produce a settlement-final report.
+    let provenance = feed
+        .sample_at(epoch)
+        .map_or(config.provenance, |s| s.provenance);
     let settlement = SettlementConfig {
         location: config.location.clone(),
         settlement_interval_secs: interval_secs,
@@ -1513,7 +1546,7 @@ fn settlement_for(
         transmission_rate_usd_per_kw_mo: config.transmission_rate_usd_per_kw_mo,
         program_costs_usd: config.program_costs_usd,
         incentives_usd: config.incentives_usd.clone(),
-        provenance: config.provenance,
+        provenance,
         rules,
     };
     let config = BacktestConfig {

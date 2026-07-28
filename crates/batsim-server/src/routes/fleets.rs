@@ -142,6 +142,7 @@ async fn create_fleet_inner(
                 load_archetype: plan.load.archetype.clone(),
                 ercot_load_zone: plan.location.ercot_load_zone.clone(),
             },
+            plan: plan.clone(),
             created_at: now_rfc3339(),
         });
     }
@@ -344,6 +345,7 @@ async fn expand_fleet_impl(
                 load_archetype: plan.load.archetype.clone(),
                 ercot_load_zone: plan.location.ercot_load_zone.clone(),
             },
+            plan: plan.clone(),
             created_at: now_rfc3339(),
         });
     }

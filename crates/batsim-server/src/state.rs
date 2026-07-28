@@ -26,6 +26,8 @@ pub struct HomeEntry {
     pub fleet_id: Option<String>,
     /// Validated configuration echo.
     pub config: HomeConfigDoc,
+    /// Composition plan (for pristine-state resets before backtests).
+    pub plan: crate::compose::HomePlan,
     /// Wall-clock creation time (RFC 3339).
     pub created_at: String,
 }
