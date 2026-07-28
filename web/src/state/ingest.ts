@@ -93,17 +93,16 @@ export function createIngest(live: LiveBuffers): Ingest {
         }));
         return;
       }
-      if (lastTick >= 0 && frame.tick > lastTick + 1) {
-        // Tick sequence gap: frames were lost upstream. Rings tolerate
-        // holes; the HUD clock simply jumps to the newest frame.
-      }
+      const tickGap = lastTick >= 0 && frame.tick > lastTick + 1;
       const dayIndex = Math.floor(frame.simTimeMs / 86_400_000);
       const looped = frame.tick < lastTick;
       if (looped || (lastDayIndex >= 0 && dayIndex !== lastDayIndex)) {
         resetEnergyAccumulators(live);
       }
       const dtHours =
-        lastSimMs >= 0 && frame.simTimeMs > lastSimMs ? (frame.simTimeMs - lastSimMs) / 3_600_000 : 0;
+        !tickGap && lastSimMs >= 0 && frame.simTimeMs > lastSimMs
+          ? (frame.simTimeMs - lastSimMs) / 3_600_000
+          : 0;
       lastTick = frame.tick;
       lastSimMs = frame.simTimeMs;
       lastDayIndex = dayIndex;
