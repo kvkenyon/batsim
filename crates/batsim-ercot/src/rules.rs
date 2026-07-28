@@ -155,19 +155,22 @@ impl ErcotRules {
         for (name, value) in raw.as_ {
             if name == "performance" {
                 let perf: AsPerformance =
-                    value.try_into().map_err(|e: toml::de::Error| ErcotError::Parse {
-                        context: "ercot_rules.toml [as.performance]".to_string(),
-                        detail: e.to_string(),
-                    })?;
+                    value
+                        .try_into()
+                        .map_err(|e: toml::de::Error| ErcotError::Parse {
+                            context: "ercot_rules.toml [as.performance]".to_string(),
+                            detail: e.to_string(),
+                        })?;
                 performance = Some(perf);
                 continue;
             }
-            let rule: AsRule = value.try_into().map_err(|e: toml::de::Error| {
-                ErcotError::Parse {
-                    context: format!("ercot_rules.toml [as.{name}]"),
-                    detail: e.to_string(),
-                }
-            })?;
+            let rule: AsRule =
+                value
+                    .try_into()
+                    .map_err(|e: toml::de::Error| ErcotError::Parse {
+                        context: format!("ercot_rules.toml [as.{name}]"),
+                        detail: e.to_string(),
+                    })?;
             products.insert(name, rule);
         }
         Ok(Self {

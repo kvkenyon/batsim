@@ -82,13 +82,21 @@ impl LastNDaysAverage {
                 count += 1;
             }
         }
-        if count == 0 { None } else { Some(sum / f64::from(count)) }
+        if count == 0 {
+            None
+        } else {
+            Some(sum / f64::from(count))
+        }
     }
 }
 
 impl Baseline for LastNDaysAverage {
     fn name(&self) -> String {
-        let exclusion = if self.exclude_event_days { "event_days" } else { "none" };
+        let exclusion = if self.exclude_event_days {
+            "event_days"
+        } else {
+            "none"
+        };
         format!("LastNDaysAverage{{n:{}, exclusion: {exclusion}}}", self.n)
     }
 
@@ -140,7 +148,11 @@ impl Baseline for MeteredBeforeAfter {
                 count += 1;
             }
         }
-        if count == 0 { None } else { Some(sum / f64::from(count)) }
+        if count == 0 {
+            None
+        } else {
+            Some(sum / f64::from(count))
+        }
     }
 }
 
@@ -182,10 +194,22 @@ impl BaselineMethod {
 impl Baseline for BaselineMethod {
     fn name(&self) -> String {
         match *self {
-            Self::LastNDaysAverage { n, exclude_event_days } =>
-                LastNDaysAverage { n, exclude_event_days }.name(),
-            Self::MeteredBeforeAfter { pre_event_intervals, interval_secs } =>
-                MeteredBeforeAfter { pre_event_intervals, interval_secs }.name(),
+            Self::LastNDaysAverage {
+                n,
+                exclude_event_days,
+            } => LastNDaysAverage {
+                n,
+                exclude_event_days,
+            }
+            .name(),
+            Self::MeteredBeforeAfter {
+                pre_event_intervals,
+                interval_secs,
+            } => MeteredBeforeAfter {
+                pre_event_intervals,
+                interval_secs,
+            }
+            .name(),
         }
     }
 
@@ -196,12 +220,22 @@ impl Baseline for BaselineMethod {
         history: &dyn Fn(&str, OffsetDateTime) -> Option<f64>,
     ) -> Option<f64> {
         match *self {
-            Self::LastNDaysAverage { n, exclude_event_days } =>
-                LastNDaysAverage { n, exclude_event_days }
-                    .baseline_kw(home_id, interval_start, history),
-            Self::MeteredBeforeAfter { pre_event_intervals, interval_secs } =>
-                MeteredBeforeAfter { pre_event_intervals, interval_secs }
-                    .baseline_kw(home_id, interval_start, history),
+            Self::LastNDaysAverage {
+                n,
+                exclude_event_days,
+            } => LastNDaysAverage {
+                n,
+                exclude_event_days,
+            }
+            .baseline_kw(home_id, interval_start, history),
+            Self::MeteredBeforeAfter {
+                pre_event_intervals,
+                interval_secs,
+            } => MeteredBeforeAfter {
+                pre_event_intervals,
+                interval_secs,
+            }
+            .baseline_kw(home_id, interval_start, history),
         }
     }
 }
@@ -228,8 +262,8 @@ fn same_wallclock_on_day(ts_utc: OffsetDateTime, day: Date) -> Option<OffsetDate
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
 mod tests {
     use super::*;
-    use time::Month;
     use time::macros::datetime;
+    use time::Month;
 
     fn aug(day: u8) -> Date {
         Date::from_calendar_date(2026, Month::August, day).unwrap()
@@ -237,7 +271,10 @@ mod tests {
 
     #[test]
     fn last_n_days_average_means_prior_operating_days() {
-        let method = LastNDaysAverage { n: 3, exclude_event_days: false };
+        let method = LastNDaysAverage {
+            n: 3,
+            exclude_event_days: false,
+        };
         // 2026-08-10 22:00 UTC = 17:00 CPT; prior days same wall clock.
         let start = datetime!(2026-08-10 22:00:00 UTC);
         let history = |_home: &str, ts: OffsetDateTime| -> Option<f64> {
@@ -255,7 +292,10 @@ mod tests {
 
     #[test]
     fn last_n_days_average_skips_missing_days() {
-        let method = LastNDaysAverage { n: 3, exclude_event_days: false };
+        let method = LastNDaysAverage {
+            n: 3,
+            exclude_event_days: false,
+        };
         let start = datetime!(2026-08-10 22:00:00 UTC);
         // Aug 8 missing -> mean(4, 5) = 4.5.
         let history = |_home: &str, ts: OffsetDateTime| -> Option<f64> {
@@ -281,13 +321,19 @@ mod tests {
             }
         };
         let is_event = |d: Date| d == aug(9);
-        let excluding = LastNDaysAverage { n: 2, exclude_event_days: true };
+        let excluding = LastNDaysAverage {
+            n: 2,
+            exclude_event_days: true,
+        };
         assert_eq!(
             excluding.baseline_kw_with_events("h1", start, &history, &is_event),
             Some(4.0)
         );
         // Flag off: predicate ignored, both days averaged.
-        let including = LastNDaysAverage { n: 2, exclude_event_days: false };
+        let including = LastNDaysAverage {
+            n: 2,
+            exclude_event_days: false,
+        };
         assert_eq!(
             including.baseline_kw_with_events("h1", start, &history, &is_event),
             Some(52.0)
@@ -300,7 +346,10 @@ mod tests {
                 _ => None,
             }
         };
-        assert_eq!(excluding.baseline_kw("h1", start, &history_no_event), Some(4.0));
+        assert_eq!(
+            excluding.baseline_kw("h1", start, &history_no_event),
+            Some(4.0)
+        );
     }
 
     #[test]
@@ -317,7 +366,10 @@ mod tests {
         // (06:30 UTC) -> 2026-03-08 01:30 CST (07:30 UTC), 25 h earlier.
         let pre = datetime!(2026-03-09 06:30:00 UTC);
         assert_eq!(
-            same_wallclock_on_day(pre, Date::from_calendar_date(2026, Month::March, 8).unwrap()),
+            same_wallclock_on_day(
+                pre,
+                Date::from_calendar_date(2026, Month::March, 8).unwrap()
+            ),
             Some(datetime!(2026-03-08 07:30:00 UTC))
         );
         // 02:30 does not exist on the spring-forward day (2026-03-08).
@@ -340,7 +392,10 @@ mod tests {
             Some(datetime!(2026-11-01 06:30:00 UTC))
         );
         // End to end through the baseline across the spring boundary.
-        let method = LastNDaysAverage { n: 1, exclude_event_days: false };
+        let method = LastNDaysAverage {
+            n: 1,
+            exclude_event_days: false,
+        };
         let history = |_home: &str, ts: OffsetDateTime| -> Option<f64> {
             (ts == datetime!(2026-03-08 14:30:00 UTC)).then_some(3.0)
         };
@@ -349,7 +404,10 @@ mod tests {
 
     #[test]
     fn metered_before_after_means_pre_event_intervals() {
-        let method = MeteredBeforeAfter { pre_event_intervals: 3, interval_secs: 900 };
+        let method = MeteredBeforeAfter {
+            pre_event_intervals: 3,
+            interval_secs: 900,
+        };
         let start = datetime!(2026-08-14 22:00:00 UTC);
         let history = |_home: &str, ts: OffsetDateTime| -> Option<f64> {
             match ts {
@@ -380,24 +438,37 @@ mod tests {
     #[test]
     fn labels_match_report_format() {
         assert_eq!(
-            BaselineMethod::LastNDaysAverage { n: 10, exclude_event_days: true }.label(),
+            BaselineMethod::LastNDaysAverage {
+                n: 10,
+                exclude_event_days: true
+            }
+            .label(),
             "LastNDaysAverage{n:10, exclusion: event_days}"
         );
         assert_eq!(
-            BaselineMethod::LastNDaysAverage { n: 10, exclude_event_days: false }.label(),
+            BaselineMethod::LastNDaysAverage {
+                n: 10,
+                exclude_event_days: false
+            }
+            .label(),
             "LastNDaysAverage{n:10, exclusion: none}"
         );
         assert_eq!(
-            BaselineMethod::MeteredBeforeAfter { pre_event_intervals: 4, interval_secs: 900 }
-                .label(),
+            BaselineMethod::MeteredBeforeAfter {
+                pre_event_intervals: 4,
+                interval_secs: 900
+            }
+            .label(),
             "MeteredBeforeAfter{pre_event_intervals:4, interval_secs:900}"
         );
     }
 
     #[test]
     fn baseline_method_serde_round_trip_with_default_cadence() {
-        let method =
-            BaselineMethod::MeteredBeforeAfter { pre_event_intervals: 4, interval_secs: 900 };
+        let method = BaselineMethod::MeteredBeforeAfter {
+            pre_event_intervals: 4,
+            interval_secs: 900,
+        };
         let json = serde_json::to_string(&method).unwrap();
         let back: BaselineMethod = serde_json::from_str(&json).unwrap();
         assert_eq!(method, back);
@@ -405,7 +476,10 @@ mod tests {
         let parsed: BaselineMethod =
             serde_json::from_str(r#"{"metered_before_after":{"pre_event_intervals":4}}"#).unwrap();
         assert_eq!(parsed, method);
-        let avg = BaselineMethod::LastNDaysAverage { n: 10, exclude_event_days: true };
+        let avg = BaselineMethod::LastNDaysAverage {
+            n: 10,
+            exclude_event_days: true,
+        };
         let back: BaselineMethod =
             serde_json::from_str(&serde_json::to_string(&avg).unwrap()).unwrap();
         assert_eq!(avg, back);

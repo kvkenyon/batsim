@@ -46,11 +46,9 @@ fn retail_rate_of(req: &BacktestRequest) -> batsim_ercot::settlement::RetailRate
             multiplier: 1.0,
             adder_usd_per_kwh: 0.0,
         },
-        Some(RetailRateSpec::Flat { usd_per_kwh }) => {
-            batsim_ercot::settlement::RetailRate::Flat {
-                usd_per_kwh: *usd_per_kwh,
-            }
-        }
+        Some(RetailRateSpec::Flat { usd_per_kwh }) => batsim_ercot::settlement::RetailRate::Flat {
+            usd_per_kwh: *usd_per_kwh,
+        },
         Some(RetailRateSpec::Tou { windows }) => batsim_ercot::settlement::RetailRate::Tou {
             windows: windows
                 .iter()
@@ -100,11 +98,7 @@ fn day_range(date: &str) -> ApiResult<(u64, u64)> {
 }
 
 /// Validate and translate the strategy schedule.
-fn parse_schedule(
-    req: &BacktestRequest,
-    start: u64,
-    end: u64,
-) -> ApiResult<Vec<StrategyEntry>> {
+fn parse_schedule(req: &BacktestRequest, start: u64, end: u64) -> ApiResult<Vec<StrategyEntry>> {
     let mut schedule = Vec::new();
     if let StrategySpec::Schedule { entries } = &req.strategy {
         for e in entries {
@@ -117,7 +111,9 @@ fn parse_schedule(
                 )));
             }
             if !e.kw.is_finite() || e.kw <= 0.0 {
-                return Err(Problem::validation("strategy kw must be positive and finite"));
+                return Err(Problem::validation(
+                    "strategy kw must be positive and finite",
+                ));
             }
             let spec = match e.action {
                 crate::model::StrategyAction::Charge => ActionSpec::ChargeTo {
@@ -153,7 +149,9 @@ fn parse_awards(req: &BacktestRequest, start: u64, end: u64) -> ApiResult<Vec<As
             ));
         }
         if !a.awarded_mw.is_finite() || a.awarded_mw <= 0.0 {
-            return Err(Problem::validation("awarded_mw must be positive and finite"));
+            return Err(Problem::validation(
+                "awarded_mw must be positive and finite",
+            ));
         }
         out.push(AsAwardInput {
             product: as_product_of(a.product),
@@ -230,7 +228,18 @@ pub async fn create_backtest(
         ));
     }
 
-    let (run_id, scenario_id) = start_run(&state, &fleet, &req, start, end, schedule, as_awards, transmission_rate, four_cp_candidates).await?;
+    let (run_id, scenario_id) = start_run(
+        &state,
+        &fleet,
+        &req,
+        start,
+        end,
+        schedule,
+        as_awards,
+        transmission_rate,
+        four_cp_candidates,
+    )
+    .await?;
 
     let bt_entry = BacktestEntry {
         id: run_id.clone(),
@@ -243,13 +252,16 @@ pub async fn create_backtest(
     if let Ok(mut backtests) = state.backtests.write() {
         backtests.insert(run_id.clone(), bt_entry.clone());
     }
-    let doc = doc_of(&bt_entry, Some(&BacktestInfo {
-        run_id: run_id.clone(),
-        state: crate::engine::BacktestState::Running,
-        sim_time: rfc3339_of(start),
-        intervals_settled: 0,
-        report: None,
-    }));
+    let doc = doc_of(
+        &bt_entry,
+        Some(&BacktestInfo {
+            run_id: run_id.clone(),
+            state: crate::engine::BacktestState::Running,
+            sim_time: rfc3339_of(start),
+            intervals_settled: 0,
+            report: None,
+        }),
+    );
     Ok((StatusCode::ACCEPTED, Json(doc)).into_response())
 }
 
@@ -380,11 +392,7 @@ fn doc_of(entry: &BacktestEntry, live: Option<&BacktestInfo>) -> BacktestDoc {
                 BacktestState::Settled => "settled".to_owned(),
                 BacktestState::Failed(reason) => format!("failed: {reason}"),
             };
-            (
-                state,
-                info.sim_time.clone(),
-                info.intervals_settled as u64,
-            )
+            (state, info.sim_time.clone(), info.intervals_settled as u64)
         }
         None => (
             if entry.report.is_some() {

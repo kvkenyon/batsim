@@ -28,7 +28,10 @@ impl FourCpWatch {
     /// `rules`.
     #[must_use]
     pub fn new(rules: &ErcotRules) -> Self {
-        Self { season_peak_mw: 0.0, rules: rules.four_cp.clone() }
+        Self {
+            season_peak_mw: 0.0,
+            rules: rules.four_cp.clone(),
+        }
     }
 
     /// Season-to-date peak observed so far, MW.
@@ -96,22 +99,27 @@ pub fn attribute_savings(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
 mod tests {
     use super::*;
-    use time::OffsetDateTime;
     use time::macros::datetime;
+    use time::OffsetDateTime;
 
     fn rules() -> ErcotRules {
         ErcotRules::current().unwrap()
     }
 
     fn signal(ts: OffsetDateTime, load_mw: f64) -> SystemSignal {
-        SystemSignal { ts, system_load_mw: load_mw, reserves_mw: None, fuel_mix: None }
+        SystemSignal {
+            ts,
+            system_load_mw: load_mw,
+            reserves_mw: None,
+            fuel_mix: None,
+        }
     }
 
     #[test]
     fn candidate_window_tracks_running_peak() {
         let mut watch = FourCpWatch::new(&rules());
         let at = datetime!(2026-07-15 20:00:00 UTC); // July, 15:00 CDT
-        // New season peak is always a candidate.
+                                                     // New season peak is always a candidate.
         assert!(watch.observe(&signal(at, 100.0)));
         // 90 < 95% of 100 -> not a candidate.
         assert!(!watch.observe(&signal(at, 90.0)));
@@ -148,7 +156,10 @@ mod tests {
         // 38,200 kW x 3.5 $/kW-mo x 12 mo x 0.25 = $401,100 (spec D.6).
         assert_eq!(attribute_savings(&[(ts, 38_200.0)], 3.5, &rules), 401_100.0);
         // Two confirmed months add linearly: 1500 x 4.0 x 12 x 0.25 = 18,000.
-        assert_eq!(attribute_savings(&[(ts, 1000.0), (ts, 500.0)], 4.0, &rules), 18_000.0);
+        assert_eq!(
+            attribute_savings(&[(ts, 1000.0), (ts, 500.0)], 4.0, &rules),
+            18_000.0
+        );
         // Nothing confirmed -> nothing saved.
         assert_eq!(attribute_savings(&[], 3.5, &rules), 0.0);
     }

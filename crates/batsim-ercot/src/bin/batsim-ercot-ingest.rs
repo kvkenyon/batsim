@@ -127,7 +127,10 @@ fn run_fetch(report: ingest::ReportKind, year: i32, out: &Path) -> Result<()> {
     );
     let docs = ingest::list_documents(&agent, report.report_type_id())?;
     let doc = ingest::find_year_document(&docs, year)?;
-    eprintln!("fetch: downloading DocID {} ({:?})", doc.doc_id, doc.friendly_name);
+    eprintln!(
+        "fetch: downloading DocID {} ({:?})",
+        doc.doc_id, doc.friendly_name
+    );
     let stage = std::env::temp_dir().join(format!(
         "batsim-ercot-ingest-{}-{}",
         std::process::id(),
@@ -149,7 +152,11 @@ fn run_import(report: ingest::ReportKind, file: &Path, out: &Path) -> Result<()>
     let bytes = std::fs::read(file)?;
     let format = ingest::ReportFormat::from_path(file)
         .unwrap_or_else(|| ingest::ReportFormat::sniff(&bytes));
-    eprintln!("import: {} ({format:?}, {} bytes)", file.display(), bytes.len());
+    eprintln!(
+        "import: {} ({format:?}, {} bytes)",
+        file.display(),
+        bytes.len()
+    );
     run_ingest(report, &bytes, format, out, Vec::new())
 }
 
@@ -241,8 +248,10 @@ fn write_price_groups(
 
 /// Group AS prices by operating day and write one partition each.
 fn write_as_groups(rows: Vec<AsPrice>, out: &Path) -> Result<Vec<ManifestEntry>> {
-    let mut groups: BTreeMap<Date, Vec<(OffsetDateTime, batsim_ercot::AsProduct, f64, Provenance)>> =
-        BTreeMap::new();
+    let mut groups: BTreeMap<
+        Date,
+        Vec<(OffsetDateTime, batsim_ercot::AsProduct, f64, Provenance)>,
+    > = BTreeMap::new();
     for row in rows {
         groups
             .entry(batsim_ercot::cpt::operating_day(row.ts))
@@ -280,9 +289,8 @@ struct VerifyRow {
 }
 
 fn run_verify(root: &Path) -> Result<()> {
-    let manifest = ingest::read_manifest(root)?.ok_or_else(|| {
-        ErcotError::InvalidParam(format!("{}: no manifest.json", root.display()))
-    })?;
+    let manifest = ingest::read_manifest(root)?
+        .ok_or_else(|| ErcotError::InvalidParam(format!("{}: no manifest.json", root.display())))?;
     eprintln!(
         "verify: {} entries, schema v{}, rules {}, ingested {}",
         manifest.entries.len(),
@@ -311,7 +319,10 @@ fn run_verify(root: &Path) -> Result<()> {
             detail,
         });
     }
-    println!("{:<12} {:<12} {:<12} {:>8}  CHECK", "SIGNAL", "DATE", "LOCATION", "ROWS");
+    println!(
+        "{:<12} {:<12} {:<12} {:>8}  CHECK",
+        "SIGNAL", "DATE", "LOCATION", "ROWS"
+    );
     for row in &rows_out {
         let check = match &row.detail {
             Ok(note) => format!("ok ({note})"),
@@ -360,10 +371,7 @@ fn verify_partition(path: &Path, rows_expected: u64) -> std::result::Result<Stri
     // row per (ts, product), so the pair must be strictly increasing.
     let mut prev_ts: Option<i64> = None;
     let mut prev_pair: Option<(i64, u8)> = None;
-    for batch in builder
-        .build()
-        .map_err(|e| format!("reader: {e}"))?
-    {
+    for batch in builder.build().map_err(|e| format!("reader: {e}"))? {
         let batch = batch.map_err(|e| format!("batch: {e}"))?;
         let ts = batch
             .column(0)
@@ -384,7 +392,9 @@ fn verify_partition(path: &Path, rows_expected: u64) -> std::result::Result<Stri
             if let Some(rank_for) = products {
                 let rank = product_rank(rank_for.value(i))?;
                 if prev_pair.is_some_and(|p| (v, rank) <= p) {
-                    return Err(format!("(ts, product) not strictly increasing at row {count}"));
+                    return Err(format!(
+                        "(ts, product) not strictly increasing at row {count}"
+                    ));
                 }
                 prev_pair = Some((v, rank));
             } else {
@@ -427,13 +437,7 @@ fn product_rank(name: &str) -> std::result::Result<u8, String> {
 // synth
 // ---------------------------------------------------------------------------
 
-fn run_synth(
-    out: &Path,
-    date: &str,
-    location: &str,
-    seed: u64,
-    interval_secs: u32,
-) -> Result<()> {
+fn run_synth(out: &Path, date: &str, location: &str, seed: u64, interval_secs: u32) -> Result<()> {
     let day = Date::parse(date, &format_description!("[year]-[month]-[day]"))
         .map_err(|e| ErcotError::InvalidParam(format!("--date: {e}")))?;
     let location = Location::from_settlement_point(location);
@@ -503,4 +507,3 @@ fn now_rfc3339() -> String {
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "unknown".to_string())
 }
-

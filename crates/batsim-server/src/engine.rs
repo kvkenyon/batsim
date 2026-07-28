@@ -1147,10 +1147,8 @@ impl Engine {
         let range = batsim_ercot::TimeRange::new(
             OffsetDateTime::from_unix_timestamp(i64::try_from(epoch).map_err(|_| "epoch")?)
                 .map_err(|e| e.to_string())?,
-            OffsetDateTime::from_unix_timestamp(
-                i64::try_from(config.end_unix).map_err(|_| "end")?,
-            )
-            .map_err(|e| e.to_string())?,
+            OffsetDateTime::from_unix_timestamp(i64::try_from(config.end_unix).map_err(|_| "end")?)
+                .map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
 
@@ -1283,11 +1281,10 @@ impl Engine {
         // Fire due strategy entries (execute next tick: the dispatch stage
         // for this tick already ran inside `world.step`).
         loop {
-            let due = self
-                .backtest
-                .as_ref()
-                .is_some_and(|b| b.next_entry < b.config.schedule.len()
-                    && b.config.schedule[b.next_entry].unix <= unix);
+            let due = self.backtest.as_ref().is_some_and(|b| {
+                b.next_entry < b.config.schedule.len()
+                    && b.config.schedule[b.next_entry].unix <= unix
+            });
             if !due {
                 break;
             }
@@ -1304,9 +1301,7 @@ impl Engine {
                 if home.is_retired() {
                     continue;
                 }
-                for action in
-                    crate::routes::dispatch::actions_for(&entry.spec, tick + 1, dt, 0)
-                {
+                for action in crate::routes::dispatch::actions_for(&entry.spec, tick + 1, dt, 0) {
                     home.schedule(action);
                 }
             }
@@ -1326,9 +1321,15 @@ impl Engine {
                 return;
             }
         }
-        let end = self.backtest.as_ref().map_or(u64::MAX, |b| b.config.end_unix);
+        let end = self
+            .backtest
+            .as_ref()
+            .map_or(u64::MAX, |b| b.config.end_unix);
         if unix >= end {
-            let open = self.backtest.as_ref().is_some_and(|b| b.interval_start < unix);
+            let open = self
+                .backtest
+                .as_ref()
+                .is_some_and(|b| b.interval_start < unix);
             if open {
                 self.close_backtest_interval(unix);
             }
@@ -1367,7 +1368,10 @@ impl Engine {
             return;
         };
         let interval_start = self.backtest.as_ref().map_or(0, |b| b.interval_start);
-        let interval_secs = self.backtest.as_ref().map_or(900, |b| b.config.interval_secs);
+        let interval_secs = self
+            .backtest
+            .as_ref()
+            .map_or(900, |b| b.config.interval_secs);
         let Some(sample) = feed.sample_at(interval_start) else {
             if let Some(b) = self.backtest.as_mut() {
                 b.failed = Some(format!(
@@ -1404,52 +1408,7 @@ impl Engine {
         let ts = OffsetDateTime::from_unix_timestamp(i64::try_from(interval_start).unwrap_or(0))
             .unwrap_or(OffsetDateTime::UNIX_EPOCH);
 
-        // 4CP: explicit candidates, or the watch over the system-load
-        // signal. Baseline: MeteredBeforeAfter over the previous 4
-        // intervals (per home).
-        let explicit = self
-            .backtest
-            .as_ref()
-            .is_some_and(|b| b.config.four_cp_candidates.contains(&interval_start));
-        let watch_hit = self
-            .backtest
-            .as_mut()
-            .and_then(|b| {
-                b.system_loads.get(&i64::try_from(interval_start).unwrap_or(0)).map(|load| {
-                    b.watch.observe(&batsim_ercot::SystemSignal {
-                        ts,
-                        system_load_mw: *load,
-                        reserves_mw: None,
-                        fuel_mix: None,
-                    })
-                })
-            })
-            .unwrap_or(false);
-        if explicit || watch_hit {
-            let mut per_home: Vec<(String, f64)> = Vec::new();
-            let mut fleet_reduction_kw = 0.0;
-            if let Some(b) = self.backtest.as_mut() {
-                for (idx, current_kw) in &net_kw {
-                    let history = b.net_kw_history.entry(*idx).or_default();
-                    let baseline = if history.is_empty() {
-                        *current_kw
-                    } else {
-                        history.iter().sum::<f64>() / history.len() as f64
-                    };
-                    let reduction = (baseline - current_kw).max(0.0);
-                    fleet_reduction_kw += reduction;
-                    if let Some((meta, _)) = self.slots.get(*idx as usize) {
-                        per_home.push((meta.home_id.clone(), reduction));
-                    }
-                }
-            }
-            per_home.sort_by(|a, b| a.0.cmp(&b.0));
-            let refs: Vec<(&str, f64)> =
-                per_home.iter().map(|(id, r)| (id.as_str(), *r)).collect();
-            if let Some(b) = self.backtest.as_mut() {
-                b.engine.flag_4cp_candidate(ts, fleet_reduction_kw, &refs);
-            }
-        }
+        self.score_4cp_candidate(ts, interval_start, &net_kw);
         // Update baseline history after scoring (bounded to 4 intervals).
         if let Some(b) = self.backtest.as_mut() {
             for (idx, kw) in net_kw {
@@ -1461,8 +1420,67 @@ impl Engine {
             }
             b.engine.record_interval(ts, &refs, &sample);
             if let Some(row) = b.engine.last_interval() {
-                drop(self.events.send(SimEvent::Settlement(Box::new(row.clone()))));
+                drop(
+                    self.events
+                        .send(SimEvent::Settlement(Box::new(row.clone()))),
+                );
             }
+        }
+    }
+
+    /// Score a 4CP candidate interval: explicit candidates, or the watch
+    /// over the system-load signal. Baseline: MeteredBeforeAfter over the
+    /// previous 4 intervals (per home).
+    fn score_4cp_candidate(
+        &mut self,
+        ts: OffsetDateTime,
+        interval_start: u64,
+        net_kw: &[(u64, f64)],
+    ) {
+        let explicit = self
+            .backtest
+            .as_ref()
+            .is_some_and(|b| b.config.four_cp_candidates.contains(&interval_start));
+        let watch_hit = self
+            .backtest
+            .as_mut()
+            .and_then(|b| {
+                b.system_loads
+                    .get(&i64::try_from(interval_start).unwrap_or(0))
+                    .map(|load| {
+                        b.watch.observe(&batsim_ercot::SystemSignal {
+                            ts,
+                            system_load_mw: *load,
+                            reserves_mw: None,
+                            fuel_mix: None,
+                        })
+                    })
+            })
+            .unwrap_or(false);
+        if !explicit && !watch_hit {
+            return;
+        }
+        let mut per_home: Vec<(String, f64)> = Vec::new();
+        let mut fleet_reduction_kw = 0.0;
+        if let Some(b) = self.backtest.as_mut() {
+            for (idx, current_kw) in net_kw {
+                let history = b.net_kw_history.entry(*idx).or_default();
+                let baseline = if history.is_empty() {
+                    *current_kw
+                } else {
+                    history.iter().sum::<f64>() / history.len() as f64
+                };
+                let reduction = (baseline - current_kw).max(0.0);
+                fleet_reduction_kw += reduction;
+                if let Some((meta, _)) = self.slots.get(*idx as usize) {
+                    per_home.push((meta.home_id.clone(), reduction));
+                }
+            }
+        }
+        per_home.sort_by(|a, b| a.0.cmp(&b.0));
+        let refs: Vec<(&str, f64)> = per_home.iter().map(|(id, r)| (id.as_str(), *r)).collect();
+        if let Some(b) = self.backtest.as_mut() {
+            b.engine.flag_4cp_candidate(ts, fleet_reduction_kw, &refs);
         }
     }
 
@@ -1523,7 +1541,14 @@ fn settlement_for(
     feed: &crate::price::ReplayFeed,
     epoch: u64,
     config: BacktestConfig,
-) -> Result<(SettlementConfig, batsim_ercot::four_cp::FourCpWatch, BacktestConfig), String> {
+) -> Result<
+    (
+        SettlementConfig,
+        batsim_ercot::four_cp::FourCpWatch,
+        BacktestConfig,
+    ),
+    String,
+> {
     let interval_secs = if config.interval_secs == 0 {
         feed.interval_secs()
     } else {

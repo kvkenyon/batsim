@@ -59,7 +59,9 @@ pub fn list_documents(agent: &ureq::Agent, report_type_id: u32) -> Result<Vec<Mi
         .pointer("/ListDocsByRptTypeRes/DocumentList")
         .and_then(serde_json::Value::as_array)
         .ok_or_else(|| {
-            ErcotError::Fetch(format!("GET {url}: missing ListDocsByRptTypeRes.DocumentList"))
+            ErcotError::Fetch(format!(
+                "GET {url}: missing ListDocsByRptTypeRes.DocumentList"
+            ))
         })?;
     let mut docs = Vec::with_capacity(list.len());
     for (i, item) in list.iter().enumerate() {

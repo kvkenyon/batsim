@@ -125,8 +125,8 @@ impl ReplayFeed {
     /// Full price sample for the interval containing `unix_time_s`.
     #[must_use]
     pub fn sample_at(&self, unix_time_s: u64) -> Option<batsim_ercot::PriceSample> {
-        let ts = time::OffsetDateTime::from_unix_timestamp(i64::try_from(unix_time_s).ok()?)
-            .ok()?;
+        let ts =
+            time::OffsetDateTime::from_unix_timestamp(i64::try_from(unix_time_s).ok()?).ok()?;
         self.replay.rt_spp_at(&self.location, ts).cloned()
     }
 }
@@ -271,8 +271,11 @@ fn resolve_replay_range(
 ) -> Result<batsim_ercot::TimeRange, String> {
     let (start, end) = if let Some((first, last)) = date_range {
         let parse_day = |s: &str| -> Result<time::Date, String> {
-            time::Date::parse(s, &time::macros::format_description!("[year]-[month]-[day]"))
-                .map_err(|e| format!("date_range `{s}`: {e}"))
+            time::Date::parse(
+                s,
+                &time::macros::format_description!("[year]-[month]-[day]"),
+            )
+            .map_err(|e| format!("date_range `{s}`: {e}"))
         };
         let first = parse_day(first)?;
         let last = parse_day(last)?;
@@ -290,10 +293,14 @@ fn resolve_replay_range(
         let (s, e) = ctx
             .range
             .ok_or_else(|| "replay requires date_range or a scenario time range".to_owned())?;
-        let start = time::OffsetDateTime::from_unix_timestamp(i64::try_from(s).map_err(|_| "range start overflows i64".to_owned())?)
-            .map_err(|e| e.to_string())?;
-        let end = time::OffsetDateTime::from_unix_timestamp(i64::try_from(e).map_err(|_| "range end overflows i64".to_owned())?)
-            .map_err(|e| e.to_string())?;
+        let start = time::OffsetDateTime::from_unix_timestamp(
+            i64::try_from(s).map_err(|_| "range start overflows i64".to_owned())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let end = time::OffsetDateTime::from_unix_timestamp(
+            i64::try_from(e).map_err(|_| "range end overflows i64".to_owned())?,
+        )
+        .map_err(|e| e.to_string())?;
         (start, end)
     };
     batsim_ercot::TimeRange::new(start, end).map_err(|e| e.to_string())

@@ -74,7 +74,9 @@ pub fn offset_at_utc(ts: OffsetDateTime) -> UtcOffset {
 /// Convert a UTC instant to CPT civil date/time.
 #[must_use]
 pub fn utc_to_cpt(ts: OffsetDateTime) -> PrimitiveDateTime {
-    ts.to_offset(offset_at_utc(ts)).date().with_time(ts.to_offset(offset_at_utc(ts)).time())
+    ts.to_offset(offset_at_utc(ts))
+        .date()
+        .with_time(ts.to_offset(offset_at_utc(ts)).time())
 }
 
 /// CPT operating day (civil date) containing a UTC instant.
@@ -108,7 +110,9 @@ pub fn cpt_interval_to_utc(
     repeated_hour: bool,
 ) -> Result<OffsetDateTime> {
     if !(1..=24).contains(&hour_ending) {
-        return Err(ErcotError::Time(format!("hour_ending {hour_ending} out of range")));
+        return Err(ErcotError::Time(format!(
+            "hour_ending {hour_ending} out of range"
+        )));
     }
     if intervals_per_hour == 0 || 60 % intervals_per_hour != 0 {
         return Err(ErcotError::Time(format!(
@@ -134,12 +138,10 @@ pub fn cpt_interval_to_utc(
     let year = local_date.year();
 
     // Ambiguous window: the fall-back day's [01:00, 02:00) local hour.
-    let ambiguous = naive
-        >= PrimitiveDateTime::new(fall_back_utc(year).date(), time!(1:00))
+    let ambiguous = naive >= PrimitiveDateTime::new(fall_back_utc(year).date(), time!(1:00))
         && naive < PrimitiveDateTime::new(fall_back_utc(year).date(), time!(2:00));
     // Gap window: the spring-forward day's [02:00, 03:00) local hour.
-    let gap = naive
-        >= PrimitiveDateTime::new(spring_forward_utc(year).date(), time!(2:00))
+    let gap = naive >= PrimitiveDateTime::new(spring_forward_utc(year).date(), time!(2:00))
         && naive < PrimitiveDateTime::new(spring_forward_utc(year).date(), time!(3:00));
 
     if gap {
@@ -150,7 +152,11 @@ pub fn cpt_interval_to_utc(
     // First occurrence of the ambiguous hour is CDT; the flagged repeat
     // is CST. Every other local time is unambiguous.
     let offset = if ambiguous {
-        if repeated_hour { CST } else { CDT }
+        if repeated_hour {
+            CST
+        } else {
+            CDT
+        }
     } else {
         offset_at_local(naive)
     };
@@ -260,7 +266,10 @@ mod tests {
     fn utc_round_trip() {
         let ts = datetime!(2023-08-17 22:00:00 UTC);
         let cpt = utc_to_cpt(ts);
-        assert_eq!(cpt, PrimitiveDateTime::new(d(2023, 8, 17), Time::from_hms(17, 0, 0).unwrap()));
+        assert_eq!(
+            cpt,
+            PrimitiveDateTime::new(d(2023, 8, 17), Time::from_hms(17, 0, 0).unwrap())
+        );
         assert_eq!(operating_day(ts), d(2023, 8, 17));
         // CST winter round trip.
         let ts = datetime!(2023-01-15 06:00:00 UTC);

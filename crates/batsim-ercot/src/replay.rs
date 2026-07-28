@@ -20,7 +20,9 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use arrow::array::{Array, Float64Array, Int32Array, Int64Array, RecordBatch, StringArray, UInt32Array};
+use arrow::array::{
+    Array, Float64Array, Int32Array, Int64Array, RecordBatch, StringArray, UInt32Array,
+};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use time::macros::format_description;
 use time::{Date, Duration, OffsetDateTime};
@@ -29,7 +31,9 @@ use crate::cpt;
 use crate::error::{ErcotError, Result};
 use crate::schema::{self, as_cols, load_cols, price_cols};
 use crate::source::PriceSource;
-use crate::types::{AsPrice, AsProduct, Location, PriceSample, Provenance, SystemSignal, TimeRange};
+use crate::types::{
+    AsPrice, AsProduct, Location, PriceSample, Provenance, SystemSignal, TimeRange,
+};
 
 /// In-memory market-signal index shared by [`Replay`] (loaded from Parquet)
 /// and [`crate::synthetic::SyntheticPriceGenerator`] (generated eagerly).
@@ -67,7 +71,8 @@ impl SourceIndex {
 
     /// Insert one AS price (last write wins on key collision).
     pub(crate) fn insert_as(&mut self, price: AsPrice) {
-        self.as_.insert((price.product, price.ts.unix_timestamp()), price);
+        self.as_
+            .insert((price.product, price.ts.unix_timestamp()), price);
     }
 
     /// Insert one system signal (last write wins on key collision).
@@ -125,12 +130,13 @@ fn price_query(
     loc: &Location,
     r: TimeRange,
 ) -> Vec<PriceSample> {
-    map.get(loc.settlement_point().as_str()).map_or_else(Vec::new, |inner| {
-        inner
-            .range(r.start.unix_timestamp()..r.end.unix_timestamp())
-            .map(|(_, sample)| sample.clone())
-            .collect()
-    })
+    map.get(loc.settlement_point().as_str())
+        .map_or_else(Vec::new, |inner| {
+            inner
+                .range(r.start.unix_timestamp()..r.end.unix_timestamp())
+                .map(|(_, sample)| sample.clone())
+                .collect()
+        })
 }
 
 /// Which price table a file feeds.
@@ -192,16 +198,31 @@ impl Replay {
             seen.push(signal);
             let rows = match signal {
                 schema::SIGNAL_RTM_SPP => {
-                    let load =
-                        load_price_signal(root, signal, first_day, last_day, range, &mut index, PriceKind::Rt)?;
+                    let load = load_price_signal(
+                        root,
+                        signal,
+                        first_day,
+                        last_day,
+                        range,
+                        &mut index,
+                        PriceKind::Rt,
+                    )?;
                     for (secs, count) in load.cadence {
                         *cadence.entry(secs).or_insert(0) += count;
                     }
                     load.rows
                 }
                 schema::SIGNAL_DAM_SPP => {
-                    load_price_signal(root, signal, first_day, last_day, range, &mut index, PriceKind::Dam)?
-                        .rows
+                    load_price_signal(
+                        root,
+                        signal,
+                        first_day,
+                        last_day,
+                        range,
+                        &mut index,
+                        PriceKind::Dam,
+                    )?
+                    .rows
                 }
                 schema::SIGNAL_AS_MCPC => {
                     load_as_signal(root, signal, first_day, last_day, range, &mut index)?
@@ -236,7 +257,10 @@ impl Replay {
                 rt_interval_secs = Some(secs);
             }
         }
-        Ok(Self { index, rt_interval_secs })
+        Ok(Self {
+            index,
+            rt_interval_secs,
+        })
     }
 
     /// The RTM sample whose interval contains `ts` (used by the sim tick
@@ -275,7 +299,12 @@ impl PriceSource for Replay {
 /// Collect the Parquet files under `<root>/<signal>` whose `date=YYYY-MM-DD`
 /// partition falls in `[first_day, last_day]` (CPT operating days), sorted
 /// for deterministic read order.
-fn partition_files(root: &Path, signal: &str, first_day: Date, last_day: Date) -> Result<Vec<PathBuf>> {
+fn partition_files(
+    root: &Path,
+    signal: &str,
+    first_day: Date,
+    last_day: Date,
+) -> Result<Vec<PathBuf>> {
     let signal_dir = root.join(signal);
     let dir_entries = match std::fs::read_dir(&signal_dir) {
         Ok(entries) => entries,
@@ -287,16 +316,24 @@ fn partition_files(root: &Path, signal: &str, first_day: Date, last_day: Date) -
     for entry in dir_entries {
         let entry = entry?;
         let dir_name = entry.file_name();
-        let Some(dir_name) = dir_name.to_str() else { continue };
-        let Some(date_str) = dir_name.strip_prefix("date=") else { continue };
-        let Ok(date) = Date::parse(date_str, &day_fmt) else { continue };
+        let Some(dir_name) = dir_name.to_str() else {
+            continue;
+        };
+        let Some(date_str) = dir_name.strip_prefix("date=") else {
+            continue;
+        };
+        let Ok(date) = Date::parse(date_str, &day_fmt) else {
+            continue;
+        };
         if date < first_day || date > last_day {
             continue;
         }
         for loc_entry in std::fs::read_dir(entry.path())? {
             let loc_entry = loc_entry?;
             let file_name = loc_entry.file_name();
-            let Some(file_name) = file_name.to_str() else { continue };
+            let Some(file_name) = file_name.to_str() else {
+                continue;
+            };
             if file_name.starts_with("location=") && file_name.ends_with(".parquet") {
                 files.push(loc_entry.path());
             }
@@ -453,10 +490,11 @@ fn load_price_signal(
                 if !range.contains(ts_dt) {
                     continue;
                 }
-                let interval_secs = u32::try_from(interval.value(row)).map_err(|_| ErcotError::Parse {
-                    context: path.display().to_string(),
-                    detail: format!("interval_secs out of range at row {row}"),
-                })?;
+                let interval_secs =
+                    u32::try_from(interval.value(row)).map_err(|_| ErcotError::Parse {
+                        context: path.display().to_string(),
+                        detail: format!("interval_secs out of range at row {row}"),
+                    })?;
                 let sample = PriceSample {
                     ts: ts_dt,
                     interval_secs,
@@ -577,7 +615,11 @@ mod tests {
     use time::macros::datetime;
 
     fn prov_label(p: Provenance) -> String {
-        serde_json::to_value(p).unwrap().as_str().unwrap().to_string()
+        serde_json::to_value(p)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string()
     }
 
     fn sample(ts: OffsetDateTime, interval_secs: u32, loc: &Location, lmp: f64) -> PriceSample {
@@ -605,19 +647,37 @@ mod tests {
         RecordBatch::try_new(
             schema,
             vec![
-                Arc::new(Int64Array::from(rows.iter().map(|r| r.ts.unix_timestamp()).collect::<Vec<_>>())),
-                Arc::new(UInt32Array::from(rows.iter().map(|r| r.interval_secs).collect::<Vec<_>>())),
+                Arc::new(Int64Array::from(
+                    rows.iter()
+                        .map(|r| r.ts.unix_timestamp())
+                        .collect::<Vec<_>>(),
+                )),
+                Arc::new(UInt32Array::from(
+                    rows.iter().map(|r| r.interval_secs).collect::<Vec<_>>(),
+                )),
                 Arc::new(StringArray::from(
-                    rows.iter().map(|r| r.location.settlement_point()).collect::<Vec<_>>(),
-                )),
-                Arc::new(Float64Array::from(rows.iter().map(|r| r.lmp_usd_per_mwh).collect::<Vec<_>>())),
-                Arc::new(Float64Array::from(
-                    rows.iter().map(|r| r.ordc_adder_usd_per_mwh).collect::<Vec<_>>(),
+                    rows.iter()
+                        .map(|r| r.location.settlement_point())
+                        .collect::<Vec<_>>(),
                 )),
                 Arc::new(Float64Array::from(
-                    rows.iter().map(|r| r.rdpa_adder_usd_per_mwh).collect::<Vec<_>>(),
+                    rows.iter().map(|r| r.lmp_usd_per_mwh).collect::<Vec<_>>(),
                 )),
-                Arc::new(StringArray::from(rows.iter().map(|r| prov_label(r.provenance)).collect::<Vec<_>>())),
+                Arc::new(Float64Array::from(
+                    rows.iter()
+                        .map(|r| r.ordc_adder_usd_per_mwh)
+                        .collect::<Vec<_>>(),
+                )),
+                Arc::new(Float64Array::from(
+                    rows.iter()
+                        .map(|r| r.rdpa_adder_usd_per_mwh)
+                        .collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter()
+                        .map(|r| prov_label(r.provenance))
+                        .collect::<Vec<_>>(),
+                )),
             ],
         )
         .unwrap()
@@ -633,10 +693,24 @@ mod tests {
         RecordBatch::try_new(
             schema,
             vec![
-                Arc::new(Int64Array::from(rows.iter().map(|r| r.ts.unix_timestamp()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(rows.iter().map(|r| r.product.dam_column()).collect::<Vec<_>>())),
-                Arc::new(Float64Array::from(rows.iter().map(|r| r.mcpc_usd_per_mw).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(rows.iter().map(|r| prov_label(r.provenance)).collect::<Vec<_>>())),
+                Arc::new(Int64Array::from(
+                    rows.iter()
+                        .map(|r| r.ts.unix_timestamp())
+                        .collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter()
+                        .map(|r| r.product.dam_column())
+                        .collect::<Vec<_>>(),
+                )),
+                Arc::new(Float64Array::from(
+                    rows.iter().map(|r| r.mcpc_usd_per_mw).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(
+                    rows.iter()
+                        .map(|r| prov_label(r.provenance))
+                        .collect::<Vec<_>>(),
+                )),
             ],
         )
         .unwrap()
@@ -651,9 +725,17 @@ mod tests {
         RecordBatch::try_new(
             schema,
             vec![
-                Arc::new(Int64Array::from(rows.iter().map(|r| r.0.unix_timestamp()).collect::<Vec<_>>())),
-                Arc::new(Float64Array::from(rows.iter().map(|r| r.1).collect::<Vec<_>>())),
-                Arc::new(Float64Array::from(rows.iter().map(|r| r.2).collect::<Vec<_>>())),
+                Arc::new(Int64Array::from(
+                    rows.iter()
+                        .map(|r| r.0.unix_timestamp())
+                        .collect::<Vec<_>>(),
+                )),
+                Arc::new(Float64Array::from(
+                    rows.iter().map(|r| r.1).collect::<Vec<_>>(),
+                )),
+                Arc::new(Float64Array::from(
+                    rows.iter().map(|r| r.2).collect::<Vec<_>>(),
+                )),
             ],
         )
         .unwrap()
@@ -661,7 +743,14 @@ mod tests {
 
     /// Minimal archive writer honouring the schema.rs contract: partition
     /// path layout plus `batsim.schema_version` file metadata.
-    fn write_parquet(root: &Path, signal: &str, date: Date, loc_dir: &str, batch: &RecordBatch, version: Option<u32>) {
+    fn write_parquet(
+        root: &Path,
+        signal: &str,
+        date: Date,
+        loc_dir: &str,
+        batch: &RecordBatch,
+        version: Option<u32>,
+    ) {
         let date_str = date
             .format(&format_description!("[year]-[month]-[day]"))
             .unwrap();
@@ -670,9 +759,17 @@ mod tests {
             .join(format!("date={date_str}"))
             .join(format!("location={loc_dir}.parquet"));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let kv = version.map(|v| vec![KeyValue::new(schema::SCHEMA_VERSION_KEY.to_string(), v.to_string())]);
-        let props = WriterProperties::builder().set_key_value_metadata(kv).build();
-        let mut writer = ArrowWriter::try_new(File::create(path).unwrap(), batch.schema(), Some(props)).unwrap();
+        let kv = version.map(|v| {
+            vec![KeyValue::new(
+                schema::SCHEMA_VERSION_KEY.to_string(),
+                v.to_string(),
+            )]
+        });
+        let props = WriterProperties::builder()
+            .set_key_value_metadata(kv)
+            .build();
+        let mut writer =
+            ArrowWriter::try_new(File::create(path).unwrap(), batch.schema(), Some(props)).unwrap();
         writer.write(batch).unwrap();
         writer.close().unwrap();
     }
@@ -701,7 +798,11 @@ mod tests {
 
     /// Two full CPT summer days (CDT, UTC-5): 2023-08-17/18.
     fn two_day_range() -> TimeRange {
-        TimeRange::new(datetime!(2023-08-17 05:00 UTC), datetime!(2023-08-19 05:00 UTC)).unwrap()
+        TimeRange::new(
+            datetime!(2023-08-17 05:00 UTC),
+            datetime!(2023-08-19 05:00 UTC),
+        )
+        .unwrap()
     }
 
     /// Write a complete small archive (all four signals, two locations for
@@ -714,7 +815,12 @@ mod tests {
             rt_rows.push(sample(ts, 900, &lz_houston(), 30.0));
             ts += Duration::seconds(900);
         }
-        write_price_rows(root, schema::SIGNAL_RTM_SPP, &rt_rows, Some(schema::SCHEMA_VERSION));
+        write_price_rows(
+            root,
+            schema::SIGNAL_RTM_SPP,
+            &rt_rows,
+            Some(schema::SCHEMA_VERSION),
+        );
 
         let mut dam_rows = Vec::new();
         let mut ts = range.start;
@@ -722,7 +828,12 @@ mod tests {
             dam_rows.push(sample(ts, 3600, &hub_north(), 28.0));
             ts += Duration::seconds(3600);
         }
-        write_price_rows(root, schema::SIGNAL_DAM_SPP, &dam_rows, Some(schema::SCHEMA_VERSION));
+        write_price_rows(
+            root,
+            schema::SIGNAL_DAM_SPP,
+            &dam_rows,
+            Some(schema::SCHEMA_VERSION),
+        );
 
         let mut as_rows = Vec::new();
         let mut ts = range.start;
@@ -739,10 +850,20 @@ mod tests {
         }
         let mut as_by_day: BTreeMap<Date, Vec<AsPrice>> = BTreeMap::new();
         for row in as_rows {
-            as_by_day.entry(cpt::operating_day(row.ts)).or_default().push(row);
+            as_by_day
+                .entry(cpt::operating_day(row.ts))
+                .or_default()
+                .push(row);
         }
         for (day, rows) in as_by_day {
-            write_parquet(root, schema::SIGNAL_AS_MCPC, day, "ALL", &as_batch(&rows), Some(schema::SCHEMA_VERSION));
+            write_parquet(
+                root,
+                schema::SIGNAL_AS_MCPC,
+                day,
+                "ALL",
+                &as_batch(&rows),
+                Some(schema::SCHEMA_VERSION),
+            );
         }
 
         let mut sys_rows = Vec::new();
@@ -751,12 +872,23 @@ mod tests {
             sys_rows.push((ts, 50_000.0, Some(9_000.0)));
             ts += Duration::seconds(900);
         }
-        let mut sys_by_day: BTreeMap<Date, Vec<(OffsetDateTime, f64, Option<f64>)>> = BTreeMap::new();
+        let mut sys_by_day: BTreeMap<Date, Vec<(OffsetDateTime, f64, Option<f64>)>> =
+            BTreeMap::new();
         for row in sys_rows {
-            sys_by_day.entry(cpt::operating_day(row.0)).or_default().push(row);
+            sys_by_day
+                .entry(cpt::operating_day(row.0))
+                .or_default()
+                .push(row);
         }
         for (day, rows) in sys_by_day {
-            write_parquet(root, schema::SIGNAL_SYSTEM_LOAD, day, "ALL", &load_batch(&rows), Some(schema::SCHEMA_VERSION));
+            write_parquet(
+                root,
+                schema::SIGNAL_SYSTEM_LOAD,
+                day,
+                "ALL",
+                &load_batch(&rows),
+                Some(schema::SCHEMA_VERSION),
+            );
         }
     }
 
@@ -780,14 +912,20 @@ mod tests {
         assert_eq!(north.len(), 192);
         assert!(north.windows(2).all(|w| w[0].ts < w[1].ts));
         assert!(north.iter().all(|s| s.location == hub_north()));
-        assert!(north.iter().all(|s| (s.lmp_usd_per_mwh - 25.0).abs() < f64::EPSILON));
+        assert!(north
+            .iter()
+            .all(|s| (s.lmp_usd_per_mwh - 25.0).abs() < f64::EPSILON));
 
         let houston = replay.rt_spps(&lz_houston(), range).unwrap();
         assert_eq!(houston.len(), 192);
-        assert!(houston.iter().all(|s| (s.lmp_usd_per_mwh - 30.0).abs() < f64::EPSILON));
+        assert!(houston
+            .iter()
+            .all(|s| (s.lmp_usd_per_mwh - 30.0).abs() < f64::EPSILON));
 
         // Unknown location: empty, not an error.
-        let nowhere = replay.rt_spps(&Location::Node("NOPE".to_string()), range).unwrap();
+        let nowhere = replay
+            .rt_spps(&Location::Node("NOPE".to_string()), range)
+            .unwrap();
         assert!(nowhere.is_empty());
 
         // 48 hourly DAM samples, 240 AS rows ordered by (ts, product),
@@ -807,12 +945,18 @@ mod tests {
         assert!(sys.iter().all(|s| s.fuel_mix.is_none()));
 
         // Interval containment lookups.
-        let first = replay.rt_spp_at(&hub_north(), range.start + Duration::seconds(100)).unwrap();
+        let first = replay
+            .rt_spp_at(&hub_north(), range.start + Duration::seconds(100))
+            .unwrap();
         assert_eq!(first.ts, range.start);
-        let on_boundary = replay.rt_spp_at(&hub_north(), range.start + Duration::seconds(900)).unwrap();
+        let on_boundary = replay
+            .rt_spp_at(&hub_north(), range.start + Duration::seconds(900))
+            .unwrap();
         assert_eq!(on_boundary.ts, range.start + Duration::seconds(900));
         assert!(replay.rt_spp_at(&hub_north(), range.end).is_none());
-        assert!(replay.rt_spp_at(&hub_north(), range.start - Duration::seconds(1)).is_none());
+        assert!(replay
+            .rt_spp_at(&hub_north(), range.start - Duration::seconds(1))
+            .is_none());
 
         assert_eq!(replay.interval_secs(), Some(900));
 
@@ -833,14 +977,21 @@ mod tests {
             rows.push(sample(ts, 900, &hub_north(), 25.0));
             ts += Duration::seconds(900);
         }
-        write_price_rows(tmp.path(), schema::SIGNAL_RTM_SPP, &rows, Some(schema::SCHEMA_VERSION));
+        write_price_rows(
+            tmp.path(),
+            schema::SIGNAL_RTM_SPP,
+            &rows,
+            Some(schema::SCHEMA_VERSION),
+        );
 
         let replay = Replay::load(tmp.path(), range, &[schema::SIGNAL_RTM_SPP]).unwrap();
         assert_eq!(replay.rt_spps(&hub_north(), range).unwrap().len(), 96);
         // The gap returns an empty vec, not an error.
         let gap = TimeRange::new(range.start + Duration::hours(30), range.end).unwrap();
         assert!(replay.rt_spps(&hub_north(), gap).unwrap().is_empty());
-        assert!(replay.rt_spp_at(&hub_north(), range.start + Duration::hours(30)).is_none());
+        assert!(replay
+            .rt_spp_at(&hub_north(), range.start + Duration::hours(30))
+            .is_none());
     }
 
     #[test]
@@ -849,13 +1000,23 @@ mod tests {
         let range = two_day_range();
         write_full_archive(tmp.path(), range);
         // dam_spp was written, but a signal that was not written is absent.
-        let err = Replay::load(tmp.path(), range, &[schema::SIGNAL_RTM_SPP, "as_mcpc_missing"]);
+        let err = Replay::load(
+            tmp.path(),
+            range,
+            &[schema::SIGNAL_RTM_SPP, "as_mcpc_missing"],
+        );
         assert!(matches!(err, Err(ErcotError::InvalidParam(_))));
         // A range disjoint from the archive: zero rows for a real signal.
-        let far = TimeRange::new(datetime!(2024-01-01 00:00 UTC), datetime!(2024-01-02 00:00 UTC)).unwrap();
+        let far = TimeRange::new(
+            datetime!(2024-01-01 00:00 UTC),
+            datetime!(2024-01-02 00:00 UTC),
+        )
+        .unwrap();
         let err = Replay::load(tmp.path(), far, &[schema::SIGNAL_RTM_SPP]);
         match err {
-            Err(ErcotError::DataNotFound { signal, start, end, .. }) => {
+            Err(ErcotError::DataNotFound {
+                signal, start, end, ..
+            }) => {
                 assert_eq!(signal, schema::SIGNAL_RTM_SPP);
                 assert_eq!(start, far.start);
                 assert_eq!(end, far.end);
@@ -872,7 +1033,9 @@ mod tests {
         // Version 999: refused with the found version reported.
         write_price_rows(tmp.path(), schema::SIGNAL_RTM_SPP, &rows, Some(999));
         match Replay::load(tmp.path(), range, &[schema::SIGNAL_RTM_SPP]) {
-            Err(ErcotError::SchemaVersion { found, expected, .. }) => {
+            Err(ErcotError::SchemaVersion {
+                found, expected, ..
+            }) => {
                 assert_eq!(found, 999);
                 assert_eq!(expected, schema::SCHEMA_VERSION);
             }
@@ -891,7 +1054,11 @@ mod tests {
     fn fall_back_day_keeps_all_25_hours() {
         let tmp = TempDir::new().unwrap();
         // 2023-11-05 CPT: 25 h day (CST/CDT transition), 100 x 900 s.
-        let range = TimeRange::new(datetime!(2023-11-05 05:00 UTC), datetime!(2023-11-06 06:00 UTC)).unwrap();
+        let range = TimeRange::new(
+            datetime!(2023-11-05 05:00 UTC),
+            datetime!(2023-11-06 06:00 UTC),
+        )
+        .unwrap();
         let mut rows = Vec::new();
         let mut ts = range.start;
         while ts < range.end {
@@ -899,7 +1066,12 @@ mod tests {
             ts += Duration::seconds(900);
         }
         assert_eq!(rows.len(), 100);
-        write_price_rows(tmp.path(), schema::SIGNAL_RTM_SPP, &rows, Some(schema::SCHEMA_VERSION));
+        write_price_rows(
+            tmp.path(),
+            schema::SIGNAL_RTM_SPP,
+            &rows,
+            Some(schema::SCHEMA_VERSION),
+        );
 
         let replay = Replay::load(tmp.path(), range, &[schema::SIGNAL_RTM_SPP]).unwrap();
         let back = replay.rt_spps(&hub_north(), range).unwrap();
@@ -907,8 +1079,12 @@ mod tests {
         assert!(back.windows(2).all(|w| w[0].ts < w[1].ts));
         // The repeated local hour survives as two distinct UTC instants:
         // 01:30 CPT maps to both 06:30 UTC (CDT) and 07:30 UTC (CST).
-        let first = replay.rt_spp_at(&hub_north(), datetime!(2023-11-05 06:30 UTC)).unwrap();
-        let repeat = replay.rt_spp_at(&hub_north(), datetime!(2023-11-05 07:30 UTC)).unwrap();
+        let first = replay
+            .rt_spp_at(&hub_north(), datetime!(2023-11-05 06:30 UTC))
+            .unwrap();
+        let repeat = replay
+            .rt_spp_at(&hub_north(), datetime!(2023-11-05 07:30 UTC))
+            .unwrap();
         assert_eq!(first.ts, datetime!(2023-11-05 06:30 UTC));
         assert_eq!(repeat.ts, datetime!(2023-11-05 07:30 UTC));
         assert_eq!(repeat.ts - first.ts, Duration::hours(1));
@@ -923,7 +1099,10 @@ mod tests {
             ("synthetic", Provenance::Synthetic),
             ("omitted", Provenance::Omitted),
         ] {
-            assert_eq!(serde_json::to_string(&prov).unwrap(), format!("\"{label}\""));
+            assert_eq!(
+                serde_json::to_string(&prov).unwrap(),
+                format!("\"{label}\"")
+            );
         }
     }
 }

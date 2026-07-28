@@ -68,8 +68,10 @@ impl RetailRate {
                     .find(|w| w.contains_hour(hour))
                     .map_or(0.0, |w| w.usd_per_kwh)
             }
-            Self::WholesalePassThrough { multiplier, adder_usd_per_kwh } =>
-                spp_usd_per_mwh / 1000.0 * multiplier + adder_usd_per_kwh,
+            Self::WholesalePassThrough {
+                multiplier,
+                adder_usd_per_kwh,
+            } => spp_usd_per_mwh / 1000.0 * multiplier + adder_usd_per_kwh,
         }
     }
 }
@@ -403,7 +405,8 @@ impl SettlementEngine {
             retail_avoided_cost_usd += avoided;
             charging_cost_usd += charging;
         }
-        self.interval_by_ts.insert(ts.unix_timestamp(), self.intervals.len());
+        self.interval_by_ts
+            .insert(ts.unix_timestamp(), self.intervals.len());
         self.intervals.push(IntervalSettlement {
             ts,
             interval_secs: price.interval_secs,
@@ -430,7 +433,13 @@ impl SettlementEngine {
         hours: f64,
         mcpc_usd_per_mw: f64,
     ) {
-        self.awards.push(AsAward { product, ts, awarded_mw, hours, mcpc_usd_per_mw });
+        self.awards.push(AsAward {
+            product,
+            ts,
+            awarded_mw,
+            hours,
+            mcpc_usd_per_mw,
+        });
     }
 
     /// Record an AS deployment's performance evidence: `instructed_mw` over
@@ -474,7 +483,10 @@ impl SettlementEngine {
             FourCpFlag {
                 ts,
                 fleet_reduction_kw,
-                per_home: per_home.iter().map(|&(id, kw)| (id.to_string(), kw)).collect(),
+                per_home: per_home
+                    .iter()
+                    .map(|&(id, kw)| (id.to_string(), kw))
+                    .collect(),
             },
         );
     }
@@ -527,8 +539,10 @@ impl SettlementEngine {
 
         let (as_totals, as_net_usd) = as_rollup(&awards, &deployments, &config.rules);
 
-        let confirmed_pairs: Vec<(OffsetDateTime, f64)> =
-            four_cp_flags.values().map(|f| (f.ts, f.fleet_reduction_kw)).collect();
+        let confirmed_pairs: Vec<(OffsetDateTime, f64)> = four_cp_flags
+            .values()
+            .map(|f| (f.ts, f.fleet_reduction_kw))
+            .collect();
         let four_cp_totals = FourCpTotals {
             candidate_intervals_hit: four_cp_flags.len() as u32,
             candidate_reduction_kw: confirmed_pairs.iter().map(|(_, kw)| kw).sum(),
@@ -584,8 +598,9 @@ fn allocate_as_revenue(intervals: &mut [IntervalSettlement], awards: &[AsAward])
         for row in intervals.iter_mut() {
             let offset = (row.ts - award.ts).as_seconds_f64();
             if offset >= 0.0 && offset < window_secs {
-                let alloc =
-                    award.awarded_mw * award.mcpc_usd_per_mw * (f64::from(row.interval_secs) / 3600.0);
+                let alloc = award.awarded_mw
+                    * award.mcpc_usd_per_mw
+                    * (f64::from(row.interval_secs) / 3600.0);
                 *row.as_revenue_usd.entry(award.product).or_insert(0.0) += alloc;
             }
         }
@@ -606,7 +621,10 @@ fn fold_four_cp(
             intervals[idx].four_cp_candidate = true;
         }
         for (home_id, kw) in &flag.per_home {
-            homes.entry(home_id.clone()).or_default().four_cp_contribution_kw += kw;
+            homes
+                .entry(home_id.clone())
+                .or_default()
+                .four_cp_contribution_kw += kw;
         }
     }
 }
@@ -658,8 +676,9 @@ fn as_rollup(
     }
     for deployment in deployments {
         let accum = accums.entry(deployment.product).or_default();
-        let instructed_mwh =
-            deployment.instructed_mw * (deployment.end - deployment.start).as_seconds_f64() / 3600.0;
+        let instructed_mwh = deployment.instructed_mw
+            * (deployment.end - deployment.start).as_seconds_f64()
+            / 3600.0;
         accum.instructed_mwh += instructed_mwh;
         accum.delivered_mwh += deployment.delivered_mwh;
         accum.deployment_gross_usd += instructed_mwh * deployment.mcpc_avg_usd_per_mw;
@@ -678,7 +697,11 @@ fn as_rollup(
             &rules.as_performance,
         );
         let net_usd = as_market::net_from_gross(gross_usd, &perf);
-        let mcpc_avg_usd_per_mw = if awarded_mwh > 0.0 { gross_usd / awarded_mwh } else { 0.0 };
+        let mcpc_avg_usd_per_mw = if awarded_mwh > 0.0 {
+            gross_usd / awarded_mwh
+        } else {
+            0.0
+        };
         net_total += net_usd;
         totals.insert(
             *product,
@@ -698,8 +721,8 @@ fn as_rollup(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
 mod tests {
     use super::*;
-    use time::macros::datetime;
     use crate::types::LoadZone;
+    use time::macros::datetime;
 
     fn price(ts: OffsetDateTime, spp: f64) -> PriceSample {
         PriceSample {
@@ -733,7 +756,10 @@ mod tests {
 
     fn assert_close(actual: f64, expected: f64) {
         let tol = 1e-9 * expected.abs().max(1.0);
-        assert!((actual - expected).abs() <= tol, "expected {expected}, got {actual}");
+        assert!(
+            (actual - expected).abs() <= tol,
+            "expected {expected}, got {actual}"
+        );
     }
 
     #[test]
@@ -776,7 +802,10 @@ mod tests {
         assert_close(report.totals.retailer_margin_usd, 0.32);
         assert_eq!(report.totals.emissions_kgco2_delta, None);
         assert_eq!(report.rules_version, "v2025");
-        assert_eq!(report.baseline_method, "LastNDaysAverage{n:10, exclusion: event_days}");
+        assert_eq!(
+            report.baseline_method,
+            "LastNDaysAverage{n:10, exclusion: event_days}"
+        );
         assert_eq!(report.settlement_interval_secs, 900);
         assert_eq!(report.location, Location::LoadZone(LoadZone::Houston));
         assert_eq!(report.provenance, Provenance::SettlementFinal);
@@ -863,9 +892,21 @@ mod tests {
         // 2026-08-14 23:00 UTC = 18:00 CDT -> peak window price.
         let tou = RetailRate::Tou {
             windows: vec![
-                TouWindow { start_hour_cpt: 16, end_hour_cpt: 21, usd_per_kwh: 0.30 },
-                TouWindow { start_hour_cpt: 0, end_hour_cpt: 16, usd_per_kwh: 0.05 },
-                TouWindow { start_hour_cpt: 21, end_hour_cpt: 24, usd_per_kwh: 0.05 },
+                TouWindow {
+                    start_hour_cpt: 16,
+                    end_hour_cpt: 21,
+                    usd_per_kwh: 0.30,
+                },
+                TouWindow {
+                    start_hour_cpt: 0,
+                    end_hour_cpt: 16,
+                    usd_per_kwh: 0.05,
+                },
+                TouWindow {
+                    start_hour_cpt: 21,
+                    end_hour_cpt: 24,
+                    usd_per_kwh: 0.05,
+                },
             ],
         };
         let ts = datetime!(2026-08-14 23:00:00 UTC);
@@ -875,14 +916,21 @@ mod tests {
         assert_close(report.intervals[0].retail_avoided_cost_usd, 0.30);
 
         // Wrap-around window semantics.
-        let night = TouWindow { start_hour_cpt: 22, end_hour_cpt: 6, usd_per_kwh: 0.1 };
+        let night = TouWindow {
+            start_hour_cpt: 22,
+            end_hour_cpt: 6,
+            usd_per_kwh: 0.1,
+        };
         assert!(night.contains_hour(23));
         assert!(night.contains_hour(5));
         assert!(!night.contains_hour(12));
         assert!(!night.contains_hour(6));
 
         // Pass-through: 100 $/MWh -> 0.1 x 1.2 + 0.01 = 0.13 $/kWh.
-        let pt = RetailRate::WholesalePassThrough { multiplier: 1.2, adder_usd_per_kwh: 0.01 };
+        let pt = RetailRate::WholesalePassThrough {
+            multiplier: 1.2,
+            adder_usd_per_kwh: 0.01,
+        };
         assert_close(pt.rate_at(ts, 100.0), 0.13);
         // Flat ignores ts/spp.
         assert_close(flat().rate_at(ts, 9000.0), 0.12);
@@ -933,7 +981,10 @@ mod tests {
         let parsed = serde_json::from_str::<RetailRate>(good).unwrap();
         assert_eq!(
             parsed,
-            RetailRate::WholesalePassThrough { multiplier: 1.2, adder_usd_per_kwh: 0.01 }
+            RetailRate::WholesalePassThrough {
+                multiplier: 1.2,
+                adder_usd_per_kwh: 0.01
+            }
         );
     }
 }

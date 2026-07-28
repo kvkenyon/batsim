@@ -492,9 +492,9 @@ pub async fn sse_stream(
                 vec![sse_event("dispatch", Some(tick), data)]
             }
             Ok(SimEvent::Settlement(row)) => {
-                let data = serde_json::to_value(&row).unwrap_or_else(|_| {
-                    serde_json::json!({"error": "settlement serialization failed"})
-                });
+                let data = serde_json::to_value(&row).unwrap_or_else(
+                    |_| serde_json::json!({"error": "settlement serialization failed"}),
+                );
                 vec![sse_event("settlement", None, data)]
             }
             Ok(SimEvent::RunFinished { run_id, tick }) => {

@@ -11,11 +11,11 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use batsim_core::engine::{AmbientFeed, SimWorld};
 use batsim_core::time::SimClock;
+use batsim_ercot::ingest::writers::ALL_LOCATION;
 use batsim_ercot::ingest::writers::{
     upsert_manifest, write_as_partition, write_price_partition, ManifestMeta,
 };
 use batsim_ercot::rules::ErcotRules;
-use batsim_ercot::ingest::writers::ALL_LOCATION;
 use batsim_ercot::schema::{ManifestEntry, SIGNAL_AS_MCPC, SIGNAL_DAM_SPP, SIGNAL_RTM_SPP};
 use batsim_ercot::synthetic::{Season, SyntheticParams, SyntheticPriceGenerator};
 use batsim_ercot::{Location, PriceSource as _, Provenance, TimeRange};
@@ -259,7 +259,8 @@ async fn backtest_end_to_end_and_deterministic() {
         .max_by(|a, b| a.spp_usd_per_mwh().total_cmp(&b.spp_usd_per_mwh()))
         .unwrap();
     let fmt = |ts: time::OffsetDateTime| {
-        ts.format(&time::format_description::well_known::Rfc3339).unwrap()
+        ts.format(&time::format_description::well_known::Rfc3339)
+            .unwrap()
     };
     let mut heuristic = base_request();
     heuristic["strategy"] = json!({

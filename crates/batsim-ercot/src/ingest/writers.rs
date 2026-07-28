@@ -302,7 +302,11 @@ pub fn read_manifest(root: &Path) -> Result<Option<Manifest>> {
 /// # Errors
 /// - `Parse`: an existing manifest is malformed.
 /// - `Io`: read/write failure.
-pub fn upsert_manifest(root: &Path, meta: &ManifestMeta, entries: &[ManifestEntry]) -> Result<Manifest> {
+pub fn upsert_manifest(
+    root: &Path,
+    meta: &ManifestMeta,
+    entries: &[ManifestEntry],
+) -> Result<Manifest> {
     let existing = read_manifest(root)?;
     let mut by_key: BTreeMap<(String, String, String), ManifestEntry> = BTreeMap::new();
     let mut doc_ids: Vec<u64> = meta.source_doc_ids.clone();
@@ -369,10 +373,7 @@ fn entry_key(entry: &ManifestEntry) -> (String, String, String) {
     )
 }
 
-fn check_unique_ts(
-    mut ts: impl Iterator<Item = OffsetDateTime>,
-    context: &str,
-) -> Result<()> {
+fn check_unique_ts(mut ts: impl Iterator<Item = OffsetDateTime>, context: &str) -> Result<()> {
     let mut prev: Option<OffsetDateTime> = None;
     for t in &mut ts {
         if let Some(p) = prev {
@@ -480,7 +481,11 @@ mod tests {
         // Read back: schema version metadata + sorted ts + values.
         let file = fs::File::open(tmp.path().join(&rel)).unwrap();
         let builder = ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
-        let kv = builder.metadata().file_metadata().key_value_metadata().unwrap();
+        let kv = builder
+            .metadata()
+            .file_metadata()
+            .key_value_metadata()
+            .unwrap();
         assert!(kv
             .iter()
             .any(|k| k.key == SCHEMA_VERSION_KEY && k.value.as_deref() == Some("1")));
@@ -559,7 +564,10 @@ mod tests {
         let rel = write_as_partition(tmp.path(), d(17), &as_rows).unwrap();
         assert_eq!(rel, "as_mcpc/date=2023-08-17/location=ALL.parquet");
 
-        let load_rows = vec![(t0, 65_000.0, Some(3_100.0)), (t0 + time::Duration::hours(1), 64_000.0, None)];
+        let load_rows = vec![
+            (t0, 65_000.0, Some(3_100.0)),
+            (t0 + time::Duration::hours(1), 64_000.0, None),
+        ];
         let rel = write_load_partition(tmp.path(), d(17), &load_rows).unwrap();
         assert_eq!(rel, "system_load/date=2023-08-17/location=ALL.parquet");
 
@@ -601,7 +609,10 @@ mod tests {
         let m1 = upsert_manifest(
             tmp.path(),
             &meta,
-            &[entry(SIGNAL_RTM_SPP, "2023-08-18", "LZ_SOUTH", 96), entry(SIGNAL_RTM_SPP, "2023-08-17", "LZ_NORTH", 96)],
+            &[
+                entry(SIGNAL_RTM_SPP, "2023-08-18", "LZ_SOUTH", 96),
+                entry(SIGNAL_RTM_SPP, "2023-08-17", "LZ_NORTH", 96),
+            ],
         )
         .unwrap();
         // Sorted by (signal, date, location).
@@ -610,7 +621,10 @@ mod tests {
         assert_eq!(m1.source_doc_ids, vec![3, 9]);
 
         // Second upsert: replace one entry, add another; doc IDs union.
-        let meta2 = ManifestMeta { source_doc_ids: vec![10], ..meta.clone() };
+        let meta2 = ManifestMeta {
+            source_doc_ids: vec![10],
+            ..meta.clone()
+        };
         let m2 = upsert_manifest(
             tmp.path(),
             &meta2,
@@ -631,7 +645,10 @@ mod tests {
         upsert_manifest(
             tmp2.path(),
             &meta,
-            &[entry(SIGNAL_RTM_SPP, "2023-08-18", "LZ_SOUTH", 96), entry(SIGNAL_RTM_SPP, "2023-08-17", "LZ_NORTH", 96)],
+            &[
+                entry(SIGNAL_RTM_SPP, "2023-08-18", "LZ_SOUTH", 96),
+                entry(SIGNAL_RTM_SPP, "2023-08-17", "LZ_NORTH", 96),
+            ],
         )
         .unwrap();
         upsert_manifest(

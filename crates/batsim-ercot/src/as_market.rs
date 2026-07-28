@@ -101,7 +101,11 @@ pub fn performance_factor(
     rules_perf: &AsPerformance,
 ) -> PerformanceOutcome {
     let factor = if instructed_mwh == 0.0 {
-        if delivered_mwh == 0.0 { 1.0 } else { 0.0 }
+        if delivered_mwh == 0.0 {
+            1.0
+        } else {
+            0.0
+        }
     } else {
         (delivered_mwh / instructed_mwh).clamp(0.0, 1.0)
     };
@@ -110,7 +114,10 @@ pub fn performance_factor(
     } else {
         0.0
     };
-    PerformanceOutcome { factor, clawback_usd_multiplier }
+    PerformanceOutcome {
+        factor,
+        clawback_usd_multiplier,
+    }
 }
 
 /// Net AS revenue for an award (spec D.5.1):
@@ -147,7 +154,10 @@ mod tests {
 
     fn assert_close(actual: f64, expected: f64) {
         let tol = 1e-9 * expected.abs().max(1.0);
-        assert!((actual - expected).abs() <= tol, "expected {expected}, got {actual}");
+        assert!(
+            (actual - expected).abs() <= tol,
+            "expected {expected}, got {actual}"
+        );
     }
 
     #[test]
@@ -185,11 +195,17 @@ mod tests {
     #[test]
     fn as_revenue_hand_computed() {
         // Spec D.6 worked example: 8 MW ECRS x 4 h x $184.20/MW = $5894.40 gross.
-        let good = PerformanceOutcome { factor: 0.93, clawback_usd_multiplier: 0.0 };
+        let good = PerformanceOutcome {
+            factor: 0.93,
+            clawback_usd_multiplier: 0.0,
+        };
         assert_close(as_revenue(8.0, 4.0, 184.20, &good), 5481.792);
         // factor 0.80 < 0.90 with clawback x2.0:
         // net = gross x (0.8 - 0.2 x 2.0) = gross x 0.4.
-        let bad = PerformanceOutcome { factor: 0.80, clawback_usd_multiplier: 2.0 };
+        let bad = PerformanceOutcome {
+            factor: 0.80,
+            clawback_usd_multiplier: 2.0,
+        };
         assert_close(as_revenue(8.0, 4.0, 184.20, &bad), 2357.76);
     }
 

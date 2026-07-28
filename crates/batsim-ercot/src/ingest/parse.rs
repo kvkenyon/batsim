@@ -204,10 +204,11 @@ pub fn parse_spp_report(
     let mut fallback_coverage: BTreeMap<Date, BTreeSet<(u8, u8, bool)>> = BTreeMap::new();
     for row in &raw {
         if crate::cpt::is_fall_back_day(row.date) {
-            fallback_coverage
-                .entry(row.date)
-                .or_default()
-                .insert((row.hour_ending, row.interval, row.repeated_hour));
+            fallback_coverage.entry(row.date).or_default().insert((
+                row.hour_ending,
+                row.interval,
+                row.repeated_hour,
+            ));
         }
     }
     for (date, covered) in &fallback_coverage {
@@ -280,7 +281,14 @@ pub fn parse_as_report(bytes: &[u8], format: ReportFormat) -> Result<ParsedRepor
                 continue;
             }
             stats.rows_read += 1;
-            read_as_row(&cols, cells, &context, &mut stats, &mut seen, &mut fallback_hours)?;
+            read_as_row(
+                &cols,
+                cells,
+                &context,
+                &mut stats,
+                &mut seen,
+                &mut fallback_hours,
+            )?;
         }
     }
     if seen.is_empty() {
@@ -332,7 +340,8 @@ struct SppColumns {
 impl SppColumns {
     fn find(headers: &[String], context: &str) -> Result<Self> {
         Ok(Self {
-            date: find_column(headers, &["DELIVERYDATE"], &["DATE"]).ok_or_else(|| missing(context, "Delivery Date"))?,
+            date: find_column(headers, &["DELIVERYDATE"], &["DATE"])
+                .ok_or_else(|| missing(context, "Delivery Date"))?,
             hour: find_column(headers, &["DELIVERYHOUR", "HOURENDING"], &[])
                 .ok_or_else(|| missing(context, "Delivery Hour / Hour Ending"))?,
             // Hourly reports (13060) have no interval column; implied 1.
@@ -393,7 +402,8 @@ struct AsColumns {
 
 impl AsColumns {
     fn find(headers: &[String], context: &str) -> Result<Self> {
-        let date = find_column(headers, &["DELIVERYDATE"], &["DATE"]).ok_or_else(|| missing(context, "Delivery Date"))?;
+        let date = find_column(headers, &["DELIVERYDATE"], &["DATE"])
+            .ok_or_else(|| missing(context, "Delivery Date"))?;
         let hour = find_column(headers, &["HOURENDING", "DELIVERYHOUR"], &[])
             .ok_or_else(|| missing(context, "Hour Ending"))?;
         let flag = find_column(headers, &["REPEATEDHOURFLAG", "DSTFLAG"], &[]);
@@ -459,7 +469,10 @@ fn read_as_row(
         }
     }
     if recorded && crate::cpt::is_fall_back_day(date) {
-        fallback_hours.entry(date).or_default().insert((hour, repeated));
+        fallback_hours
+            .entry(date)
+            .or_default()
+            .insert((hour, repeated));
     }
     Ok(())
 }
@@ -501,12 +514,10 @@ fn read_tables(bytes: &[u8], format: ReportFormat, context: &str) -> Result<Vec<
 }
 
 fn read_xlsx(bytes: &[u8], context: &str) -> Result<Vec<Table>> {
-    let mut workbook: calamine::Xlsx<_> =
-        calamine::open_workbook_from_rs(Cursor::new(bytes)).map_err(|e: calamine::XlsxError| {
-            ErcotError::Parse {
-                context: context.to_string(),
-                detail: format!("xlsx open: {e}"),
-            }
+    let mut workbook: calamine::Xlsx<_> = calamine::open_workbook_from_rs(Cursor::new(bytes))
+        .map_err(|e: calamine::XlsxError| ErcotError::Parse {
+            context: context.to_string(),
+            detail: format!("xlsx open: {e}"),
         })?;
     let mut tables = Vec::new();
     for sheet in workbook.sheet_names().clone() {
@@ -530,7 +541,11 @@ fn table_from_range(range: &calamine::Range<calamine::Data>, context: &str) -> R
     let headers: Vec<String> = header_row.iter().map(data_text).collect();
     let mut out = Vec::with_capacity(range.height().saturating_sub(1));
     for row in rows {
-        out.push(row.iter().map(|d| data_cell(d, context)).collect::<Result<Vec<_>>>()?);
+        out.push(
+            row.iter()
+                .map(|d| data_cell(d, context))
+                .collect::<Result<Vec<_>>>()?,
+        );
     }
     Ok(Table { headers, rows: out })
 }
@@ -858,8 +873,7 @@ fn parse_date_str(s: &str, context: &str) -> Result<Date> {
         Date::from_calendar_date(year, month, day).map_err(|_| bad())
     } else if s.len() >= 10 && s.as_bytes()[4] == b'-' {
         // ISO YYYY-MM-DD, possibly followed by a time component.
-        let (Some(year), Some(month), Some(day)) = (s.get(0..4), s.get(5..7), s.get(8..10))
-        else {
+        let (Some(year), Some(month), Some(day)) = (s.get(0..4), s.get(5..7), s.get(8..10)) else {
             return Err(bad());
         };
         let year: i32 = year.parse().map_err(|_| bad())?;
@@ -959,7 +973,8 @@ Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Poin
 
     #[test]
     fn rtm_csv_parses_and_dedupes_zone_rows() {
-        let out = parse_spp_report(ReportKind::RtmSpp, RTM_CSV.as_bytes(), ReportFormat::Csv).unwrap();
+        let out =
+            parse_spp_report(ReportKind::RtmSpp, RTM_CSV.as_bytes(), ReportFormat::Csv).unwrap();
         assert_eq!(out.stats.rows_read, 13);
         assert_eq!(out.stats.duplicates_skipped, 4);
         assert_eq!(out.rows.len(), 9);
@@ -971,7 +986,10 @@ Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Poin
         }
         // Sorted by ts; first row is 00:00 CPT = 05:00 UTC (CDT).
         assert_eq!(out.rows[0].ts, datetime!(2023-08-17 05:00 UTC));
-        assert_eq!(out.rows[0].location, Location::from_settlement_point("HB_NORTH"));
+        assert_eq!(
+            out.rows[0].location,
+            Location::from_settlement_point("HB_NORTH")
+        );
         // The spiked LZ_NORTH interval 4.
         let spiked = out
             .rows
@@ -1048,7 +1066,8 @@ Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Poin
                 csv.push_str(&format!("11/05/2023,{h},{i},N,LZ_NORTH,LZ,10.0\n"));
             }
         }
-        let err = parse_spp_report(ReportKind::RtmSpp, csv.as_bytes(), ReportFormat::Csv).unwrap_err();
+        let err =
+            parse_spp_report(ReportKind::RtmSpp, csv.as_bytes(), ReportFormat::Csv).unwrap_err();
         assert!(matches!(err, ErcotError::Parse { .. }));
         assert!(err.to_string().contains("covers 96 of 100"));
     }
@@ -1068,7 +1087,8 @@ Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Poin
                 }
             }
         }
-        let err = parse_spp_report(ReportKind::RtmSpp, csv.as_bytes(), ReportFormat::Csv).unwrap_err();
+        let err =
+            parse_spp_report(ReportKind::RtmSpp, csv.as_bytes(), ReportFormat::Csv).unwrap_err();
         assert!(matches!(err, ErcotError::Parse { .. }));
         assert!(err.to_string().contains("covers 96 of 100"));
     }
@@ -1076,7 +1096,8 @@ Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Poin
     #[test]
     fn as_fall_back_day_missing_repeated_hour_errors() {
         // Hourly AS report on the 25-hour day with only 24 distinct hours.
-        let mut csv = String::from("Delivery Date,Hour Ending,Repeated Hour Flag,REGUP MCPC,RRS MCPC\n");
+        let mut csv =
+            String::from("Delivery Date,Hour Ending,Repeated Hour Flag,REGUP MCPC,RRS MCPC\n");
         for h in 1..=24 {
             csv.push_str(&format!("11/05/2023,{h},N,1.1,2.2\n"));
         }
@@ -1087,7 +1108,8 @@ Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Poin
 
     #[test]
     fn as_fall_back_day_with_25_hours_passes() {
-        let mut csv = String::from("Delivery Date,Hour Ending,Repeated Hour Flag,REGUP MCPC,RRS MCPC\n");
+        let mut csv =
+            String::from("Delivery Date,Hour Ending,Repeated Hour Flag,REGUP MCPC,RRS MCPC\n");
         for h in 1..=24 {
             let passes: &[&str] = if h == 2 { &["N", "Y"] } else { &["N"] };
             for flag in passes {
@@ -1146,7 +1168,8 @@ Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Poin
         // Thousands separators are not valid floats: parse error, not a panic.
         assert!(matches!(err, Err(ErcotError::Parse { .. })));
         let csv_ok = csv.replace("\"1,234.50\"", "1234.50");
-        let out = parse_spp_report(ReportKind::RtmSpp, csv_ok.as_bytes(), ReportFormat::Csv).unwrap();
+        let out =
+            parse_spp_report(ReportKind::RtmSpp, csv_ok.as_bytes(), ReportFormat::Csv).unwrap();
         assert_eq!(out.rows.len(), 1);
         assert_eq!(out.rows[0].lmp_usd_per_mwh, 1234.50);
     }
@@ -1181,7 +1204,10 @@ Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Poin
             writer.write_all(b"<workbook/>").unwrap();
             writer.finish().unwrap();
         }
-        assert_eq!(ReportFormat::sniff(&cursor.into_inner()), ReportFormat::Xlsx);
+        assert_eq!(
+            ReportFormat::sniff(&cursor.into_inner()),
+            ReportFormat::Xlsx
+        );
     }
 
     #[test]
@@ -1207,7 +1233,10 @@ Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Poin
         let ctx = "test";
         let want = Date::from_calendar_date(2023, Month::August, 17).unwrap();
         assert_eq!(parse_date_str("08/17/2023", ctx).unwrap(), want);
-        assert_eq!(parse_date_str("8/7/23", ctx).unwrap(), Date::from_calendar_date(2023, Month::August, 7).unwrap());
+        assert_eq!(
+            parse_date_str("8/7/23", ctx).unwrap(),
+            Date::from_calendar_date(2023, Month::August, 7).unwrap()
+        );
         assert_eq!(parse_date_str("2023-08-17", ctx).unwrap(), want);
         assert_eq!(parse_date_str("2023-08-17 00:00:00", ctx).unwrap(), want);
         assert!(parse_date_str("17/08/2023", ctx).is_err());

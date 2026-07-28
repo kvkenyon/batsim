@@ -7,9 +7,7 @@
 use std::collections::BTreeMap;
 
 use batsim_ercot::cpt;
-use batsim_ercot::ingest::{
-    self, ManifestMeta, ParseStats, ReportFormat, ReportKind,
-};
+use batsim_ercot::ingest::{self, ManifestMeta, ParseStats, ReportFormat, ReportKind};
 use batsim_ercot::schema::{ManifestEntry, SCHEMA_VERSION_KEY, SIGNAL_RTM_SPP};
 use batsim_ercot::types::{LoadZone, Location, PriceSample, Provenance};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -34,16 +32,12 @@ fn group_by_day_location(
     groups
 }
 
-fn ingest_prices(
-    root: &std::path::Path,
-    samples: Vec<PriceSample>,
-) -> Vec<ManifestEntry> {
+fn ingest_prices(root: &std::path::Path, samples: Vec<PriceSample>) -> Vec<ManifestEntry> {
     let mut entries = Vec::new();
     for ((day, loc_name), (location, rows)) in group_by_day_location(samples) {
         let n = rows.len() as u64;
-        let rel =
-            ingest::write_price_partition(root, SIGNAL_RTM_SPP, day, &location, &rows, None)
-                .unwrap();
+        let rel = ingest::write_price_partition(root, SIGNAL_RTM_SPP, day, &location, &rows, None)
+            .unwrap();
         entries.push(ManifestEntry {
             signal: SIGNAL_RTM_SPP.to_string(),
             date: day

@@ -409,7 +409,8 @@ fn season_shape(season: Season) -> SeasonShape {
 /// `base_dow_shape(season, hour)`: seasonal base + morning/evening bumps -
 /// overnight dip, with a weekend derate (spec D.4.1).
 fn base_dow_shape(shape: &SeasonShape, hour: f64, weekend: bool) -> f64 {
-    let price = shape.price_base + shape.price_morning * gauss(hour, 8.0, 2.0)
+    let price = shape.price_base
+        + shape.price_morning * gauss(hour, 8.0, 2.0)
         + shape.price_evening * gauss(hour, shape.evening_center, 2.5)
         - shape.price_night * gauss(hour, 4.0, 3.0);
     if weekend {
@@ -722,7 +723,11 @@ impl SyntheticPriceGenerator {
         }
         finalize_dam(&params, &dam_hours, &mut index);
         finalize_as(&params, &regimes_at, &mut index, &mut driver.rng);
-        Ok(Self { params, range, index })
+        Ok(Self {
+            params,
+            range,
+            index,
+        })
     }
 
     /// The parameters this series was generated from.
@@ -857,7 +862,11 @@ fn resolve_and_validate(params: &SyntheticParams, rules: &ErcotRules) -> Result<
 
 /// Validate the scalar scenario fields and event overlays.
 fn validate_scalars(params: &SyntheticParams, rules: &ErcotRules) -> Result<()> {
-    if !rules.settlement.allowed_interval_secs.contains(&params.interval_secs) {
+    if !rules
+        .settlement
+        .allowed_interval_secs
+        .contains(&params.interval_secs)
+    {
         return Err(ErcotError::InvalidParam(format!(
             "interval_secs {} not in rules settlement.allowed_interval_secs {:?}",
             params.interval_secs, rules.settlement.allowed_interval_secs
@@ -908,10 +917,7 @@ fn validate_scalars(params: &SyntheticParams, rules: &ErcotRules) -> Result<()> 
 }
 
 /// Resolve the effective offer caps (params override wins) and validate.
-fn resolve_caps(
-    params: &SyntheticParams,
-    rules: &ErcotRules,
-) -> Result<(f64, f64, f64, f64)> {
+fn resolve_caps(params: &SyntheticParams, rules: &ErcotRules) -> Result<(f64, f64, f64, f64)> {
     let (hcap, lcap, emergency_hours, window_hours) = params.caps.as_ref().map_or(
         (
             rules.offer_caps.hcap_usd_per_mwh,
@@ -948,10 +954,20 @@ fn resolve_caps(
 
 /// Resolve the effective ORDC params (params override wins) and validate.
 fn resolve_ordc(params: &SyntheticParams, rules: &ErcotRules) -> Result<(f64, f64, f64)> {
-    let ordc_threshold_mw = params.ordc.as_ref().map_or(rules.ordc.threshold_mw, |o| o.threshold_mw);
-    let ordc_floor_mw = params.ordc.as_ref().map_or(rules.ordc.floor_mw, |o| o.floor_mw);
-    let voll = params.ordc.as_ref().map_or(rules.ordc.voll_usd_per_mwh, |o| o.voll_usd_per_mwh);
-    if !(ordc_threshold_mw > ordc_floor_mw && ordc_floor_mw > 0.0 && voll > 0.0 && voll.is_finite()) {
+    let ordc_threshold_mw = params
+        .ordc
+        .as_ref()
+        .map_or(rules.ordc.threshold_mw, |o| o.threshold_mw);
+    let ordc_floor_mw = params
+        .ordc
+        .as_ref()
+        .map_or(rules.ordc.floor_mw, |o| o.floor_mw);
+    let voll = params
+        .ordc
+        .as_ref()
+        .map_or(rules.ordc.voll_usd_per_mwh, |o| o.voll_usd_per_mwh);
+    if !(ordc_threshold_mw > ordc_floor_mw && ordc_floor_mw > 0.0 && voll > 0.0 && voll.is_finite())
+    {
         return Err(ErcotError::InvalidParam(format!(
             "ordc requires threshold {ordc_threshold_mw} > floor {ordc_floor_mw} > 0 and voll {voll} > 0"
         )));
@@ -974,7 +990,10 @@ fn resolve_matrix(params: &SyntheticParams) -> Result<[[f64; 4]; 4]> {
             }
             Ok(m)
         }
-        None => Ok(default_matrix(params, f64::from(params.interval_secs) / 900.0)),
+        None => Ok(default_matrix(
+            params,
+            f64::from(params.interval_secs) / 900.0,
+        )),
     }
 }
 
@@ -991,7 +1010,11 @@ mod tests {
     }
 
     fn three_days() -> TimeRange {
-        TimeRange::new(datetime!(2026-08-14 05:00 UTC), datetime!(2026-08-17 05:00 UTC)).unwrap()
+        TimeRange::new(
+            datetime!(2026-08-14 05:00 UTC),
+            datetime!(2026-08-17 05:00 UTC),
+        )
+        .unwrap()
     }
 
     fn base_params(seed: u64) -> SyntheticParams {
@@ -1022,9 +1045,15 @@ mod tests {
         let va = a.rt_spps(&loc(), range).unwrap();
         let vb = b.rt_spps(&loc(), range).unwrap();
         assert_eq!(va, vb);
-        assert_eq!(a.dam_spps(&loc(), range).unwrap(), b.dam_spps(&loc(), range).unwrap());
+        assert_eq!(
+            a.dam_spps(&loc(), range).unwrap(),
+            b.dam_spps(&loc(), range).unwrap()
+        );
         assert_eq!(a.as_prices(range).unwrap(), b.as_prices(range).unwrap());
-        assert_eq!(a.system_signals(range).unwrap(), b.system_signals(range).unwrap());
+        assert_eq!(
+            a.system_signals(range).unwrap(),
+            b.system_signals(range).unwrap()
+        );
         let ha = Sha256::digest(serde_json::to_string(&va).unwrap().as_bytes());
         let hb = Sha256::digest(serde_json::to_string(&vb).unwrap().as_bytes());
         assert_eq!(ha, hb);
@@ -1041,7 +1070,9 @@ mod tests {
         let rt = gen.rt_spps(&loc(), range).unwrap();
         // 72 h * 4 = 288 intervals at 900 s.
         assert_eq!(rt.len(), 288);
-        assert!(rt.windows(2).all(|w| w[1].ts - w[0].ts == Duration::seconds(900)));
+        assert!(rt
+            .windows(2)
+            .all(|w| w[1].ts - w[0].ts == Duration::seconds(900)));
         assert!(rt.iter().all(|s| s.interval_secs == 900));
         assert!(rt.iter().all(|s| s.provenance == Provenance::Synthetic));
         assert!(rt.iter().all(|s| s.location == loc()));
@@ -1197,7 +1228,11 @@ mod tests {
         for s in &rt {
             if s.ts >= storm_start && s.ts < storm_start + Duration::hours(24) {
                 // Overlay window: above the 2026 HCAP, at/below the era cap.
-                assert!(s.spp_usd_per_mwh() > hcap, "{} <= {hcap}", s.spp_usd_per_mwh());
+                assert!(
+                    s.spp_usd_per_mwh() > hcap,
+                    "{} <= {hcap}",
+                    s.spp_usd_per_mwh()
+                );
                 assert!(s.spp_usd_per_mwh() <= uri_cap + 1e-9);
             } else {
                 assert!(s.spp_usd_per_mwh() <= hcap + 1e-9);
@@ -1230,7 +1265,9 @@ mod tests {
         assert!((params.event_overlay[0].cap_usd_per_mwh - 9000.0).abs() < f64::EPSILON);
         // Unknown fields are refused loudly.
         let mut bad = doc;
-        bad.as_object_mut().unwrap().insert("bogus".to_string(), serde_json::json!(1));
+        bad.as_object_mut()
+            .unwrap()
+            .insert("bogus".to_string(), serde_json::json!(1));
         assert!(serde_json::from_value::<SyntheticParams>(bad).is_err());
         // Bad cadence is refused against the rules.
         let rules = ErcotRules::current().unwrap();

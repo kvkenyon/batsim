@@ -55,7 +55,10 @@ pub async fn scenario_action(
     }
 }
 
-fn validate_scenario(req: &ScenarioRequest, data_root: &std::path::Path) -> ApiResult<(u64, u64, u32)> {
+fn validate_scenario(
+    req: &ScenarioRequest,
+    data_root: &std::path::Path,
+) -> ApiResult<(u64, u64, u32)> {
     let start_u = crate::engine::unix_of(&req.time.start)
         .map_err(|e| Problem::validation(format!("time.start: {e}")))?;
     let end = crate::engine::unix_of(&req.time.end)
