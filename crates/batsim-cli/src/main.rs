@@ -58,6 +58,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ScenariosCmd,
     },
+    /// Run ERCOT replay backtests and read settlement.
+    Backtests {
+        #[command(subcommand)]
+        cmd: BacktestsCmd,
+    },
     /// Control virtual time.
     Sim {
         #[command(subcommand)]
@@ -142,6 +147,27 @@ enum FleetsCmd {
         id: String,
         /// Action JSON, e.g. `{"type":"discharge_to","kw":5.0,"duration_s":3600}`.
         action: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum BacktestsCmd {
+    /// Start a backtest from a JSON file or stdin (`-`).
+    Start {
+        /// BacktestRequest JSON.
+        body: String,
+    },
+    /// List backtest runs.
+    List,
+    /// Show a run's status.
+    Status {
+        /// Run id.
+        id: String,
+    },
+    /// Fetch a run's final settlement report.
+    Settlement {
+        /// Run id.
+        id: String,
     },
 }
 
@@ -577,6 +603,17 @@ fn run(cli: &Cli) -> Result<()> {
                     None,
                 )?,
             ),
+        },
+        Cmd::Backtests { cmd } => match cmd {
+            BacktestsCmd::Start { body } => {
+                let v = read_json_arg(body)?;
+                emit(cli, &http.send("POST", "/v1/backtests", Some(&v), None)?)
+            }
+            BacktestsCmd::List => emit(cli, &http.get("/v1/backtests")?),
+            BacktestsCmd::Status { id } => emit(cli, &http.get(&format!("/v1/backtests/{id}"))?),
+            BacktestsCmd::Settlement { id } => {
+                emit(cli, &http.get(&format!("/v1/backtests/{id}/settlement"))?)
+            }
         },
         Cmd::Sim { cmd } => match cmd {
             SimCmd::Start => emit(cli, &http.send("POST", "/v1/sim:start", None, None)?),
