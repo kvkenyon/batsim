@@ -16,7 +16,7 @@
 //! parsers deduplicate on `(ts, location)` / `(ts, product)` keeping the
 //! first occurrence and count the drops in [`ParseStats`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read};
 
 use calamine::Reader as _;
@@ -201,6 +201,27 @@ pub fn parse_spp_report(
         });
     }
     let interval_secs = u32::from(60 / intervals_per_hour) * 60;
+    let mut fallback_coverage: BTreeMap<Date, BTreeSet<(u8, u8, bool)>> = BTreeMap::new();
+    for row in &raw {
+        if crate::cpt::is_fall_back_day(row.date) {
+            fallback_coverage
+                .entry(row.date)
+                .or_default()
+                .insert((row.hour_ending, row.interval, row.repeated_hour));
+        }
+    }
+    for (date, covered) in &fallback_coverage {
+        let expected = 25 * usize::from(intervals_per_hour);
+        if covered.len() != expected {
+            return Err(ErcotError::Parse {
+                context: context.clone(),
+                detail: format!(
+                    "fall-back operating day {date} covers {} of {expected} intervals (repeated-hour rows missing or flag values empty)",
+                    covered.len()
+                ),
+            });
+        }
+    }
     let mut seen: BTreeMap<(i64, String), PriceSample> = BTreeMap::new();
     for row in raw {
         let ts = cpt_interval_to_utc(
@@ -251,6 +272,7 @@ pub fn parse_as_report(bytes: &[u8], format: ReportFormat) -> Result<ParsedRepor
     let tables = read_tables(bytes, format, &context)?;
     let mut stats = ParseStats::default();
     let mut seen: BTreeMap<(i64, AsProduct), AsPrice> = BTreeMap::new();
+    let mut fallback_hours: BTreeMap<Date, BTreeSet<(u8, bool)>> = BTreeMap::new();
     for table in &tables {
         let cols = AsColumns::find(&table.headers, &context)?;
         for cells in &table.rows {
@@ -258,7 +280,7 @@ pub fn parse_as_report(bytes: &[u8], format: ReportFormat) -> Result<ParsedRepor
                 continue;
             }
             stats.rows_read += 1;
-            read_as_row(&cols, cells, &context, &mut stats, &mut seen)?;
+            read_as_row(&cols, cells, &context, &mut stats, &mut seen, &mut fallback_hours)?;
         }
     }
     if seen.is_empty() {
@@ -266,6 +288,17 @@ pub fn parse_as_report(bytes: &[u8], format: ReportFormat) -> Result<ParsedRepor
             context,
             detail: "no data rows found".to_string(),
         });
+    }
+    for (date, hours) in &fallback_hours {
+        if hours.len() != 25 {
+            return Err(ErcotError::Parse {
+                context: context.clone(),
+                detail: format!(
+                    "fall-back operating day {date} covers {} of 25 hours (repeated-hour rows missing or flag values empty)",
+                    hours.len()
+                ),
+            });
+        }
     }
     Ok(ParsedReport {
         rows: seen.into_values().collect(),
@@ -388,6 +421,7 @@ fn read_as_row(
     context: &str,
     stats: &mut ParseStats,
     seen: &mut BTreeMap<(i64, AsProduct), AsPrice>,
+    fallback_hours: &mut BTreeMap<Date, BTreeSet<(u8, bool)>>,
 ) -> Result<()> {
     let date = cell_date(cell_at(cells, cols.date), context)?;
     if cols.flag.is_none() && crate::cpt::is_fall_back_day(date) {
@@ -399,6 +433,7 @@ fn read_as_row(
     let hour = cell_hour_ending(cell_at(cells, cols.hour), context)?;
     let repeated = cols.flag.is_some_and(|i| cell_flag(cell_at(cells, i)));
     let ts = cpt_interval_to_utc(date, hour, 1, 1, repeated)?;
+    let mut recorded = false;
     for (idx, product) in &cols.products {
         let price = match cell_at(cells, *idx) {
             cell if cell.is_empty() => {
@@ -407,6 +442,7 @@ fn read_as_row(
             }
             cell => cell_f64(cell, context, product.dam_column())?,
         };
+        recorded = true;
         let row = AsPrice {
             ts,
             product: *product,
@@ -421,6 +457,9 @@ fn read_as_row(
                 stats.duplicates_skipped += 1;
             }
         }
+    }
+    if recorded && crate::cpt::is_fall_back_day(date) {
+        fallback_hours.entry(date).or_default().insert((hour, repeated));
     }
     Ok(())
 }
@@ -996,6 +1035,67 @@ Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Poin
         let repeat = out.rows.iter().find(|r| r.lmp_usd_per_mwh == 31.0).unwrap();
         assert_eq!(first.ts, datetime!(2023-11-05 06:00 UTC));
         assert_eq!(repeat.ts, datetime!(2023-11-05 07:00 UTC));
+    }
+
+    #[test]
+    fn fall_back_day_missing_repeated_rows_errors() {
+        // Flag column present but no repeated-hour rows: 24 hours, not 25.
+        let mut csv = String::from(
+            "Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Point Name,Settlement Point Type,Settlement Point Price\n",
+        );
+        for h in 1..=24u8 {
+            for i in 1..=4 {
+                csv.push_str(&format!("11/05/2023,{h},{i},N,LZ_NORTH,LZ,10.0\n"));
+            }
+        }
+        let err = parse_spp_report(ReportKind::RtmSpp, csv.as_bytes(), ReportFormat::Csv).unwrap_err();
+        assert!(matches!(err, ErcotError::Parse { .. }));
+        assert!(err.to_string().contains("covers 96 of 100"));
+    }
+
+    #[test]
+    fn fall_back_day_empty_flag_values_error() {
+        // Repeated-hour rows present but flag values empty: second 01:00
+        // occurrence collapses onto the first, again 24 distinct hours.
+        let mut csv = String::from(
+            "Delivery Date,Delivery Hour,Delivery Interval,Repeated Hour Flag,Settlement Point Name,Settlement Point Type,Settlement Point Price\n",
+        );
+        for h in 1..=24u8 {
+            let passes: &[f64] = if h == 2 { &[20.0, 30.0] } else { &[10.0] };
+            for base in passes {
+                for i in 1..=4 {
+                    csv.push_str(&format!("11/05/2023,{h},{i},,LZ_NORTH,LZ,{base}\n"));
+                }
+            }
+        }
+        let err = parse_spp_report(ReportKind::RtmSpp, csv.as_bytes(), ReportFormat::Csv).unwrap_err();
+        assert!(matches!(err, ErcotError::Parse { .. }));
+        assert!(err.to_string().contains("covers 96 of 100"));
+    }
+
+    #[test]
+    fn as_fall_back_day_missing_repeated_hour_errors() {
+        // Hourly AS report on the 25-hour day with only 24 distinct hours.
+        let mut csv = String::from("Delivery Date,Hour Ending,Repeated Hour Flag,REGUP MCPC,RRS MCPC\n");
+        for h in 1..=24 {
+            csv.push_str(&format!("11/05/2023,{h},N,1.1,2.2\n"));
+        }
+        let err = parse_as_report(csv.as_bytes(), ReportFormat::Csv).unwrap_err();
+        assert!(matches!(err, ErcotError::Parse { .. }));
+        assert!(err.to_string().contains("covers 24 of 25 hours"));
+    }
+
+    #[test]
+    fn as_fall_back_day_with_25_hours_passes() {
+        let mut csv = String::from("Delivery Date,Hour Ending,Repeated Hour Flag,REGUP MCPC,RRS MCPC\n");
+        for h in 1..=24 {
+            let passes: &[&str] = if h == 2 { &["N", "Y"] } else { &["N"] };
+            for flag in passes {
+                csv.push_str(&format!("11/05/2023,{h},{flag},1.1,2.2\n"));
+            }
+        }
+        let out = parse_as_report(csv.as_bytes(), ReportFormat::Csv).unwrap();
+        assert_eq!(out.rows.len(), 50);
     }
 
     #[test]
