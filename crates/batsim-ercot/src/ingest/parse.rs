@@ -192,6 +192,14 @@ pub fn parse_spp_report(
         });
     }
     let intervals_per_hour = raw.iter().map(|r| r.interval).max().unwrap_or(1);
+    if !matches!(intervals_per_hour, 1 | 4 | 12) {
+        return Err(ErcotError::Parse {
+            context,
+            detail: format!(
+                "unsupported Delivery Interval cadence: {intervals_per_hour} intervals/hour (expected 1, 4, or 12)"
+            ),
+        });
+    }
     let interval_secs = u32::from(60 / intervals_per_hour) * 60;
     let mut seen: BTreeMap<(i64, String), PriceSample> = BTreeMap::new();
     for row in raw {
@@ -323,8 +331,15 @@ fn read_spp_row(
         stats.empty_skipped += 1;
         return Ok(None);
     }
+    let date = cell_date(cell_at(cells, cols.date), context)?;
+    if cols.flag.is_none() && crate::cpt::is_fall_back_day(date) {
+        return Err(ErcotError::Parse {
+            context: context.to_string(),
+            detail: "fall-back operating day requires a Repeated Hour Flag column".to_string(),
+        });
+    }
     Ok(Some(SppRow {
-        date: cell_date(cell_at(cells, cols.date), context)?,
+        date,
         hour_ending: cell_hour_ending(cell_at(cells, cols.hour), context)?,
         interval: match cols.interval {
             Some(i) => cell_u8(cell_at(cells, i), context, "Delivery Interval")?,
@@ -375,6 +390,12 @@ fn read_as_row(
     seen: &mut BTreeMap<(i64, AsProduct), AsPrice>,
 ) -> Result<()> {
     let date = cell_date(cell_at(cells, cols.date), context)?;
+    if cols.flag.is_none() && crate::cpt::is_fall_back_day(date) {
+        return Err(ErcotError::Parse {
+            context: context.to_string(),
+            detail: "fall-back operating day requires a Repeated Hour Flag column".to_string(),
+        });
+    }
     let hour = cell_hour_ending(cell_at(cells, cols.hour), context)?;
     let repeated = cols.flag.is_some_and(|i| cell_flag(cell_at(cells, i)));
     let ts = cpt_interval_to_utc(date, hour, 1, 1, repeated)?;
@@ -392,8 +413,13 @@ fn read_as_row(
             mcpc_usd_per_mw: price,
             provenance: Provenance::SettlementFinal,
         };
-        if seen.insert((ts.unix_timestamp(), *product), row).is_some() {
-            stats.duplicates_skipped += 1;
+        match seen.entry((ts.unix_timestamp(), *product)) {
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                slot.insert(row);
+            }
+            std::collections::btree_map::Entry::Occupied(_) => {
+                stats.duplicates_skipped += 1;
+            }
         }
     }
     Ok(())
@@ -567,12 +593,18 @@ fn parse_csv_records(text: &str, context: &str) -> Result<Vec<Vec<String>>> {
     Ok(records)
 }
 
+/// Decompressed-size caps for zip entries (decompression-bomb guard; a
+/// yearly XLSX/CSV report is O(100 MiB), far below these limits).
+const MAX_ZIP_ENTRY_BYTES: u64 = 1 << 30;
+const MAX_ZIP_TOTAL_BYTES: u64 = 4 << 30;
+
 fn read_csv_zip(bytes: &[u8], context: &str) -> Result<Vec<Table>> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| ErcotError::Parse {
         context: context.to_string(),
         detail: format!("zip open: {e}"),
     })?;
     let mut tables = Vec::new();
+    let mut total_bytes: u64 = 0;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| ErcotError::Parse {
             context: context.to_string(),
@@ -589,9 +621,25 @@ fn read_csv_zip(bytes: &[u8], context: &str) -> Result<Vec<Table>> {
         if !is_csv && !is_xlsx {
             continue;
         }
-        let mut buf = Vec::new();
-        entry.read_to_end(&mut buf)?;
         let entry_context = format!("{context} entry {entry_name}");
+        let mut buf = Vec::new();
+        entry
+            .by_ref()
+            .take(MAX_ZIP_ENTRY_BYTES + 1)
+            .read_to_end(&mut buf)?;
+        if buf.len() as u64 > MAX_ZIP_ENTRY_BYTES {
+            return Err(ErcotError::Parse {
+                context: entry_context,
+                detail: format!("decompressed entry exceeds {MAX_ZIP_ENTRY_BYTES} bytes"),
+            });
+        }
+        total_bytes += buf.len() as u64;
+        if total_bytes > MAX_ZIP_TOTAL_BYTES {
+            return Err(ErcotError::Parse {
+                context: entry_context,
+                detail: format!("decompressed archive exceeds {MAX_ZIP_TOTAL_BYTES} bytes"),
+            });
+        }
         if is_csv {
             tables.push(table_from_csv_bytes(&buf, &entry_context)?);
         } else {
@@ -771,9 +819,13 @@ fn parse_date_str(s: &str, context: &str) -> Result<Date> {
         Date::from_calendar_date(year, month, day).map_err(|_| bad())
     } else if s.len() >= 10 && s.as_bytes()[4] == b'-' {
         // ISO YYYY-MM-DD, possibly followed by a time component.
-        let year: i32 = s[0..4].parse().map_err(|_| bad())?;
-        let month: u8 = s[5..7].parse().map_err(|_| bad())?;
-        let day: u8 = s[8..10].parse().map_err(|_| bad())?;
+        let (Some(year), Some(month), Some(day)) = (s.get(0..4), s.get(5..7), s.get(8..10))
+        else {
+            return Err(bad());
+        };
+        let year: i32 = year.parse().map_err(|_| bad())?;
+        let month: u8 = month.parse().map_err(|_| bad())?;
+        let day: u8 = day.parse().map_err(|_| bad())?;
         let month = Month::try_from(month).map_err(|_| bad())?;
         Date::from_calendar_date(year, month, day).map_err(|_| bad())
     } else {

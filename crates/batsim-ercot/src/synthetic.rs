@@ -832,6 +832,11 @@ fn finalize_as(
     }
 }
 
+/// Upper bound for event-overlay durations and the emergency-cap rolling
+/// window: one leap year in hours. Keeps `Duration::seconds_f64` and the
+/// `as i64` window conversion far from overflow.
+const MAX_EVENT_WINDOW_H: f64 = 8784.0;
+
 /// Resolve caps/ORDC/matrix from params + rules and validate everything.
 fn resolve_and_validate(params: &SyntheticParams, rules: &ErcotRules) -> Result<Resolved> {
     validate_scalars(params, rules)?;
@@ -883,9 +888,12 @@ fn validate_scalars(params: &SyntheticParams, rules: &ErcotRules) -> Result<()> 
         )));
     }
     for overlay in &params.event_overlay {
-        if !(overlay.duration_h.is_finite() && overlay.duration_h > 0.0) {
+        if !(overlay.duration_h.is_finite()
+            && overlay.duration_h > 0.0
+            && overlay.duration_h <= MAX_EVENT_WINDOW_H)
+        {
             return Err(ErcotError::InvalidParam(format!(
-                "event_overlay duration_h {} must be > 0",
+                "event_overlay duration_h {} must be in (0, {MAX_EVENT_WINDOW_H}]",
                 overlay.duration_h
             )));
         }
@@ -925,9 +933,14 @@ fn resolve_caps(
             "caps require 0 < lcap <= hcap, got lcap {lcap} hcap {hcap}"
         )));
     }
-    if !(emergency_hours.is_finite() && emergency_hours > 0.0 && window_hours >= emergency_hours) {
+    if !(emergency_hours.is_finite()
+        && emergency_hours > 0.0
+        && window_hours.is_finite()
+        && window_hours >= emergency_hours
+        && window_hours <= MAX_EVENT_WINDOW_H)
+    {
         return Err(ErcotError::InvalidParam(format!(
-            "emergency trigger requires window {window_hours} >= hours {emergency_hours} > 0"
+            "emergency trigger requires 0 < hours <= window <= {MAX_EVENT_WINDOW_H}, got hours {emergency_hours} window {window_hours}"
         )));
     }
     Ok((hcap, lcap, emergency_hours, window_hours))

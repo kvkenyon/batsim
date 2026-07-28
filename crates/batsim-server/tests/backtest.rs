@@ -172,7 +172,7 @@ async fn make_fleet(app: &axum::Router) -> String {
         app,
         "/v1/fleets",
         json!({
-            "name": "bt-fleet", "seed": 42, "count": 2,
+            "name": "bt-fleet", "seed": 42, "count": 3,
             "archetypes": [{
                 "weight": 1.0,
                 "template": {
@@ -230,7 +230,7 @@ async fn backtest_end_to_end_and_deterministic() {
     let (_, base) = run_backtest(&app, &fleet, base_request()).await;
     assert_eq!(base["settlement_interval_secs"], json!(900));
     assert_eq!(base["intervals"].as_array().unwrap().len(), 96);
-    assert_eq!(base["homes"].as_array().unwrap().len(), 2);
+    assert_eq!(base["homes"].as_array().unwrap().len(), 3);
     assert_eq!(base["provenance"], json!("synthetic"));
     assert_eq!(base["rules_version"], json!("v2025"));
     // No dispatch: every interval's fleet export is just PV surplus minus

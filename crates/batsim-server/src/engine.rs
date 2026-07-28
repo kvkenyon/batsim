@@ -246,12 +246,12 @@ struct BacktestRun {
     settlement_cfg: SettlementConfig,
     config: BacktestConfig,
     interval_start: u64,
-    last_meters: std::collections::HashMap<u64, MeterSnapshot>,
-    acc: std::collections::HashMap<u64, IntervalAcc>,
+    last_meters: std::collections::BTreeMap<u64, MeterSnapshot>,
+    acc: std::collections::BTreeMap<u64, IntervalAcc>,
     next_entry: usize,
     intervals_settled: usize,
     batt_export_kwh_by_interval: Vec<(u64, f64)>,
-    net_kw_history: std::collections::HashMap<u64, std::collections::VecDeque<f64>>,
+    net_kw_history: std::collections::BTreeMap<u64, std::collections::VecDeque<f64>>,
     system_loads: std::collections::BTreeMap<i64, f64>,
     watch: batsim_ercot::four_cp::FourCpWatch,
     failed: Option<String>,
@@ -1201,11 +1201,11 @@ impl Engine {
             config,
             interval_start: epoch,
             last_meters,
-            acc: std::collections::HashMap::new(),
+            acc: std::collections::BTreeMap::new(),
             next_entry: 0,
             intervals_settled: 0,
             batt_export_kwh_by_interval: Vec::new(),
-            net_kw_history: std::collections::HashMap::new(),
+            net_kw_history: std::collections::BTreeMap::new(),
             system_loads,
             watch,
             failed: None,
@@ -1226,8 +1226,8 @@ impl Engine {
     }
 
     /// Meter snapshots for every active home (backtest baseline).
-    fn meter_snapshots(&self) -> std::collections::HashMap<u64, MeterSnapshot> {
-        let mut out = std::collections::HashMap::new();
+    fn meter_snapshots(&self) -> std::collections::BTreeMap<u64, MeterSnapshot> {
+        let mut out = std::collections::BTreeMap::new();
         for idx in 0..self.world.home_count() {
             if let Some(h) = self.world.home(idx) {
                 if h.is_retired() {
@@ -1266,10 +1266,12 @@ impl Engine {
         })
     }
 
-    /// Per-tick backtest accounting: strategy schedule, interval energy
-    /// accumulation from meter deltas, interval close, run finalize.
-    /// `unix` is the pre-step tick time; meters therefore cover all energy
-    /// strictly before `unix`.
+    /// Per-tick backtest accounting: strategy schedule, interval close,
+    /// interval energy accumulation from meter deltas, run finalize.
+    /// `unix` is the pre-step tick time; the interval ending at `unix` is
+    /// closed BEFORE the just-stepped `[unix, unix+dt)` energy is
+    /// accumulated, so each settled interval covers exactly
+    /// `[ts, ts+interval)` and no energy beyond `end_unix` is booked.
     fn backtest_tick(&mut self, unix: u64, tick: u64) {
         let inactive = self
             .backtest
@@ -1313,7 +1315,28 @@ impl Engine {
             }
         }
 
-        // Accumulate meter deltas.
+        let interval_secs = self
+            .backtest
+            .as_ref()
+            .map_or(900, |b| u64::from(b.config.interval_secs));
+        let interval_start = self.backtest.as_ref().map_or(0, |b| b.interval_start);
+        if unix % interval_secs == 0 && unix > interval_start {
+            self.close_backtest_interval(unix);
+            if self.backtest.as_ref().is_some_and(|b| b.failed.is_some()) {
+                return;
+            }
+        }
+        let end = self.backtest.as_ref().map_or(u64::MAX, |b| b.config.end_unix);
+        if unix >= end {
+            let open = self.backtest.as_ref().is_some_and(|b| b.interval_start < unix);
+            if open {
+                self.close_backtest_interval(unix);
+            }
+            self.finalize_backtest();
+            return;
+        }
+
+        // Accumulate meter deltas for the step [unix, unix+dt).
         for idx in 0..self.world.home_count() {
             let Some(home) = self.world.home(idx) else {
                 continue;
@@ -1335,23 +1358,6 @@ impl Engine {
             acc.import_main += now.import_main - last.import_main;
             acc.export_main += now.export_main - last.export_main;
             acc.export_batt += now.export_batt - last.export_batt;
-        }
-
-        let interval_secs = self
-            .backtest
-            .as_ref()
-            .map_or(900, |b| u64::from(b.config.interval_secs));
-        let interval_start = self.backtest.as_ref().map_or(0, |b| b.interval_start);
-        if unix % interval_secs == 0 && unix > interval_start {
-            self.close_backtest_interval(unix);
-        }
-        let end = self.backtest.as_ref().map_or(u64::MAX, |b| b.config.end_unix);
-        if unix >= end {
-            let open = self.backtest.as_ref().is_some_and(|b| b.interval_start < unix);
-            if open {
-                self.close_backtest_interval(unix);
-            }
-            self.finalize_backtest();
         }
     }
 
@@ -1465,6 +1471,10 @@ impl Engine {
         let Some(run) = self.backtest.as_mut() else {
             return;
         };
+        if run.failed.is_some() {
+            self.state = SimState::Stopped;
+            return;
+        }
         let awards = run.config.as_awards.clone();
         for award in &awards {
             if !award.deployed {

@@ -53,6 +53,13 @@ fn fall_back_utc(year: i32) -> OffsetDateTime {
         .assume_utc()
 }
 
+/// True when `date` is the CPT fall-back operating day (the 25-hour day;
+/// first Sunday of November).
+#[must_use]
+pub fn is_fall_back_day(date: Date) -> bool {
+    date == nth_weekday(date.year(), Month::November, Weekday::Sunday, 1)
+}
+
 /// CPT offset in force at a UTC instant.
 #[must_use]
 pub fn offset_at_utc(ts: OffsetDateTime) -> UtcOffset {

@@ -109,6 +109,7 @@ pub fn write_price_partition(
         }
     }
     let location_dir = location.settlement_point();
+    check_location_dir(&location_dir)?;
     // Pair each row with its raw value BEFORE sorting so `lmp_raw` stays
     // positional to its row.
     let mut sorted: Vec<(&PriceSample, f64)> = rows
@@ -343,6 +344,20 @@ pub const fn provenance_label(provenance: Provenance) -> &'static str {
         Provenance::Corrected => "corrected",
         Provenance::Synthetic => "synthetic",
         Provenance::Omitted => "omitted",
+    }
+}
+
+fn check_location_dir(name: &str) -> Result<()> {
+    let ok = !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'));
+    if ok {
+        Ok(())
+    } else {
+        Err(ErcotError::InvalidParam(format!(
+            "location name {name:?} must be non-empty and match [A-Za-z0-9_.-]+"
+        )))
     }
 }
 

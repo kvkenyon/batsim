@@ -26,6 +26,7 @@ pub struct ErcotRules {
     /// 4CP policy.
     pub four_cp: FourCp,
     /// Ancillary-service product parameters.
+    #[serde(rename = "as")]
     pub as_: std::collections::BTreeMap<String, AsRule>,
     /// AS performance/penalty parameters (the `[as.performance]` section).
     pub as_performance: AsPerformance,

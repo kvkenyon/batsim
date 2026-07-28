@@ -137,7 +137,7 @@ fn parse_schedule(
 }
 
 /// Validate and translate AS awards.
-fn parse_awards(req: &BacktestRequest) -> ApiResult<Vec<AsAwardInput>> {
+fn parse_awards(req: &BacktestRequest, start: u64, end: u64) -> ApiResult<Vec<AsAwardInput>> {
     let mut out = Vec::new();
     for a in &req.as_awards {
         let start_unix = unix_of(&a.start)
@@ -146,6 +146,11 @@ fn parse_awards(req: &BacktestRequest) -> ApiResult<Vec<AsAwardInput>> {
             unix_of(&a.end).map_err(|err| Problem::validation(format!("as award end: {err}")))?;
         if end_unix <= start_unix {
             return Err(Problem::validation("as award end must be after start"));
+        }
+        if start_unix < start || end_unix > end {
+            return Err(Problem::validation(
+                "as award window must lie within the operating day",
+            ));
         }
         if !a.awarded_mw.is_finite() || a.awarded_mw <= 0.0 {
             return Err(Problem::validation("awarded_mw must be positive and finite"));
@@ -211,7 +216,7 @@ pub async fn create_backtest(
 
     let (start, end) = day_range(&req.date)?;
     let schedule = parse_schedule(&req, start, end)?;
-    let as_awards = parse_awards(&req)?;
+    let as_awards = parse_awards(&req, start, end)?;
     let (transmission_rate, four_cp_candidates) = parse_four_cp(&req)?;
 
     // Sim must be stopped: a run rebinds the world.
@@ -414,6 +419,9 @@ async fn live_info(state: &AppState, id: &str) -> ApiResult<Option<BacktestInfo>
 
 /// Capture a settled report into the entry so it survives later rebinds.
 fn capture_report(state: &AppState, id: &str, info: &BacktestInfo) {
+    if !matches!(info.state, BacktestState::Settled) {
+        return;
+    }
     if let Some(report) = &info.report {
         if let Ok(json) = serde_json::to_value(report) {
             if let Ok(mut backtests) = state.backtests.write() {

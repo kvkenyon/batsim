@@ -18,23 +18,37 @@ use crate::types::{AsPrice, Location, PriceSample, SystemSignal, TimeRange};
 pub trait PriceSource: Send + Sync {
     /// DAM hourly SPPs for `[start, end)`.
     ///
+    /// Returns an empty vec when the source lacks coverage for the
+    /// location/range.
+    ///
     /// # Errors
-    /// Returns `ErcotError::DataNotFound` when the source lacks coverage.
+    /// Returns an error only on source-internal failures; coverage gaps are
+    /// reported as empty vecs, not `ErcotError::DataNotFound`.
     fn dam_spps(&self, loc: &Location, r: TimeRange) -> Result<Vec<PriceSample>>;
     /// Real-time SPPs at the native cadence of the source.
     ///
+    /// Returns an empty vec when the source lacks coverage for the
+    /// location/range.
+    ///
     /// # Errors
-    /// Returns `ErcotError::DataNotFound` when the source lacks coverage.
+    /// Returns an error only on source-internal failures; coverage gaps are
+    /// reported as empty vecs, not `ErcotError::DataNotFound`.
     fn rt_spps(&self, loc: &Location, r: TimeRange) -> Result<Vec<PriceSample>>;
     /// DAM AS clearing prices for capacity (hourly, per product).
     ///
+    /// Returns an empty vec when the source lacks coverage for the range.
+    ///
     /// # Errors
-    /// Returns `ErcotError::DataNotFound` when the source lacks coverage.
+    /// Returns an error only on source-internal failures; coverage gaps are
+    /// reported as empty vecs, not `ErcotError::DataNotFound`.
     fn as_prices(&self, r: TimeRange) -> Result<Vec<AsPrice>>;
     /// System load / reserves / fuel mix (drives 4CP watch and emissions).
     ///
+    /// Returns an empty vec when the source lacks coverage for the range.
+    ///
     /// # Errors
-    /// Returns `ErcotError::DataNotFound` when the source lacks coverage.
+    /// Returns an error only on source-internal failures; coverage gaps are
+    /// reported as empty vecs, not `ErcotError::DataNotFound`.
     fn system_signals(&self, r: TimeRange) -> Result<Vec<SystemSignal>>;
     /// Streaming view for live mode. Default: unsupported.
     ///
