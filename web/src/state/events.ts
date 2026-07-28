@@ -61,6 +61,13 @@ export function createEventDetector(): EventDetector {
     onTick(frame) {
       const out: GridEvent[] = [];
       const now = frame.simTimeMs;
+      if (now < lastSimMs) {
+        lastPriceBand = 0;
+        lastPriceEventMs = -Infinity;
+        lastScarcityMs = -Infinity;
+        lastFleetEventMs = -Infinity;
+        fleetState = null;
+      }
       lastSimMs = now;
       const dayIndex = Math.floor(now / 86_400_000);
       if (dayIndex !== lastDay) {
