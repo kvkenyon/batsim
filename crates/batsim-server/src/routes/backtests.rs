@@ -434,6 +434,7 @@ fn capture_report(state: &AppState, id: &str, info: &BacktestInfo) {
     params(PageParams),
     responses(
         (status = 200, description = "Page of backtest runs", body = BacktestsPage),
+        (status = 400, description = "Invalid query parameters", body = crate::problem::Problem, content_type = "application/problem+json"),
     ),
     tag = "backtests"
 )]

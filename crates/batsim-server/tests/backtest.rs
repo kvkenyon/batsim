@@ -58,11 +58,11 @@ fn synth_archive(root: &std::path::Path) -> (Vec<batsim_ercot::PriceSample>, Dat
     let rtm = gen.rt_spps(&loc, range).unwrap();
     let dam = gen.dam_spps(&loc, range).unwrap();
     let as_prices = gen.as_prices(range).unwrap();
-    let day = Date::from_calendar_date(2026, time::Month::August, 14).unwrap();
+    let op_day = Date::from_calendar_date(2026, time::Month::August, 14).unwrap();
 
     let mut entries = Vec::new();
     for (signal, rows) in [(SIGNAL_RTM_SPP, &rtm), (SIGNAL_DAM_SPP, &dam)] {
-        let path = write_price_partition(root, signal, day, &loc, rows, None).unwrap();
+        let path = write_price_partition(root, signal, op_day, &loc, rows, None).unwrap();
         entries.push(ManifestEntry {
             signal: signal.to_string(),
             date: DAY.to_string(),
@@ -76,7 +76,7 @@ fn synth_archive(root: &std::path::Path) -> (Vec<batsim_ercot::PriceSample>, Dat
         .iter()
         .map(|p| (p.ts, p.product, p.mcpc_usd_per_mw, p.provenance))
         .collect();
-    let path = write_as_partition(root, day, &as_rows).unwrap();
+    let path = write_as_partition(root, op_day, &as_rows).unwrap();
     entries.push(ManifestEntry {
         signal: SIGNAL_AS_MCPC.to_string(),
         date: DAY.to_string(),
@@ -96,12 +96,14 @@ fn synth_archive(root: &std::path::Path) -> (Vec<batsim_ercot::PriceSample>, Dat
         &entries,
     )
     .unwrap();
-    (rtm, day)
+    (rtm, op_day)
 }
 
 fn test_state(data_dir: &std::path::Path) -> AppState {
-    let mut config = Config::default();
-    config.data_dir = data_dir.to_path_buf();
+    let config = Config {
+        data_dir: data_dir.to_path_buf(),
+        ..Config::default()
+    };
     let registry = Registry::embedded().expect("embedded catalog");
     let world = SimWorld::new(
         SimClock::from_rfc3339("2025-01-01T00:00:00Z", 1).unwrap(),
