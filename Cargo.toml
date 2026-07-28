@@ -18,6 +18,14 @@ base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 figment = { version = "0.10", features = ["toml", "env"] }
 ureq = { version = "3", default-features = false, features = ["json", "rustls", "platform-verifier"] }
+# Feature-unification fix: rustls-platform-verifier 0.3.4 (pulled in by ureq's
+# platform-verifier feature) depends on rustls-webpki 0.102 with
+# default-features = false on Linux/Android, so webpki::Error loses its
+# #[cfg(feature = "std")] std::error::Error impl and rpv fails to compile
+# (E0277 in verification/others.rs). Nothing else in the graph enables
+# webpki 0.102's std feature (rustls 0.23 uses webpki 0.103), so enable it
+# here. macOS never sees this: rpv uses the security-framework path there.
+rustls-webpki = { version = "0.102", default-features = false, features = ["std"] }
 subtle = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
